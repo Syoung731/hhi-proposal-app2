@@ -14,7 +14,9 @@ function roomLabel(room: Room): string {
 }
 
 export function DraftProposalView({ project }: { project: ProjectWithRelations }) {
-  const coverMedia = project.media.find((m) => m.kind === MediaKind.COVER);
+  const coverMedia = project.coverHeroImageId
+    ? project.media.find((m) => m.id === project.coverHeroImageId)
+    : project.media.find((m) => m.kind === MediaKind.COVER);
   const mediaByRoom = new Map<string, Media[]>();
   for (const m of project.media) {
     if (m.roomId) {

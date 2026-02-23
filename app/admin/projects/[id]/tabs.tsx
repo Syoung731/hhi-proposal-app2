@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { MediaTab } from "./media/media-tab";
+import { OverviewTab } from "./overview/overview-tab";
+import { RoomsTab } from "./rooms/rooms-tab";
+import { TimelineTab } from "./timeline/timeline-tab";
+import { InvestmentTab } from "./investment/investment-tab";
 
 const TABS = [
   { slug: "overview", label: "Overview" },
@@ -25,11 +29,33 @@ type ProjectForTabs = {
   publishedVersion: number;
   rooms: RoomForTabs[];
   media: MediaForTabs[];
-  timelinePhases: unknown[];
-  investmentLineItems: unknown[];
+  timelinePhases: TimelinePhaseForTabs[];
+  investmentLineItems: InvestmentItemForTabs[];
 };
 
-type RoomForTabs = { id: string; roomType: string; roomLabel: string | null };
+type TimelinePhaseForTabs = {
+  id: string;
+  phase: string;
+  durationText: string;
+  sortOrder: number;
+};
+
+type InvestmentItemForTabs = {
+  id: string;
+  label: string;
+  rangeLow: number | null;
+  rangeHigh: number | null;
+  notes: string | null;
+  sortOrder: number;
+};
+
+type RoomForTabs = {
+  id: string;
+  roomType: string;
+  roomLabel: string | null;
+  scopeNarrative: string;
+  sortOrder: number;
+};
 type MediaForTabs = {
   id: string;
   kind: string;
@@ -72,16 +98,35 @@ export function ProjectTabs({
       </nav>
       <div className="min-h-[200px] rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
         {currentTab === "overview" && (
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Overview: title, subtitle, address, client names, objective, cover hero
-            image. (Form in Phase 4.)
-          </p>
+          <OverviewTab
+            projectId={project.id}
+            project={{
+              title: project.title,
+              subtitle: project.subtitle,
+              address: project.address,
+              clientNames: project.clientNames,
+              objective: project.objective,
+              coverHeroImageId: project.coverHeroImageId,
+            }}
+            media={project.media.map((m) => ({
+              id: m.id,
+              url: m.url,
+              kind: m.kind,
+              caption: m.caption,
+            }))}
+          />
         )}
         {currentTab === "rooms" && (
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Rooms: add/reorder rooms, room type, narrative, assign media. (Form
-            in Phase 4.)
-          </p>
+          <RoomsTab
+            projectId={project.id}
+            rooms={project.rooms.map((r) => ({
+              id: r.id,
+              roomType: r.roomType,
+              roomLabel: r.roomLabel,
+              scopeNarrative: r.scopeNarrative,
+              sortOrder: r.sortOrder,
+            }))}
+          />
         )}
         {currentTab === "media" && (
           <MediaTab
@@ -91,14 +136,28 @@ export function ProjectTabs({
           />
         )}
         {currentTab === "timeline" && (
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Timeline: phase durations. (Phase 4.)
-          </p>
+          <TimelineTab
+            projectId={project.id}
+            phases={project.timelinePhases.map((p) => ({
+              id: p.id,
+              phase: p.phase,
+              durationText: p.durationText,
+              sortOrder: p.sortOrder,
+            }))}
+          />
         )}
         {currentTab === "investment" && (
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Investment: line items and ranges. (Phase 4.)
-          </p>
+          <InvestmentTab
+            projectId={project.id}
+            items={project.investmentLineItems.map((i) => ({
+              id: i.id,
+              label: i.label,
+              rangeLow: i.rangeLow,
+              rangeHigh: i.rangeHigh,
+              notes: i.notes,
+              sortOrder: i.sortOrder,
+            }))}
+          />
         )}
         {currentTab === "publish" && (
           <p className="text-zinc-600 dark:text-zinc-400">
