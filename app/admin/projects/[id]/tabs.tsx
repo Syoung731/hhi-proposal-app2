@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { MediaTab } from "./media/media-tab";
 
 const TABS = [
   { slug: "overview", label: "Overview" },
@@ -22,10 +23,21 @@ type ProjectForTabs = {
   coverHeroImageId: string | null;
   objective: string | null;
   publishedVersion: number;
-  rooms: unknown[];
-  media: unknown[];
+  rooms: RoomForTabs[];
+  media: MediaForTabs[];
   timelinePhases: unknown[];
   investmentLineItems: unknown[];
+};
+
+type RoomForTabs = { id: string; roomType: string; roomLabel: string | null };
+type MediaForTabs = {
+  id: string;
+  kind: string;
+  caption: string | null;
+  tags: string[];
+  roomId: string | null;
+  url: string;
+  room: RoomForTabs | null;
 };
 
 export function ProjectTabs({
@@ -72,9 +84,11 @@ export function ProjectTabs({
           </p>
         )}
         {currentTab === "media" && (
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Media: upload, tag, caption, reorder. (Phase 3.)
-          </p>
+          <MediaTab
+            projectId={project.id}
+            media={project.media}
+            rooms={project.rooms}
+          />
         )}
         {currentTab === "timeline" && (
           <p className="text-zinc-600 dark:text-zinc-400">

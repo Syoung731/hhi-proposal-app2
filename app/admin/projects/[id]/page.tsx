@@ -20,7 +20,7 @@ export default async function AdminProjectPage({
     where: { id },
     include: {
       rooms: { orderBy: { sortOrder: "asc" } },
-      media: { orderBy: { sortOrder: "asc" } },
+      media: { orderBy: { sortOrder: "asc" }, include: { room: true } },
       timelinePhases: { orderBy: { sortOrder: "asc" } },
       investmentLineItems: { orderBy: { sortOrder: "asc" } },
     },
