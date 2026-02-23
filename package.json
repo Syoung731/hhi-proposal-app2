@@ -17,6 +17,9 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^6.9.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0",
     "@prisma/client": "^7.4.1",
     "@vercel/blob": "^2.3.0",
     "next": "16.1.6",
