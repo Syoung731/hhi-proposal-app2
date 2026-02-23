@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Optional: store Clerk user id for allowlist lookup
+model User {
+  id         String   @id @default(cuid())
+  clerkUserId String @unique
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum ProjectStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum RoomType {
+  KITCHEN
+  BATHROOM
+  LIVING_ROOM
+  BEDROOM
+  DINING_ROOM
+  OFFICE
+  BASEMENT
+  GARAGE
+  LAUNDRY
+  MUDROOM
+  OTHER
+}
+
+enum MediaKind {
+  COVER
+  BEFORE
+  AFTER
+  INSPIRATION
+  PLAN
+  TEAM
+  OTHER
+}
+
+enum TimelinePhaseType {
+  DESIGN_FEASIBILITY
+  PRECONSTRUCTION
+  CONSTRUCTION
+}
+
+model Project {
+  id                 String    @id @default(cuid())
+  slug               String    @unique
+  status             ProjectStatus @default(DRAFT)
+  title              String
+  subtitle           String?
+  address            String?
+  clientNames        String?
+  coverHeroImageId   String?
+  objective          String?
+  publishedVersion   Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  rooms              Room[]
+  media              Media[]
+  timelinePhases     TimelinePhase[]
+  investmentLineItems InvestmentLineItem[]
+  publishedSnapshots PublishedSnapshot[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Room {
+  id             String   @id @default(cuid())
+  projectId      String
+  roomType       RoomType
+  roomLabel      String?  // custom label when roomType is OTHER
+  scopeNarrative String   @default("")
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  media   Media[]
+
+  @@index([projectId])
+  @@index([projectId, sortOrder])
+}
+
+model Media {
+  id        String    @id @default(cuid())
+  projectId String
+  roomId    String?
+  kind      MediaKind
+  url       String
+  fileKey   String
+  width     Int?
+  height    Int?
+  caption   String?
+  tags      String[]
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room    Room?   @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([roomId])
+  @@index([projectId, kind])
+  @@index([projectId, sortOrder])
+}
+
+model TimelinePhase {
+  id           String           @id @default(cuid())
+  projectId    String
+  phase        TimelinePhaseType
+  durationText String           @default("")
+  sortOrder    Int              @default(0)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, sortOrder])
+}
+
+model InvestmentLineItem {
+  id         String   @id @default(cuid())
+  projectId  String
+  label      String
+  rangeLow   Int?
+  rangeHigh  Int?
+  notes      String?
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, sortOrder])
+}
+
+model PublishedSnapshot {
+  id           String   @id @default(cuid())
+  projectId    String
+  version      Int
+  snapshotJson Json
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, version])
+  @@index([projectId])
+}
