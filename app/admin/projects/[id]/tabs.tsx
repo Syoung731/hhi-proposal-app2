@@ -6,6 +6,7 @@ import { OverviewTab } from "./overview/overview-tab";
 import { RoomsTab } from "./rooms/rooms-tab";
 import { TimelineTab } from "./timeline/timeline-tab";
 import { InvestmentTab } from "./investment/investment-tab";
+import { PublishTab } from "./publish/publish-tab";
 
 const TABS = [
   { slug: "overview", label: "Overview" },
@@ -160,9 +161,11 @@ export function ProjectTabs({
           />
         )}
         {currentTab === "publish" && (
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Preview & Publish: confirm dialog, create snapshot. (Phase 5.)
-          </p>
+          <PublishTab
+            projectId={project.id}
+            slug={project.slug}
+            publishedVersion={project.publishedVersion}
+          />
         )}
       </div>
     </div>

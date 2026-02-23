@@ -24,3 +24,15 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media print {
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  header[class*="sticky"],
+  footer a,
+  a[href*="/pdf"] {
+    display: none !important;
+  }
+}
