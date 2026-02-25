@@ -7,32 +7,166 @@ datasource db {
   provider = "postgresql"
 }
 
-// Optional: store Clerk user id for allowlist lookup
 model User {
-  id         String   @id @default(cuid())
-  clerkUserId String @unique
-  email     String?
+  id          String   @id @default(cuid())
+  clerkUserId String   @unique
+  email       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StylePreset {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  prompt    String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  media     Media[]
+  projects  Project[]
+  rooms     Room[]
+
+  @@index([isActive, sortOrder])
+}
+
+model Project {
+  id                  String               @id @default(cuid())
+  slug                String               @unique
+  status              ProjectStatus        @default(DRAFT)
+  title               String
+  subtitle            String?
+  coverHeroImageId    String?
+  objective           String?
+  publishedVersion    Int                  @default(0)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  state               String?
+  zip                 String?
+  client1First        String?
+  client1Last         String?
+  client2First        String?
+  client2Last         String?
+  transcriptText      String?
+  stylePresetId       String?
+  stylePreset         StylePreset?         @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  investmentLineItems InvestmentLineItem[]
+  media               Media[]
+  publishedSnapshots  PublishedSnapshot[]
+  rooms               Room[]
+  timelinePhases      TimelinePhase[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([stylePresetId])
+}
+
+model Room {
+  id             String       @id @default(cuid())
+  projectId      String
+  roomTypeId     String?
+  stylePresetId  String?
+  scopeNarrative String       @default("")
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  name           String
+  scopeSource    String       @default("AI")
+  scopeUpdatedAt DateTime     @default(now())
+  media          Media[]
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  roomType       RoomType?    @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
+  stylePreset    StylePreset? @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([projectId, sortOrder])
+  @@index([roomTypeId])
+  @@index([stylePresetId])
+}
+
+model Media {
+  id              String       @id @default(cuid())
+  projectId       String
+  roomId          String?
+  kind            MediaKind
+  url             String
+  fileKey         String
+  width           Int?
+  height          Int?
+  caption         String?
+  tags            String[]
+  sortOrder       Int          @default(0)
+  createdAt       DateTime     @default(now())
+  sourceMediaId   String?
+  stylePresetId   String?
+  renderProvider  String?
+  renderModel     String?
+  promptVersion   Int          @default(1)
+  project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room            Room?        @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  sourceMedia     Media?        @relation("MediaSource", fields: [sourceMediaId], references: [id], onDelete: SetNull)
+  renderingsFrom  Media[]       @relation("MediaSource")
+  stylePreset     StylePreset?  @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  type            MediaType    @default(EXISTING)
+
+  @@index([projectId])
+  @@index([roomId])
+  @@index([projectId, kind])
+  @@index([projectId, type])
+  @@index([projectId, sortOrder])
+  @@index([sourceMediaId])
+  @@index([stylePresetId])
+}
+
+model TimelinePhase {
+  id           String            @id @default(cuid())
+  projectId    String
+  phase        TimelinePhaseType
+  durationText String            @default("")
+  sortOrder    Int               @default(0)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, sortOrder])
+}
+
+model InvestmentLineItem {
+  id        String   @id @default(cuid())
+  projectId String
+  label     String
+  rangeLow  Int?
+  rangeHigh Int?
+  notes     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, sortOrder])
+}
+
+model PublishedSnapshot {
+  id           String   @id @default(cuid())
+  projectId    String
+  version      Int
+  snapshotJson Json
+  createdAt    DateTime @default(now())
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, version])
+  @@index([projectId])
 }
 
 enum ProjectStatus {
   DRAFT
   PUBLISHED
-}
-
-enum RoomType {
-  KITCHEN
-  BATHROOM
-  LIVING_ROOM
-  BEDROOM
-  DINING_ROOM
-  OFFICE
-  BASEMENT
-  GARAGE
-  LAUNDRY
-  MUDROOM
-  OTHER
+  ARCHIVED
 }
 
 enum MediaKind {
@@ -45,117 +179,68 @@ enum MediaKind {
   OTHER
 }
 
+enum MediaType {
+  HERO
+  EXISTING
+  RENDERING
+}
+
 enum TimelinePhaseType {
   DESIGN_FEASIBILITY
   PRECONSTRUCTION
   CONSTRUCTION
 }
 
-model Project {
-  id                 String    @id @default(cuid())
-  slug               String    @unique
-  status             ProjectStatus @default(DRAFT)
-  title              String
-  subtitle           String?
-  address            String?
-  clientNames        String?
-  coverHeroImageId   String?
-  objective          String?
-  publishedVersion   Int       @default(0)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+model Employee {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  roleTitle String?  // e.g., Project Director, PM, Designer
+  email     String?  @unique
+  phone     String?
+  isActive  Boolean  @default(true)
+  isAdmin   Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  rooms              Room[]
-  media              Media[]
-  timelinePhases     TimelinePhase[]
-  investmentLineItems InvestmentLineItem[]
-  publishedSnapshots PublishedSnapshot[]
-
-  @@index([status])
-  @@index([createdAt])
+  @@index([sortOrder])
 }
 
-model Room {
-  id             String   @id @default(cuid())
-  projectId      String
-  roomType       RoomType
-  roomLabel      String?  // custom label when roomType is OTHER
-  scopeNarrative String   @default("")
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  media   Media[]
-
-  @@index([projectId])
-  @@index([projectId, sortOrder])
+// Singleton: one row for company-wide settings. Use findFirst and create if none.
+model CompanySettings {
+  id                      String   @id @default(cuid())
+  companyName             String   @default("")
+  addressLine1            String?
+  addressLine2            String?
+  city                    String?
+  state                   String?
+  zip                     String?
+  phone                   String?
+  email                   String?
+  logoUrl                 String?
+  logoLightUrl            String?
+  logoDarkUrl             String?
+  primaryColor            String?
+  primaryColorHex         String?  // accent color
+  textColorHex            String?  // text/headline color
+  defaultProposalDisclaimer String? @default("")
+  defaultTimelineNote     String?
+  integrationsJson       Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 }
 
-model Media {
-  id        String    @id @default(cuid())
-  projectId String
-  roomId    String?
-  kind      MediaKind
-  url       String
-  fileKey   String
-  width     Int?
-  height    Int?
-  caption   String?
-  tags      String[]
-  sortOrder Int       @default(0)
-  createdAt DateTime  @default(now())
+// Library of room types (e.g. Kitchen, Primary Bath). Reusable across projects.
+model RoomType {
+  id        String   @id @default(cuid())
+  name      String
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  exterior  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  rooms     Room[]
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  room    Room?   @relation(fields: [roomId], references: [id], onDelete: SetNull)
-
-  @@index([projectId])
-  @@index([roomId])
-  @@index([projectId, kind])
-  @@index([projectId, sortOrder])
-}
-
-model TimelinePhase {
-  id           String           @id @default(cuid())
-  projectId    String
-  phase        TimelinePhaseType
-  durationText String           @default("")
-  sortOrder    Int              @default(0)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@index([projectId, sortOrder])
-}
-
-model InvestmentLineItem {
-  id         String   @id @default(cuid())
-  projectId  String
-  label      String
-  rangeLow   Int?
-  rangeHigh  Int?
-  notes      String?
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@index([projectId, sortOrder])
-}
-
-model PublishedSnapshot {
-  id           String   @id @default(cuid())
-  projectId    String
-  version      Int
-  snapshotJson Json
-  createdAt    DateTime @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, version])
-  @@index([projectId])
+  @@index([sortOrder])
 }

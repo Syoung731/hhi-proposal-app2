@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
+import { listActiveStylePresets } from "@/app/admin/settings/actions";
 import { ProjectTabs } from "./tabs";
 
 const TAB = "tab";
@@ -16,15 +17,32 @@ export default async function AdminProjectPage({
   const sp = await searchParams;
   const tab = (typeof sp[TAB] === "string" ? sp[TAB] : undefined) || "overview";
 
-  const project = await prisma.project.findUnique({
-    where: { id },
-    include: {
-      rooms: { orderBy: { sortOrder: "asc" } },
-      media: { orderBy: { sortOrder: "asc" }, include: { room: true } },
-      timelinePhases: { orderBy: { sortOrder: "asc" } },
-      investmentLineItems: { orderBy: { sortOrder: "asc" } },
-    },
-  });
+  const [project, stylePresets] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id },
+      include: {
+        stylePreset: { select: { id: true, name: true } },
+        rooms: {
+          orderBy: { sortOrder: "asc" },
+          include: { roomType: { select: { id: true, name: true } }, stylePreset: { select: { id: true, name: true } } },
+        },
+        media: {
+        orderBy: { sortOrder: "asc" },
+        include: {
+          room: {
+            include: {
+              roomType: { select: { id: true, name: true } },
+              stylePreset: { select: { id: true, name: true } },
+            },
+          },
+        },
+      },
+        timelinePhases: { orderBy: { sortOrder: "asc" } },
+        investmentLineItems: { orderBy: { sortOrder: "asc" } },
+      },
+    }),
+    listActiveStylePresets(),
+  ]);
   if (!project) notFound();
   return (
     <div>
@@ -49,7 +67,11 @@ export default async function AdminProjectPage({
           Preview draft
         </Link>
       </div>
-      <ProjectTabs project={project} currentTab={tab} />
+      <ProjectTabs
+        project={project}
+        stylePresets={stylePresets}
+        currentTab={tab}
+      />
     </div>
   );
 }

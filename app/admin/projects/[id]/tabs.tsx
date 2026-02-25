@@ -17,17 +17,29 @@ const TABS = [
   { slug: "publish", label: "Preview & Publish" },
 ] as const;
 
+type StylePresetForTabs = { id: string; name: string; isActive?: boolean };
+
 type ProjectForTabs = {
   id: string;
   title: string;
   slug: string;
   status: string;
   subtitle: string | null;
-  address: string | null;
-  clientNames: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  client1First: string | null;
+  client1Last: string | null;
+  client2First: string | null;
+  client2Last: string | null;
+  transcriptText: string | null;
   coverHeroImageId: string | null;
   objective: string | null;
   publishedVersion: number;
+  stylePresetId: string | null;
+  stylePreset: StylePresetForTabs | null;
   rooms: RoomForTabs[];
   media: MediaForTabs[];
   timelinePhases: TimelinePhaseForTabs[];
@@ -52,26 +64,35 @@ type InvestmentItemForTabs = {
 
 type RoomForTabs = {
   id: string;
-  roomType: string;
-  roomLabel: string | null;
+  name: string;
   scopeNarrative: string;
+  scopeSource: string | null;
+  scopeUpdatedAt: Date | string | null;
   sortOrder: number;
+  roomTypeId: string | null;
+  roomType: { id: string; name: string } | null;
+  stylePresetId: string | null;
+  stylePreset: { id: string; name: string } | null;
 };
 type MediaForTabs = {
   id: string;
   kind: string;
+  type: string;
   caption: string | null;
   tags: string[];
   roomId: string | null;
   url: string;
+  sortOrder: number;
   room: RoomForTabs | null;
 };
 
 export function ProjectTabs({
   project,
+  stylePresets,
   currentTab,
 }: {
   project: ProjectForTabs;
+  stylePresets: StylePresetForTabs[];
   currentTab: string;
 }) {
   const base = `/admin/projects/${project.id}`;
@@ -97,22 +118,34 @@ export function ProjectTabs({
           );
         })}
       </nav>
-      <div className="min-h-[200px] rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="min-h-[200px] rounded-lg border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
         {currentTab === "overview" && (
           <OverviewTab
             projectId={project.id}
             project={{
               title: project.title,
               subtitle: project.subtitle,
-              address: project.address,
-              clientNames: project.clientNames,
+              addressLine1: project.addressLine1,
+              addressLine2: project.addressLine2,
+              city: project.city,
+              state: project.state,
+              zip: project.zip,
+              client1First: project.client1First,
+              client1Last: project.client1Last,
+              client2First: project.client2First,
+              client2Last: project.client2Last,
+              transcriptText: project.transcriptText,
               objective: project.objective,
               coverHeroImageId: project.coverHeroImageId,
+              stylePresetId: project.stylePresetId,
+              stylePreset: project.stylePreset,
             }}
+            stylePresets={stylePresets}
             media={project.media.map((m) => ({
               id: m.id,
               url: m.url,
               kind: m.kind,
+              type: m.type,
               caption: m.caption,
             }))}
           />
@@ -122,11 +155,17 @@ export function ProjectTabs({
             projectId={project.id}
             rooms={project.rooms.map((r) => ({
               id: r.id,
-              roomType: r.roomType,
-              roomLabel: r.roomLabel,
+              name: r.name,
               scopeNarrative: r.scopeNarrative,
+              scopeSource: r.scopeSource,
+              scopeUpdatedAt: r.scopeUpdatedAt,
               sortOrder: r.sortOrder,
+              roomTypeId: r.roomTypeId,
+              roomType: r.roomType,
+              stylePresetId: r.stylePresetId,
+              stylePreset: r.stylePreset,
             }))}
+            stylePresets={stylePresets}
           />
         )}
         {currentTab === "media" && (
@@ -134,6 +173,8 @@ export function ProjectTabs({
             projectId={project.id}
             media={project.media}
             rooms={project.rooms}
+            projectStylePresetId={project.stylePresetId}
+            stylePresets={stylePresets}
           />
         )}
         {currentTab === "timeline" && (

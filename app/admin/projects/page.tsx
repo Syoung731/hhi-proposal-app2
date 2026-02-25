@@ -1,24 +1,42 @@
 import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
 import { ProjectStatus } from "@/app/generated/prisma";
+import { ProjectListActions } from "./project-list-actions";
 
-export default async function AdminProjectsPage() {
+export default async function AdminProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ showArchived?: string }>;
+}) {
+  const { showArchived } = await searchParams;
+  const includeArchived = showArchived === "1" || showArchived === "true";
+
   const projects = await prisma.project.findMany({
+    where: includeArchived ? undefined : { status: { not: ProjectStatus.ARCHIVED } },
     orderBy: { updatedAt: "desc" },
     select: { id: true, slug: true, title: true, status: true, updatedAt: true },
   });
+
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
           Projects
         </h1>
-        <Link
-          href="/admin/projects/new"
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          New project
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href={includeArchived ? "/admin/projects" : "/admin/projects?showArchived=1"}
+            className="text-sm text-zinc-600 hover:underline dark:text-zinc-400"
+          >
+            {includeArchived ? "Hide archived" : "Show archived"}
+          </Link>
+          <Link
+            href="/admin/projects/new"
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            New project
+          </Link>
+        </div>
       </div>
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <table className="w-full text-left text-sm">
@@ -45,7 +63,9 @@ export default async function AdminProjectsPage() {
             {projects.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
-                  No projects yet. Create one to get started.
+                  {includeArchived
+                    ? "No projects yet. Create one to get started."
+                    : "No active projects. Create one or show archived."}
                 </td>
               </tr>
             ) : (
@@ -65,7 +85,9 @@ export default async function AdminProjectsPage() {
                       className={
                         p.status === ProjectStatus.PUBLISHED
                           ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-zinc-500 dark:text-zinc-400"
+                          : p.status === ProjectStatus.ARCHIVED
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-zinc-500 dark:text-zinc-400"
                       }
                     >
                       {p.status}
@@ -75,25 +97,12 @@ export default async function AdminProjectsPage() {
                     {p.updatedAt.toLocaleDateString()}
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/admin/projects/${p.id}`}
-                      className="text-zinc-600 hover:underline dark:text-zinc-400"
-                    >
-                      Edit
-                    </Link>
-                    {p.status === ProjectStatus.PUBLISHED && (
-                      <>
-                        {" · "}
-                        <Link
-                          href={`/p/${p.slug}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-zinc-600 hover:underline dark:text-zinc-400"
-                        >
-                          View
-                        </Link>
-                      </>
-                    )}
+                    <ProjectListActions
+                      projectId={p.id}
+                      slug={p.slug}
+                      status={p.status}
+                      title={p.title}
+                    />
                   </td>
                 </tr>
               ))

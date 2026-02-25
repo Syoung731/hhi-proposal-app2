@@ -1,15 +1,23 @@
 import type { SnapshotData } from "@/app/lib/snapshot";
+import { isBadPlaceholderUrl } from "@/app/lib/media";
 
-function roomLabel(room: SnapshotData["rooms"][0]): string {
-  if (room.roomType === "OTHER" && room.roomLabel) return room.roomLabel;
-  return room.roomType.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+/** Display name for a room; supports legacy snapshots with roomType/roomLabel */
+function roomDisplayName(room: SnapshotData["rooms"][0]): string {
+  if ("name" in room && room.name) return room.name;
+  const legacy = room as { roomType?: string; roomLabel?: string | null };
+  if (legacy.roomType === "OTHER" && legacy.roomLabel) return legacy.roomLabel;
+  if (legacy.roomType) return legacy.roomType.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  return "Room";
 }
 
 export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData }) {
   const { project, rooms, media, timelinePhases, investmentLineItems } = snapshot;
-  const coverMedia = project.coverHeroImageId
-    ? media.find((m) => m.id === project.coverHeroImageId)
-    : media.find((m) => m.kind === "COVER");
+  const coverMedia =
+    media.find((m) => (m as { type?: string }).type === "HERO") ??
+    (project.coverHeroImageId
+      ? media.find((m) => m.id === project.coverHeroImageId)
+      : null) ??
+    media.find((m) => m.kind === "COVER");
   const mediaByRoom = new Map<string, SnapshotData["media"]>();
   for (const m of media) {
     if (m.roomId) {
@@ -23,13 +31,30 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
     <article className="mx-auto max-w-4xl px-4 py-12">
       <section className="mb-16 text-center">
         {coverMedia && (
-          <div className="mb-6 aspect-video w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={coverMedia.url}
-              alt=""
-              className="h-full w-full object-cover"
-            />
+          <div className="relative mb-6 aspect-video w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+            {isBadPlaceholderUrl(coverMedia.url) ? (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "#f5f5f5",
+                  color: "#999",
+                  display: "grid",
+                  placeItems: "center",
+                  fontSize: 12,
+                  borderRadius: 8,
+                }}
+              >
+                No image
+              </div>
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={coverMedia.url}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            )}
           </div>
         )}
         <h1 className="text-4xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
@@ -40,11 +65,23 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
             {project.subtitle}
           </p>
         )}
-        {project.address && (
-          <p className="mt-1 text-zinc-500 dark:text-zinc-500">{project.address}</p>
+        {(project.addressLine1 || project.city || project.address) && (
+          <p className="mt-1 text-zinc-500 dark:text-zinc-500">
+            {project.address
+              ? project.address
+              : [project.addressLine1, project.addressLine2, [project.city, project.state, project.zip].filter(Boolean).join(", ")]
+                  .filter(Boolean)
+                  .join(", ")}
+          </p>
         )}
-        {project.clientNames && (
-          <p className="mt-1 text-zinc-500 dark:text-zinc-500">{project.clientNames}</p>
+        {(project.client1First || project.client1Last || project.client2First || project.client2Last || project.clientNames) && (
+          <p className="mt-1 text-zinc-500 dark:text-zinc-500">
+            {project.clientNames
+              ? project.clientNames
+              : [[project.client1First, project.client1Last].filter(Boolean).join(" ").trim(), [project.client2First, project.client2Last].filter(Boolean).join(" ").trim()]
+                  .filter(Boolean)
+                  .join(" & ")}
+          </p>
         )}
       </section>
 
@@ -71,7 +108,7 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
       {rooms.map((room) => (
         <section key={room.id} className="mb-16">
           <h2 className="mb-3 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-            {roomLabel(room)}
+            {roomDisplayName(room)}
           </h2>
           <p className="mb-4 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
             {room.scopeNarrative || "—"}
@@ -80,14 +117,31 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
             {(mediaByRoom.get(room.id) ?? []).slice(0, 4).map((m) => (
               <div
                 key={m.id}
-                className="aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800"
+                className="relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={m.url}
-                  alt={m.caption ?? ""}
-                  className="h-full w-full object-cover"
-                />
+                {isBadPlaceholderUrl(m.url) ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background: "#f5f5f5",
+                      color: "#999",
+                      display: "grid",
+                      placeItems: "center",
+                      fontSize: 12,
+                      borderRadius: 8,
+                    }}
+                  >
+                    No image
+                  </div>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={m.url}
+                    alt={m.caption ?? ""}
+                    className="h-full w-full object-cover"
+                  />
+                )}
               </div>
             ))}
           </div>
