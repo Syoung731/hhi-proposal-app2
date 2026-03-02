@@ -13,11 +13,12 @@ import { ProjectStatus } from "@/app/generated/prisma";
 type Props = {
   projectId: string;
   slug: string;
+  proposalId: string | null;
   status: ProjectStatus;
   title: string;
 };
 
-export function ProjectListActions({ projectId, slug, status, title }: Props) {
+export function ProjectListActions({ projectId, slug, proposalId, status, title }: Props) {
   const router = useRouter();
   const [archivePending, setArchivePending] = useState(false);
   const [unarchivePending, setUnarchivePending] = useState(false);
@@ -68,12 +69,6 @@ export function ProjectListActions({ projectId, slug, status, title }: Props) {
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <Link
-        href={`/admin/projects/${projectId}`}
-        className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      >
-        Edit
-      </Link>
       {isArchived ? (
         <button
           type="button"
@@ -104,11 +99,11 @@ export function ProjectListActions({ projectId, slug, status, title }: Props) {
       >
         Delete
       </button>
-      {status === ProjectStatus.PUBLISHED && (
+      {status === ProjectStatus.PUBLISHED && proposalId && (
         <>
           <span className="text-zinc-400 dark:text-zinc-500">·</span>
           <Link
-            href={`/p/${slug}`}
+            href={`/p/${proposalId}`}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"

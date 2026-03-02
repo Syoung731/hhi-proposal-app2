@@ -14,7 +14,14 @@ export default async function AdminProjectsPage({
   const projects = await prisma.project.findMany({
     where: includeArchived ? undefined : { status: { not: ProjectStatus.ARCHIVED } },
     orderBy: { updatedAt: "desc" },
-    select: { id: true, slug: true, title: true, status: true, updatedAt: true },
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      status: true,
+      updatedAt: true,
+      proposal: { select: { id: true } },
+    },
   });
 
   return (
@@ -75,7 +82,12 @@ export default async function AdminProjectsPage({
                   className="border-b border-zinc-100 dark:border-zinc-800"
                 >
                   <td className="px-4 py-3 text-zinc-900 dark:text-zinc-100">
-                    {p.title}
+                    <Link
+                      href={`/admin/projects/${p.id}`}
+                      className="font-medium hover:underline cursor-pointer"
+                    >
+                      {p.title}
+                    </Link>
                   </td>
                   <td className="px-4 py-3 font-mono text-zinc-600 dark:text-zinc-400">
                     {p.slug}
@@ -100,6 +112,7 @@ export default async function AdminProjectsPage({
                     <ProjectListActions
                       projectId={p.id}
                       slug={p.slug}
+                      proposalId={p.proposal?.id ?? null}
                       status={p.status}
                       title={p.title}
                     />

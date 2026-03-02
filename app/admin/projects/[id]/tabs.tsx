@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ProjectForTabs } from "./page";
 import { MediaTab } from "./media/media-tab";
 import { OverviewTab } from "./overview/overview-tab";
 import { RoomsTab } from "./rooms/rooms-tab";
@@ -8,100 +9,47 @@ import { TimelineTab } from "./timeline/timeline-tab";
 import { InvestmentTab } from "./investment/investment-tab";
 import { PublishTab } from "./publish/publish-tab";
 
-const TABS = [
+const TABS: { slug: string; label: string; hrefOnly?: boolean }[] = [
   { slug: "overview", label: "Overview" },
-  { slug: "rooms", label: "Rooms" },
+  { slug: "rooms", label: "Sections" },
   { slug: "media", label: "Media" },
   { slug: "timeline", label: "Timeline" },
   { slug: "investment", label: "Investment" },
+  { slug: "presentation", label: "Presentation", hrefOnly: true },
   { slug: "publish", label: "Preview & Publish" },
-] as const;
+];
 
 type StylePresetForTabs = { id: string; name: string; isActive?: boolean };
-
-type ProjectForTabs = {
-  id: string;
-  title: string;
-  slug: string;
-  status: string;
-  subtitle: string | null;
-  addressLine1: string | null;
-  addressLine2: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
-  client1First: string | null;
-  client1Last: string | null;
-  client2First: string | null;
-  client2Last: string | null;
-  transcriptText: string | null;
-  coverHeroImageId: string | null;
-  objective: string | null;
-  publishedVersion: number;
-  stylePresetId: string | null;
-  stylePreset: StylePresetForTabs | null;
-  rooms: RoomForTabs[];
-  media: MediaForTabs[];
-  timelinePhases: TimelinePhaseForTabs[];
-  investmentLineItems: InvestmentItemForTabs[];
-};
-
-type TimelinePhaseForTabs = {
-  id: string;
-  phase: string;
-  durationText: string;
-  sortOrder: number;
-};
-
-type InvestmentItemForTabs = {
-  id: string;
-  label: string;
-  rangeLow: number | null;
-  rangeHigh: number | null;
-  notes: string | null;
-  sortOrder: number;
-};
-
-type RoomForTabs = {
-  id: string;
-  name: string;
-  scopeNarrative: string;
-  scopeSource: string | null;
-  scopeUpdatedAt: Date | string | null;
-  sortOrder: number;
-  roomTypeId: string | null;
-  roomType: { id: string; name: string } | null;
-  stylePresetId: string | null;
-  stylePreset: { id: string; name: string } | null;
-};
-type MediaForTabs = {
-  id: string;
-  kind: string;
-  type: string;
-  caption: string | null;
-  tags: string[];
-  roomId: string | null;
-  url: string;
-  sortOrder: number;
-  room: RoomForTabs | null;
-};
+type SectionTypeForTabs = { id: string; name: string; category: string; defaultMeasurementMode: string; defaultEstimateUnit: string; customUnitLabel: string | null };
 
 export function ProjectTabs({
   project,
   stylePresets,
+  sectionTypes,
   currentTab,
+  roomTypeLowPct,
+  roomTypeHighPct,
+  children,
 }: {
   project: ProjectForTabs;
   stylePresets: StylePresetForTabs[];
+  sectionTypes: SectionTypeForTabs[];
   currentTab: string;
+  roomTypeLowPct?: number;
+  roomTypeHighPct?: number;
+  children?: React.ReactNode;
 }) {
   const base = `/admin/projects/${project.id}`;
 
   return (
     <div className="space-y-6">
       <nav className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {TABS.map(({ slug, label }) => {
-          const href = slug === "overview" ? base : `${base}?tab=${slug}`;
+        {TABS.map(({ slug, label, hrefOnly }) => {
+          const href = hrefOnly
+            ? `${base}/${slug}`
+            : slug === "overview"
+              ? base
+              : `${base}?tab=${slug}`;
           const isActive = currentTab === slug;
           return (
             <Link
@@ -118,7 +66,7 @@ export function ProjectTabs({
           );
         })}
       </nav>
-      <div className="min-h-[200px] rounded-lg border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className={`min-h-[200px] rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${currentTab === "presentation" && children ? "p-0" : "p-8"}`}>
         {currentTab === "overview" && (
           <OverviewTab
             projectId={project.id}
@@ -137,22 +85,15 @@ export function ProjectTabs({
               transcriptText: project.transcriptText,
               objective: project.objective,
               coverHeroImageId: project.coverHeroImageId,
-              stylePresetId: project.stylePresetId,
-              stylePreset: project.stylePreset,
             }}
-            stylePresets={stylePresets}
-            media={project.media.map((m) => ({
-              id: m.id,
-              url: m.url,
-              kind: m.kind,
-              type: m.type,
-              caption: m.caption,
-            }))}
           />
         )}
         {currentTab === "rooms" && (
           <RoomsTab
             projectId={project.id}
+            projectStylePresetId={project.stylePresetId}
+            roomTypeLowPct={roomTypeLowPct ?? -10}
+            roomTypeHighPct={roomTypeHighPct ?? 10}
             rooms={project.rooms.map((r) => ({
               id: r.id,
               name: r.name,
@@ -164,8 +105,30 @@ export function ProjectTabs({
               roomType: r.roomType,
               stylePresetId: r.stylePresetId,
               stylePreset: r.stylePreset,
+              estPricePerSqFt: r.estPricePerSqFt ?? null,
+              lengthIn: r.lengthIn ?? null,
+              widthIn: r.widthIn ?? null,
+              ceilingHeightIn: r.ceilingHeightIn ?? null,
+              sectionTypeId: r.sectionTypeId ?? null,
+              sectionType: r.sectionType,
+              measurementMode: r.measurementMode ?? null,
+              areaSqFt: r.areaSqFt ?? null,
+              quantity: r.quantity ?? null,
+              origin: r.origin,
+              estimateUnit: r.estimateUnit ?? null,
+              customUnitLabel: r.customUnitLabel ?? null,
+              unitQuantity: r.unitQuantity ?? null,
+              unitQuantityManualOverride: r.unitQuantityManualOverride ?? false,
+              bucket: r.bucket,
+              totalLow: r.totalLow ?? null,
+              totalTarget: r.totalTarget ?? null,
+              totalHigh: r.totalHigh ?? null,
+              unitRateLow: r.unitRateLow ?? null,
+              unitRateTarget: r.unitRateTarget ?? null,
+              unitRateHigh: r.unitRateHigh ?? null,
             }))}
             stylePresets={stylePresets}
+            sectionTypes={sectionTypes}
           />
         )}
         {currentTab === "media" && (
@@ -173,8 +136,8 @@ export function ProjectTabs({
             projectId={project.id}
             media={project.media}
             rooms={project.rooms}
-            projectStylePresetId={project.stylePresetId}
-            stylePresets={stylePresets}
+            projectStylePreset={project.stylePreset}
+            coverHeroImageId={project.coverHeroImageId}
           />
         )}
         {currentTab === "timeline" && (
@@ -191,12 +154,31 @@ export function ProjectTabs({
         {currentTab === "investment" && (
           <InvestmentTab
             projectId={project.id}
+            sections={project.rooms.map((r) => ({
+              id: r.id,
+              name: r.name,
+              sortOrder: r.sortOrder,
+              bucket: r.bucket,
+              sectionTypeName: r.sectionType?.name ?? "Unassigned",
+              category: r.sectionType?.category ?? null,
+              totalLow: r.totalLow ?? null,
+              totalTarget: r.totalTarget ?? null,
+              totalHigh: r.totalHigh ?? null,
+            }))}
             items={project.investmentLineItems.map((i) => ({
               id: i.id,
+              bucket: i.bucket,
               label: i.label,
               rangeLow: i.rangeLow,
+              rangeTarget: i.rangeTarget,
               rangeHigh: i.rangeHigh,
               notes: i.notes,
+              overrideLow: i.overrideLow,
+              overrideTarget: i.overrideTarget,
+              overrideHigh: i.overrideHigh,
+              overrideNotes: i.overrideNotes,
+              isOverride: i.isOverride,
+              includeInTotals: i.includeInTotals,
               sortOrder: i.sortOrder,
             }))}
           />
@@ -204,10 +186,11 @@ export function ProjectTabs({
         {currentTab === "publish" && (
           <PublishTab
             projectId={project.id}
-            slug={project.slug}
+            proposalId={project.proposal?.id ?? null}
             publishedVersion={project.publishedVersion}
           />
         )}
+        {currentTab === "presentation" && children}
       </div>
     </div>
   );

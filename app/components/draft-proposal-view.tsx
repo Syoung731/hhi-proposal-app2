@@ -1,6 +1,8 @@
 import type { Project, Room, Media, TimelinePhase, InvestmentLineItem } from "@/app/generated/prisma";
 import { MediaKind, MediaType } from "@/app/generated/prisma";
 import { isBadPlaceholderUrl } from "@/app/lib/media";
+import { formatAddress, formatOwnerNames } from "@/app/lib/cover-display";
+import { formatInvestmentRange } from "@/app/lib/format-investment-range";
 
 type ProjectWithRelations = Project & {
   rooms: Room[];
@@ -24,6 +26,20 @@ export function DraftProposalView({ project }: { project: ProjectWithRelations }
       mediaByRoom.set(m.roomId, list);
     }
   }
+  const effectiveRange = (item: InvestmentLineItem) => {
+    if (item.isOverride) {
+      return {
+        low: item.overrideLow ?? null,
+        target: item.overrideTarget ?? null,
+        high: item.overrideHigh ?? null,
+      };
+    }
+    return {
+      low: item.rangeLow,
+      target: item.rangeTarget,
+      high: item.rangeHigh,
+    };
+  };
 
   return (
     <article className="mx-auto max-w-4xl px-4 py-12">
@@ -64,25 +80,14 @@ export function DraftProposalView({ project }: { project: ProjectWithRelations }
             {project.subtitle}
           </p>
         )}
-        {(project.addressLine1 || project.city) && (
+        {formatAddress(project) && (
           <p className="mt-1 text-zinc-500 dark:text-zinc-500">
-            {[
-              project.addressLine1,
-              project.addressLine2,
-              [project.city, project.state, project.zip].filter(Boolean).join(", "),
-            ]
-              .filter(Boolean)
-              .join(", ")}
+            {formatAddress(project)}
           </p>
         )}
-        {(project.client1First || project.client1Last || project.client2First || project.client2Last) && (
+        {formatOwnerNames(project) && (
           <p className="mt-1 text-zinc-500 dark:text-zinc-500">
-            {[
-              [project.client1First, project.client1Last].filter(Boolean).join(" ").trim(),
-              [project.client2First, project.client2Last].filter(Boolean).join(" ").trim(),
-            ]
-              .filter(Boolean)
-              .join(" & ")}
+            {formatOwnerNames(project)}
           </p>
         )}
       </section>
@@ -109,7 +114,7 @@ export function DraftProposalView({ project }: { project: ProjectWithRelations }
         </p>
       </section>
 
-      {/* Rooms */}
+      {/* Sections */}
       {project.rooms.map((room) => (
         <section key={room.id} className="mb-16">
           <h2 className="mb-3 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
@@ -199,24 +204,25 @@ export function DraftProposalView({ project }: { project: ProjectWithRelations }
                 </tr>
               </thead>
               <tbody>
-                {project.investmentLineItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-t border-zinc-200 dark:border-zinc-700"
-                  >
-                    <td className="px-4 py-3 text-zinc-900 dark:text-zinc-100">
-                      {item.label}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                      {item.rangeLow != null || item.rangeHigh != null
-                        ? `$${item.rangeLow ?? "—"} – $${item.rangeHigh ?? "—"}`
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-500 dark:text-zinc-500">
-                      {item.notes ?? "—"}
-                    </td>
-                  </tr>
-                ))}
+                {project.investmentLineItems.map((item) => {
+                  const { low, target, high } = effectiveRange(item);
+                  return (
+                    <tr
+                      key={item.id}
+                      className="border-t border-zinc-200 dark:border-zinc-700"
+                    >
+                      <td className="px-4 py-3 text-zinc-900 dark:text-zinc-100">
+                        {item.label}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                        {formatInvestmentRange(low, target, high)}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-500 dark:text-zinc-500">
+                        {item.notes ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

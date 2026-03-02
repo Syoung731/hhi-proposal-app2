@@ -106,7 +106,7 @@ export default async function AdminHomePage() {
               Settings
             </h2>
             <p className="mt-1 flex-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Admin and application settings, branding, and room types.
+              Admin and application settings, branding, and pricing profiles.
             </p>
             <Link
               href="/admin/settings"
@@ -142,7 +142,7 @@ export default async function AdminHomePage() {
             </div>
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Room Types
+                Pricing Profiles
               </p>
               <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                 {roomTypesStatus}

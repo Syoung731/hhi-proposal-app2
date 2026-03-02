@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { getPresignedUploadUrl, uploadBuffer } from "@/app/lib/s3";
-import { generateRoomRendering } from "@/app/lib/gemini";
-import { MediaKind, MediaType } from "@/app/generated/prisma";
+import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
+import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
+import type { HeroPresetKey } from "./hero-presets";
 
 export async function getPresignedUploadUrlAction(
   projectId: string,
@@ -29,6 +30,7 @@ export async function getPresignedUploadUrlAction(
 /**
  * Create a media record. Use publicUrl (from getPresignedUploadUrl) as url, not the presigned uploadUrl.
  * HERO must have roomId = null. EXISTING/RENDERING typically have roomId set.
+ * Front Page uploads (roomId null, type EXISTING) should pass placement=FRONT_PAGE so the item does not appear in Unassigned.
  */
 export async function createMediaAction(formData: FormData): Promise<{ error?: string }> {
   await requireAdmin();
@@ -36,6 +38,13 @@ export async function createMediaAction(formData: FormData): Promise<{ error?: s
   const fileKey = formData.get("fileKey") as string;
   const url = formData.get("url") as string; // Must be the R2/public URL, not the presigned upload URL
   const type = (formData.get("type") as MediaType) ?? MediaType.EXISTING;
+  const placementRaw = formData.get("placement") as string | null;
+  const placement =
+    placementRaw === "FRONT_PAGE"
+      ? MediaPlacement.FRONT_PAGE
+      : placementRaw === "SECTION"
+        ? MediaPlacement.SECTION
+        : undefined; // UNASSIGNED or not set
   const caption = (formData.get("caption") as string)?.trim() || null;
   const tagsStr = (formData.get("tags") as string)?.trim();
   const tags = tagsStr ? tagsStr.split(/[\s,]+/).filter(Boolean) : [];
@@ -47,15 +56,16 @@ export async function createMediaAction(formData: FormData): Promise<{ error?: s
   if (type === MediaType.HERO) roomId = null;
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return { error: "Project not found" };
-  // Max sortOrder within the same group (projectId + type + roomId)
-  const groupWhere = {
-    projectId,
-    type,
-    ...(roomId ? { roomId } : { roomId: null }),
-  };
+  const effectivePlacement =
+    placement ??
+    (roomId != null ? MediaPlacement.SECTION : MediaPlacement.UNASSIGNED);
   const maxOrder = await prisma.media
     .aggregate({
-      where: groupWhere,
+      where: {
+        projectId,
+        type,
+        ...(roomId ? { roomId } : { roomId: null }),
+      },
       _max: { sortOrder: true },
     })
     .then((r) => r._max.sortOrder ?? -1);
@@ -70,6 +80,7 @@ export async function createMediaAction(formData: FormData): Promise<{ error?: s
       caption,
       tags,
       sortOrder: maxOrder + 1,
+      placement: effectivePlacement,
     },
   });
   revalidatePath(`/admin/projects/${projectId}`);
@@ -79,7 +90,7 @@ export async function createMediaAction(formData: FormData): Promise<{ error?: s
 
 /**
  * Replace project hero: delete existing HERO media for this project, then create new one.
- * Also sets project.coverHeroImageId so Overview/draft views keep working.
+ * Does not set project.coverHeroImageId (cover invariant: cover must be a COVER rendering). Use Front Page to create a COVER and set as proposal cover.
  */
 export async function setHeroAction(
   projectId: string,
@@ -101,7 +112,7 @@ export async function setHeroAction(
     if (existingHero) {
       await tx.media.delete({ where: { id: existingHero.id } });
     }
-    const media = await tx.media.create({
+    await tx.media.create({
       data: {
         projectId,
         roomId: null,
@@ -113,10 +124,6 @@ export async function setHeroAction(
         tags: ["hero"],
         sortOrder: 0,
       },
-    });
-    await tx.project.update({
-      where: { id: projectId },
-      data: { coverHeroImageId: media.id },
     });
   });
   revalidatePath(`/admin/projects/${projectId}`);
@@ -173,11 +180,15 @@ export async function updateMediaCaptionAction(
   return {};
 }
 
-/** Assign a room to media (e.g. from Unassigned section). Keeps type unchanged. */
+/**
+ * Assign a room to media (e.g. from Unassigned section), or move to Front Page.
+ * When roomId is set, placement becomes SECTION. When roomId is null, pass placement "FRONT_PAGE" to move to Front Page (so item leaves Unassigned).
+ */
 export async function updateMediaRoomAction(
   projectId: string,
   mediaId: string,
-  roomId: string | null
+  roomId: string | null,
+  placement?: MediaPlacement | "FRONT_PAGE" | "SECTION" | "UNASSIGNED"
 ): Promise<{ error?: string }> {
   await requireAdmin();
   const media = await prisma.media.findFirst({
@@ -185,9 +196,18 @@ export async function updateMediaRoomAction(
   });
   if (!media) return { error: "Media not found" };
   if (media.type === MediaType.HERO) return { error: "Hero media cannot be assigned to a room" };
+  const placementStr = placement as string | undefined;
+  const placementValue: MediaPlacement =
+    roomId != null
+      ? MediaPlacement.SECTION
+      : placementStr === "FRONT_PAGE" || placement === MediaPlacement.FRONT_PAGE
+        ? MediaPlacement.FRONT_PAGE
+        : placementStr === "SECTION" || placement === MediaPlacement.SECTION
+          ? MediaPlacement.SECTION
+          : MediaPlacement.UNASSIGNED;
   await prisma.media.update({
     where: { id: mediaId },
-    data: { roomId },
+    data: { roomId, placement: placementValue },
   });
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -200,10 +220,28 @@ export async function deleteMediaAction(projectId: string, mediaId: string): Pro
     where: { id: mediaId, projectId },
   });
   if (!media) return { error: "Media not found" };
+  // If this media is the selected render concept for any room, clear the selection.
+  if (media.type === MediaType.RENDERING) {
+    await prisma.room.updateMany({
+      where: {
+        projectId,
+        selectedRenderMediaId: mediaId,
+      },
+      data: {
+        selectedRenderMediaId: null,
+      },
+    });
+  }
   await prisma.media.delete({ where: { id: mediaId } });
   if (media.type === MediaType.HERO) {
     await prisma.project.update({
       where: { id: projectId },
+      data: { coverHeroImageId: null },
+    });
+  } else if (media.id) {
+    // If deleted media was the selected cover hero (e.g. a hero rendering), clear it
+    await prisma.project.updateMany({
+      where: { id: projectId, coverHeroImageId: media.id },
       data: { coverHeroImageId: null },
     });
   }
@@ -213,8 +251,213 @@ export async function deleteMediaAction(projectId: string, mediaId: string): Pro
 }
 
 /**
+ * Set the project's selected hero/cover image (project.coverHeroImageId).
+ * Accepts: (1) existing media (type !== RENDERING) with valid url, or
+ * (2) COVER renderings (type=RENDERING, kind=COVER, roomId=null) with valid url.
+ * Rejects: invalid/missing url or media not belonging to the project.
+ */
+export async function setProjectHeroMediaAction(
+  projectId: string,
+  heroMediaId: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!projectId || !heroMediaId) return { error: "Missing projectId or heroMediaId" };
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return { error: "Project not found" };
+  const media = await prisma.media.findFirst({
+    where: { id: heroMediaId, projectId },
+  });
+  if (!media) return { error: "Media not found or does not belong to this project" };
+  const validUrl = media.url != null && media.url.trim() !== "";
+  if (!validUrl) return { error: "Media has no valid image URL" };
+  const isCoverRendering =
+    media.type === MediaType.RENDERING &&
+    media.kind === MediaKind.COVER &&
+    media.roomId == null;
+  const isExisting = media.type !== MediaType.RENDERING;
+  if (!isExisting && !isCoverRendering) {
+    return {
+      error:
+        "Cover must be an existing upload or a COVER rendering (Front Page). Room renderings cannot be set as cover.",
+    };
+  }
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { coverHeroImageId: heroMediaId },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/**
+ * Clear the project's selected cover hero (project.coverHeroImageId = null).
+ */
+export async function clearCoverHeroAction(
+  projectId: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!projectId) return { error: "Missing projectId" };
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return { error: "Project not found" };
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { coverHeroImageId: null },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/**
+ * Create a hero/cover render from ANY source media (existing upload or room rendering).
+ * Uses the same Gemini edit pipeline as room "Update Render": generateRenderEdit → R2 upload → update Media.
+ * New Media: type=RENDERING, kind=COVER, roomId=null, sourceMediaId=<selected id>, editInstruction stored.
+ * Idempotent: we update the same Media row by id; no duplicate rows on retry.
+ */
+export async function startHeroRenderAction(
+  projectId: string,
+  sourceMediaId: string,
+  presets: HeroPresetKey[],
+  instructions: string
+): Promise<
+  | { ok: true; mediaId: string; id: string; renderStatus: string; url: string | null }
+  | { error: string }
+> {
+  await requireAdmin();
+  if (!projectId || !sourceMediaId) return { error: "Missing projectId or sourceMediaId" };
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return { error: "Project not found" };
+  const sourceMedia = await prisma.media.findFirst({
+    where: { id: sourceMediaId, projectId },
+  });
+  if (!sourceMedia) return { error: "Source media not found" };
+  const effectiveUrl =
+    sourceMedia.type === MediaType.RENDERING
+      ? sourceMedia.url?.trim() || null
+      : sourceMedia.url?.trim() || null;
+  if (!effectiveUrl) return { error: "Source has no image URL (upload or render must be complete)" };
+
+  const maxOrder = await prisma.media
+    .aggregate({
+      where: { projectId, roomId: null, type: MediaType.RENDERING },
+      _max: { sortOrder: true },
+    })
+    .then((r) => r._max.sortOrder ?? -1);
+
+  const baseInstruction = [
+    ...presets.map((p) => p.replace(/_/g, " ")),
+    instructions?.trim() ?? "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+
+  const crop16x9Suffix = presets.includes("crop_16_9")
+      ? " Output the image in 16:9 aspect ratio (width:height), cropped for a cover. Center the most important part of the image."
+      : "";
+
+  const finalInstruction =
+    (baseInstruction + crop16x9Suffix).trim() ||
+    "Improve the image for use as a proposal cover. Keep it photorealistic, no text or watermarks.";
+
+  const created = await prisma.media.create({
+    data: {
+      projectId,
+      roomId: null,
+      kind: MediaKind.COVER,
+      type: MediaType.RENDERING,
+      url: "",
+      fileKey: `hero-renders/pending/${sourceMediaId}/${Date.now()}`,
+      caption: null,
+      tags: [],
+      sortOrder: maxOrder + 1,
+      sourceMediaId: sourceMedia.id,
+      parentMediaId: sourceMedia.id,
+      editInstruction: finalInstruction,
+      renderProvider: "gemini",
+      renderModel: GEMINI_MODEL,
+      renderStatus: RenderStatus.QUEUED,
+    },
+  });
+
+  try {
+    await prisma.media.update({
+      where: { id: created.id },
+      data: { renderStatus: RenderStatus.RENDERING, renderError: null },
+    });
+
+    const { bytes, mimeType } = await generateRenderEdit({
+      imageUrl: effectiveUrl,
+      instruction: finalInstruction,
+    });
+
+    const ext = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "jpg" : "png";
+    const fileKey = `projects/${projectId}/cover/renderings/${created.id}.${ext}`;
+    const contentType = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "image/jpeg" : "image/png";
+
+    const { publicUrl } = await uploadBuffer(fileKey, bytes, contentType);
+
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        url: publicUrl,
+        fileKey,
+        renderStatus: RenderStatus.DONE,
+        renderError: null,
+      },
+    });
+
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+    return {
+      ok: true,
+      mediaId: created.id,
+      id: created.id,
+      renderStatus: "DONE",
+      url: publicUrl,
+    };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    await prisma.media
+      .update({
+        where: { id: created.id },
+        data: {
+          renderStatus: RenderStatus.FAILED,
+          renderError: reason.slice(0, 500),
+        },
+      })
+      .catch(() => {});
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+    return { error: `Hero render failed: ${reason}` };
+  }
+}
+
+/**
+ * Delete a hero render (Media type RENDERING, roomId null). Clears project.coverHeroImageId if it pointed to this media.
+ */
+export async function deleteHeroRenderAction(
+  projectId: string,
+  mediaId: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const media = await prisma.media.findFirst({
+    where: { id: mediaId, projectId, type: MediaType.RENDERING, roomId: null },
+  });
+  if (!media) return { error: "Hero render not found" };
+  await prisma.media.delete({ where: { id: mediaId } });
+  await prisma.project.updateMany({
+    where: { id: projectId, coverHeroImageId: mediaId },
+    data: { coverHeroImageId: null },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/**
  * Move media up/down within its group only (same projectId + type + roomId).
- * Room section order is NOT editable here; it follows Room.sortOrder on Rooms tab.
+ * Room section order is NOT editable here; it follows Room.sortOrder on Sections tab.
  */
 export async function moveMediaOrderAction(
   projectId: string,
@@ -257,37 +500,65 @@ export async function moveMediaOrderAction(
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-image";
 
 /**
+ * Resolve effective style prompt for Media rendering: project-level preset only.
+ * Returns null if no project preset; otherwise returns project.stylePreset.prompt.
+ * When null, render must not inject any style guidance (scope + photo only).
+ */
+function getEffectiveStylePromptForProject(project: {
+  stylePresetId: string | null;
+  stylePreset: { id: string; prompt: string } | null;
+}): string | null {
+  if (!project.stylePresetId || !project.stylePreset?.prompt) return null;
+  return project.stylePreset.prompt.trim() || null;
+}
+
+/**
  * Start room rendering for the given media (exactly one EXISTING photo).
  * Creates a pending RENDERING Media row with versioning metadata, then generates image via Gemini,
- * uploads to R2, updates the row with url/fileKey, and revalidates. On failure, deletes the pending row.
- * effectivePresetId: optional; if not provided, uses room.stylePresetId ?? project.stylePresetId ?? first active preset.
+ * uploads to R2, updates the row with url/fileKey/status, and revalidates.
+ * On failure, keeps the Media row with renderStatus=FAILED and renderError populated.
+ * Style: only project.stylePresetId is used; if set, project.stylePreset.prompt is applied; otherwise no style guidance.
  */
 export async function startRoomRenderAction(
   projectId: string,
   roomId: string,
-  mediaIds: string[],
-  stylePresetId?: string | null
+  sourceMediaId: string
 ): Promise<
   | { ok: true; createdMediaId: string; fileKey: string }
   | { error: string }
 > {
   await requireAdmin();
   if (!projectId || !roomId) return { error: "Missing projectId or roomId" };
-  if (!mediaIds || mediaIds.length !== 1) {
-    return { error: "Exactly one source photo must be selected" };
+  if (!sourceMediaId) {
+    return { error: "Source photo is required" };
   }
+
+  // Enforce hard cap of 3 root renderings per room (parentMediaId null only).
+  const rootRenderCount = await prisma.media.count({
+    where: {
+      projectId,
+      roomId,
+      type: MediaType.RENDERING,
+      parentMediaId: null,
+    },
+  });
+  if (rootRenderCount >= 3) {
+    return {
+      error: "Max 3 root renders per room. Delete one to generate another.",
+    };
+  }
+
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    include: { stylePreset: { select: { id: true, prompt: true } } },
+    include: { stylePreset: { select: { id: true, name: true, prompt: true } } },
   });
   if (!project) return { error: "Project not found" };
   const room = await prisma.room.findFirst({
     where: { id: roomId, projectId },
-    include: { stylePreset: { select: { id: true, prompt: true } } },
   });
   if (!room) return { error: "Room not found" };
   const sourceMedia = await prisma.media.findFirst({
-    where: { id: mediaIds[0]!, projectId, roomId },
+    where: { id: sourceMediaId, projectId, roomId },
   });
   if (!sourceMedia) {
     return { error: "Source photo not found or does not belong to this project and room" };
@@ -296,22 +567,9 @@ export async function startRoomRenderAction(
     return { error: "Source must be an existing photo" };
   }
 
-  // Resolve effective preset: explicit > room > project > first active
-  let effectivePresetId: string | null = stylePresetId ?? null;
-  if (!effectivePresetId && room.stylePreset?.id) effectivePresetId = room.stylePreset.id;
-  if (!effectivePresetId && project.stylePreset?.id) effectivePresetId = project.stylePreset.id;
-  if (!effectivePresetId) {
-    const first = await prisma.stylePreset.findFirst({
-      where: { isActive: true },
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      select: { id: true },
-    });
-    if (first) effectivePresetId = first.id;
-  }
-  const effectivePreset = effectivePresetId
-    ? await prisma.stylePreset.findUnique({ where: { id: effectivePresetId }, select: { prompt: true, name: true } })
-    : null;
-  const stylePresetPrompt = effectivePreset?.prompt ?? "";
+  const stylePresetPrompt = getEffectiveStylePromptForProject(project) ?? "";
+  const effectivePresetId = project.stylePresetId;
+  const effectivePreset = project.stylePreset;
   const promptVersion = 1;
 
   const maxOrder = await prisma.media
@@ -335,17 +593,27 @@ export async function startRoomRenderAction(
       stylePresetId: effectivePresetId,
       renderProvider: "gemini",
       renderModel: GEMINI_MODEL,
+      renderStatus: RenderStatus.QUEUED,
       promptVersion,
     },
   });
 
   try {
+    // Mark as actively rendering while we call the provider.
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        renderStatus: RenderStatus.RENDERING,
+        renderError: null,
+      },
+    });
+
     const { bytes, mimeType } = await generateRoomRendering({
       imageUrl: sourceMedia.url,
       roomName: room.name,
       scopeNarrative: room.scopeNarrative ?? "",
       transcriptText: project.transcriptText ?? undefined,
-      stylePresetPrompt,
+      stylePresetPrompt: stylePresetPrompt || undefined,
       promptVersion,
     });
 
@@ -362,6 +630,8 @@ export async function startRoomRenderAction(
         url: publicUrl,
         fileKey,
         tags,
+        renderStatus: RenderStatus.DONE,
+        renderError: null,
       },
     });
 
@@ -369,8 +639,14 @@ export async function startRoomRenderAction(
     revalidatePath(`/admin/projects/${projectId}/preview`);
     return { ok: true, createdMediaId: created.id, fileKey };
   } catch (e) {
-    await prisma.media.delete({ where: { id: created.id } }).catch(() => {});
     const reason = e instanceof Error ? e.message : String(e);
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        renderStatus: RenderStatus.FAILED,
+        renderError: reason.slice(0, 500),
+      },
+    }).catch(() => {});
     revalidatePath(`/admin/projects/${projectId}`);
     revalidatePath(`/admin/projects/${projectId}/preview`);
     return { error: `Render failed: ${reason}` };
@@ -403,4 +679,299 @@ export async function reorderMediaAction(
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
+}
+
+/**
+ * Mark a specific render as the selected concept for a room.
+ * Validates that the media belongs to the project+room and is a RENDERING with DONE status.
+ */
+export async function setSelectedRenderAction(
+  projectId: string,
+  roomId: string,
+  mediaId: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!projectId || !roomId || !mediaId) {
+    return { error: "Missing projectId, roomId, or mediaId" };
+  }
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+  });
+  if (!room) return { error: "Room not found" };
+
+  const media = await prisma.media.findFirst({
+    where: {
+      id: mediaId,
+      projectId,
+      roomId,
+      type: MediaType.RENDERING,
+    },
+  });
+  if (!media) {
+    return { error: "Render not found for this room" };
+  }
+  if (media.renderStatus !== RenderStatus.DONE) {
+    return { error: "Only completed renders can be selected." };
+  }
+
+  await prisma.room.update({
+    where: { id: roomId },
+    data: {
+      selectedRenderMediaId: mediaId,
+    },
+  });
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/**
+ * Clear the selected render for a room (set selectedRenderMediaId to null).
+ * Validates admin and project/room ownership.
+ */
+export async function clearSelectedRenderAction(
+  projectId: string,
+  roomId: string
+): Promise<{ ok?: true; error?: string }> {
+  await requireAdmin();
+  if (!projectId || !roomId) {
+    return { error: "Missing projectId or roomId" };
+  }
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+  });
+  if (!room) return { error: "Room not found" };
+
+  await prisma.room.update({
+    where: { id: roomId },
+    data: { selectedRenderMediaId: null },
+  });
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return { ok: true };
+}
+
+const INSTRUCTION_MIN_LEN = 3;
+const INSTRUCTION_MAX_LEN = 500;
+
+/**
+ * Start an "Update Render" (Gemini edit): create a new RENDERING Media from a DONE render
+ * using image-to-image edit with the given instruction. New row uses base render's sourceMediaId
+ * so it stays in the same before-photo group; parentMediaId points to the base render.
+ * Counts toward max 3 renderings per room.
+ */
+export async function startRenderUpdateAction(
+  projectId: string,
+  roomId: string,
+  baseRenderMediaId: string,
+  instruction: string
+): Promise<
+  | { ok: true; mediaId: string; createdMediaId: string; fileKey: string }
+  | { error: string }
+> {
+  await requireAdmin();
+  if (!projectId || !roomId || !baseRenderMediaId) {
+    return { error: "Missing projectId, roomId, or base render" };
+  }
+
+  const trimmed = instruction?.trim() ?? "";
+  if (trimmed.length < INSTRUCTION_MIN_LEN) {
+    return { error: "Instruction must be at least 3 characters." };
+  }
+  if (trimmed.length > INSTRUCTION_MAX_LEN) {
+    return { error: `Instruction must be ${INSTRUCTION_MAX_LEN} characters or less.` };
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: { stylePreset: { select: { id: true, name: true, prompt: true } } },
+  });
+  if (!project) return { error: "Project not found" };
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+  });
+  if (!room) return { error: "Room not found" };
+
+  const baseRender = await prisma.media.findFirst({
+    where: {
+      id: baseRenderMediaId,
+      projectId,
+      roomId,
+      type: MediaType.RENDERING,
+    },
+  });
+  if (!baseRender) {
+    return { error: "Base render not found or does not belong to this room" };
+  }
+  if (baseRender.renderStatus !== RenderStatus.DONE) {
+    return { error: "Only completed renders can be updated" };
+  }
+  if (!baseRender.url?.trim() || baseRender.fileKey?.startsWith("renderings/pending/")) {
+    return { error: "Base render has no valid image to update" };
+  }
+
+  // Resolve root of this render (base may be an update; root has parentMediaId null).
+  const rootId = baseRender.parentMediaId ?? baseRenderMediaId;
+  const rootMedia = await prisma.media.findFirst({
+    where: { id: rootId, projectId, roomId, type: MediaType.RENDERING },
+  });
+  if (!rootMedia) {
+    return { error: "Base render root not found" };
+  }
+  const effectiveRootId = rootMedia.parentMediaId ?? rootMedia.id;
+
+  // Enforce max 3 updates per root (children where parentMediaId === effectiveRootId).
+  const updateCount = await prisma.media.count({
+    where: {
+      projectId,
+      roomId,
+      type: MediaType.RENDERING,
+      parentMediaId: effectiveRootId,
+    },
+  });
+  if (updateCount >= 3) {
+    return {
+      error: "Max 3 updates per render. Delete one to add another.",
+    };
+  }
+
+  const stylePresetPrompt = getEffectiveStylePromptForProject(project) ?? "";
+  const effectivePresetId = project.stylePresetId;
+  const effectivePreset = project.stylePreset;
+
+  const maxOrder = await prisma.media
+    .aggregate({
+      where: { projectId, roomId, type: MediaType.RENDERING },
+      _max: { sortOrder: true },
+    })
+    .then((r) => r._max.sortOrder ?? -1);
+
+  const created = await prisma.media.create({
+    data: {
+      projectId,
+      roomId,
+      kind: MediaKind.OTHER,
+      type: MediaType.RENDERING,
+      url: "",
+      fileKey: `renderings/pending/${baseRender.id}/${Date.now()}`,
+      caption: null,
+      tags: [],
+      sortOrder: maxOrder + 1,
+      sourceMediaId: baseRender.sourceMediaId,
+      parentMediaId: baseRenderMediaId,
+      editInstruction: trimmed,
+      stylePresetId: effectivePresetId,
+      renderProvider: "gemini",
+      renderModel: GEMINI_MODEL,
+      renderStatus: RenderStatus.QUEUED,
+      promptVersion: baseRender.promptVersion,
+    },
+  });
+
+  try {
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        renderStatus: RenderStatus.RENDERING,
+        renderError: null,
+      },
+    });
+
+    const { bytes, mimeType } = await generateRenderEdit({
+      imageUrl: baseRender.url,
+      instruction: trimmed,
+      stylePresetPrompt: stylePresetPrompt || undefined,
+    });
+
+    const ext = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "jpg" : "png";
+    const fileKey = `projects/${projectId}/rooms/${roomId}/renderings/${created.id}.${ext}`;
+    const contentType = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "image/jpeg" : "image/png";
+
+    const { publicUrl } = await uploadBuffer(fileKey, bytes, contentType);
+
+    const tags = ["AI_RENDERED", "EDIT", ...(effectivePreset?.name ? [`STYLE:${effectivePreset.name}`] : [])];
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        url: publicUrl,
+        fileKey,
+        tags,
+        renderStatus: RenderStatus.DONE,
+        renderError: null,
+      },
+    });
+
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+    return { ok: true, mediaId: created.id, createdMediaId: created.id, fileKey };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        renderStatus: RenderStatus.FAILED,
+        renderError: reason.slice(0, 500),
+      },
+    }).catch(() => {});
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+    return { error: `Update failed: ${reason}` };
+  }
+}
+
+export type GetCompareRenderChangesResult =
+  | { ok: true; bullets: string[]; rawText?: string }
+  | { error: string };
+
+/**
+ * Compare source vs render image with vision on-demand; return 3–6 bullet differences or "No meaningful differences detected."
+ * No DB caching (renderChangeSummary table not used).
+ */
+export async function getCompareRenderChangesAction(
+  projectId: string,
+  sourceMediaId: string,
+  renderMediaId: string
+): Promise<GetCompareRenderChangesResult> {
+  await requireAdmin();
+  if (!projectId || !sourceMediaId || !renderMediaId) {
+    return { error: "Missing projectId, sourceMediaId, or renderMediaId" };
+  }
+
+  const [sourceMedia, renderMedia] = await Promise.all([
+    prisma.media.findFirst({
+      where: { id: sourceMediaId, projectId },
+      select: { id: true, url: true },
+    }),
+    prisma.media.findFirst({
+      where: { id: renderMediaId, projectId },
+      select: { id: true, url: true, sourceMediaId: true },
+    }),
+  ]);
+
+  if (!sourceMedia?.url?.trim()) {
+    return { error: "Source media not found or has no URL" };
+  }
+  if (!renderMedia?.url?.trim()) {
+    return { error: "Render media not found or has no URL" };
+  }
+  if (renderMedia.sourceMediaId !== sourceMediaId) {
+    return { error: "Render is not derived from this source" };
+  }
+
+  try {
+    const result = await compareSourceAndRenderImages(sourceMedia.url, renderMedia.url);
+    const bullets =
+      result.differences != null && result.differences.length > 0
+        ? result.differences
+        : ["No meaningful differences detected."];
+    return { ok: true, bullets };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { error: message };
+  }
 }

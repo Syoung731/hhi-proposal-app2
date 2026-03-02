@@ -1,5 +1,7 @@
 import type { SnapshotData } from "@/app/lib/snapshot";
 import { isBadPlaceholderUrl } from "@/app/lib/media";
+import { formatAddress, formatOwnerNames } from "@/app/lib/cover-display";
+import { formatInvestmentRange } from "@/app/lib/format-investment-range";
 
 /** Display name for a room; supports legacy snapshots with roomType/roomLabel */
 function roomDisplayName(room: SnapshotData["rooms"][0]): string {
@@ -65,22 +67,14 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
             {project.subtitle}
           </p>
         )}
-        {(project.addressLine1 || project.city || project.address) && (
+        {formatAddress(project) && (
           <p className="mt-1 text-zinc-500 dark:text-zinc-500">
-            {project.address
-              ? project.address
-              : [project.addressLine1, project.addressLine2, [project.city, project.state, project.zip].filter(Boolean).join(", ")]
-                  .filter(Boolean)
-                  .join(", ")}
+            {formatAddress(project)}
           </p>
         )}
-        {(project.client1First || project.client1Last || project.client2First || project.client2Last || project.clientNames) && (
+        {formatOwnerNames(project) && (
           <p className="mt-1 text-zinc-500 dark:text-zinc-500">
-            {project.clientNames
-              ? project.clientNames
-              : [[project.client1First, project.client1Last].filter(Boolean).join(" ").trim(), [project.client2First, project.client2Last].filter(Boolean).join(" ").trim()]
-                  .filter(Boolean)
-                  .join(" & ")}
+            {formatOwnerNames(project)}
           </p>
         )}
       </section>
@@ -202,9 +196,11 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
                       {item.label}
                     </td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                      {item.rangeLow != null || item.rangeHigh != null
-                        ? `$${item.rangeLow ?? "—"} – $${item.rangeHigh ?? "—"}`
-                        : "—"}
+                      {formatInvestmentRange(
+                        item.rangeLow,
+                        item.rangeTarget,
+                        item.rangeHigh
+                      )}
                     </td>
                     <td className="px-4 py-3 text-zinc-500 dark:text-zinc-500">
                       {item.notes ?? "—"}

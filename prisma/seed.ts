@@ -183,15 +183,9 @@ async function main() {
       },
       investmentLineItems: {
         create: [
-          { label: "Kitchen", rangeLow: 45000, rangeHigh: 65000, sortOrder: 0 },
-          { label: "Primary Bath", rangeLow: 28000, rangeHigh: 38000, sortOrder: 1 },
-          {
-            label: "Contingency & permits",
-            rangeLow: 5000,
-            rangeHigh: 8000,
-            notes: "~10%",
-            sortOrder: 2,
-          },
+          { bucket: "BASE", label: "Base", rangeLow: 0, rangeTarget: 0, rangeHigh: 0, sortOrder: 0 },
+          { bucket: "ALTERNATE", label: "Alternates", rangeLow: 0, rangeTarget: 0, rangeHigh: 0, sortOrder: 1 },
+          { bucket: "ALLOWANCE", label: "Allowances", rangeLow: 0, rangeTarget: 0, rangeHigh: 0, sortOrder: 2 },
         ],
       },
     },

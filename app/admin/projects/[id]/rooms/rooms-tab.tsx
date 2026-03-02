@@ -12,6 +12,7 @@ import {
   updateRoomScopesFromTranscriptAction,
   rewriteRoomScopeAction,
   updateRoomsRoomType,
+  updateRoomsSectionType,
 } from "./actions";
 import { updateProjectStylePresetAction } from "../overview/actions";
 import { getRoomTypes } from "@/app/admin/settings/actions";
@@ -96,16 +97,154 @@ type SectionPriceRangeResult =
   | { kind: "needDimensions"; tooltip: string }
   | null;
 
+/** SectionType shape used for pricing (id, pricingBasis, priceLow, priceTarget, priceHigh, category). */
+type SectionTypeForPricing = {
+  id: string;
+  name: string;
+  category: string;
+  pricingBasis?: string | null;
+  priceLow?: number | null;
+  priceTarget?: number | null;
+  priceHigh?: number | null;
+};
+
+const DEFAULT_LOW_PCT = -10;
+const DEFAULT_HIGH_PCT = 10;
+
+/**
+ * Get unit low/high ($ per unit) for a SectionType using overrides or global % from target.
+ * Low floors to whole dollars, high ceils to whole dollars when computed from target.
+ * Returns null if pricingBasis is NONE or there is no target and no overrides.
+ *
+ * Inline test cases (conceptual):
+ * - PER_SF: priceTarget=100, lowPct=-10, highPct=10 → unitLow=90 (floor), unitHigh=110 (ceil). priceLow override 85 → unitLow=85.
+ * - PER_JOB: priceTarget=5000, no overrides → unitLow=4500, unitHigh=5500.
+ */
+function getUnitLowHigh(
+  sectionType: SectionTypeForPricing,
+  lowPct: number,
+  highPct: number
+): { unitLow: number; unitHigh: number } | null {
+  const basis = sectionType.pricingBasis ?? "NONE";
+  if (basis === "NONE") return null;
+
+  const target = sectionType.priceTarget ?? null;
+  const overrideLow = sectionType.priceLow ?? null;
+  const overrideHigh = sectionType.priceHigh ?? null;
+
+  const unitLow: number | null =
+    overrideLow ??
+    (target != null ? Math.floor(target * (1 + lowPct / 100)) : null);
+  const unitHigh: number | null =
+    overrideHigh ??
+    (target != null ? Math.ceil(target * (1 + highPct / 100)) : null);
+
+  if (unitLow == null && unitHigh == null) return null;
+  const low = unitLow ?? unitHigh!;
+  const high = unitHigh ?? unitLow!;
+  return { unitLow: low, unitHigh: high };
+}
+
+/**
+ * Compute range totals (lowTotal, highTotal) for the blue pill from section + sectionType.
+ * Whole-dollar: lowTotal floored, highTotal ceiled.
+ * - PER_SF: lowTotal = floor(unitLow * sqFt), highTotal = ceil(unitHigh * sqFt). Requires sqFt > 0.
+ * - PER_JOB: lowTotal = floor(unitLow), highTotal = ceil(unitHigh) (no multiplying).
+ * - PER_EACH: lowTotal = floor(unitLow * qty), highTotal = ceil(unitHigh * qty); qty defaults to 1.
+ *
+ * Inline test cases (conceptual):
+ * - PER_SF: unitLow=90, unitHigh=110, sqFt=100 → lowTotal=9000, highTotal=11000.
+ * - PER_JOB: unitLow=4500, unitHigh=5500 → lowTotal=4500, highTotal=5500 (no multiplying).
+ */
+function getRangeTotal(
+  room: Room,
+  sectionType: SectionTypeForPricing,
+  unitLow: number,
+  unitHigh: number
+): { lowTotal: number; highTotal: number; tooltip: string } | null {
+  const basis = sectionType.pricingBasis ?? "NONE";
+
+  if (basis === "PER_SF") {
+    const sqFt = getSqFt(room);
+    if (sqFt == null || sqFt <= 0) return null;
+    const lowTotal = Math.floor(unitLow * sqFt);
+    const highTotal = Math.ceil(unitHigh * sqFt);
+    const tooltip = `Pricing Profile: ${sectionType.name} ($/SF) × ${sqFt.toFixed(1)} SF`;
+    return { lowTotal, highTotal, tooltip };
+  }
+
+  if (basis === "PER_JOB") {
+    const lowTotal = Math.floor(unitLow);
+    const highTotal = Math.ceil(unitHigh);
+    const tooltip = `Pricing Profile: ${sectionType.name} ($/Job)`;
+    return { lowTotal, highTotal, tooltip };
+  }
+
+  if (basis === "PER_EACH") {
+    const qty = room.quantity ?? room.unitQuantity ?? 1;
+    const lowTotal = Math.floor(unitLow * qty);
+    const highTotal = Math.ceil(unitHigh * qty);
+    const tooltip = `Pricing Profile: ${sectionType.name} ($/EA) × ${qty}`;
+    return { lowTotal, highTotal, tooltip };
+  }
+
+  return null;
+}
+
 /**
  * Compute what to show in the blue price range pill for a section card.
- * - Pricing Profile = RoomType: use profile $/SF × section sqft; if no sqft → need dimensions.
- * - Custom: use section totalLow/totalTarget/totalHigh; if only one number → target; else try sectionType × driver.
+ * Uses correct SectionType (section.sectionTypeId) when mapped; does not treat mapped sections as Custom.
+ * Pricing basis: PER_SF (unit × sqFt, whole-dollar floor/ceil), PER_JOB (unit = total), PER_EACH (unit × qty), NONE = no pill.
  */
-function getSectionPriceRangeDisplay(room: Room): SectionPriceRangeResult {
+function getSectionPriceRangeDisplay(
+  room: Room,
+  lowPct: number = DEFAULT_LOW_PCT,
+  highPct: number = DEFAULT_HIGH_PCT
+): SectionPriceRangeResult {
   const rt = room.roomType;
   const st = room.sectionType;
 
-  // Pricing Profile = RoomType ($/SF)
+  // 1) Section has a Pricing Profile (SectionType): use SectionType pricing only
+  if (room.sectionTypeId && st) {
+    const basis = st.pricingBasis ?? "NONE";
+
+    if (basis === "NONE") return null;
+    const noTargetAndNoOverrides =
+      (st.priceTarget == null && st.priceLow == null && st.priceHigh == null);
+    if (noTargetAndNoOverrides) return null;
+
+    const unitRange = getUnitLowHigh(st, lowPct, highPct);
+    if (!unitRange) return null;
+
+    const { unitLow, unitHigh } = unitRange;
+
+    if (basis === "PER_SF") {
+      const sqFt = getSqFt(room);
+      if (sqFt == null || sqFt <= 0) {
+        return {
+          kind: "needDimensions",
+          tooltip: `Pricing Profile: ${st.name} ($/SF) — set dimensions to estimate`,
+        };
+      }
+      const rangeTotal = getRangeTotal(room, st, unitLow, unitHigh);
+      if (!rangeTotal) return null;
+      const { lowTotal, highTotal, tooltip } = rangeTotal;
+      if (lowTotal === highTotal) return { kind: "target", value: lowTotal, tooltip };
+      return { kind: "range", low: lowTotal, high: highTotal, tooltip };
+    }
+
+    if (basis === "PER_JOB" || basis === "PER_EACH") {
+      const rangeTotal = getRangeTotal(room, st, unitLow, unitHigh);
+      if (!rangeTotal) return null;
+      const { lowTotal, highTotal, tooltip } = rangeTotal;
+      if (lowTotal === highTotal) return { kind: "target", value: lowTotal, tooltip };
+      return { kind: "range", low: lowTotal, high: highTotal, tooltip };
+    }
+
+    return null;
+  }
+
+  // 2) No SectionType: fall back to RoomType ($/SF) if set
   if (room.roomTypeId && rt) {
     const sqFt = getSqFt(room);
     if (sqFt == null) {
@@ -124,7 +263,7 @@ function getSectionPriceRangeDisplay(room: Room): SectionPriceRangeResult {
     return { kind: "range", low, high, tooltip };
   }
 
-  // Custom: use section's stored totals first
+  // 3) Custom: use section's stored totals (whole dollars)
   const totalLow = room.totalLow != null ? Math.round(room.totalLow) : null;
   const totalTarget = room.totalTarget != null ? Math.round(room.totalTarget) : null;
   const totalHigh = room.totalHigh != null ? Math.round(room.totalHigh) : null;
@@ -138,44 +277,6 @@ function getSectionPriceRangeDisplay(room: Room): SectionPriceRangeResult {
     }
     if (totalTarget != null) return { kind: "target", value: totalTarget, tooltip };
     return { kind: "target", value: low, tooltip };
-  }
-
-  // Custom with no totals: try SectionType profile × quantity driver
-  if (room.sectionTypeId && st && st.pricingBasis && st.pricingBasis !== "NONE") {
-    const basis = st.pricingBasis;
-    const pl = st.priceLow ?? st.priceTarget ?? st.priceHigh ?? null;
-    const ph = st.priceHigh ?? st.priceTarget ?? st.priceLow ?? null;
-    if (pl == null && ph == null) return null;
-
-    const defaultMode = (st.defaultMeasurementMode ?? null) as MeasurementMode | null;
-    let multiplier: number | null = null;
-    if (basis === "PER_SF") {
-      multiplier = getSqFt(room) ?? computeUnitQuantity(room, defaultMode);
-      if (multiplier == null) {
-        return {
-          kind: "needDimensions",
-          tooltip: `Pricing Profile: ${st.name} ($/SF) — set dimensions to estimate`,
-        };
-      }
-    } else if (basis === "PER_EACH") {
-      multiplier = room.quantity ?? room.unitQuantity ?? (computeUnitQuantity(room, defaultMode) ?? null);
-      if (multiplier == null) {
-        return {
-          kind: "needDimensions",
-          tooltip: `Pricing Profile: ${st.name} ($/EA) — set quantity to estimate`,
-        };
-      }
-    } else if (basis === "PER_JOB") {
-      multiplier = 1;
-    }
-    if (multiplier == null) return null;
-
-    const low = Math.floor((pl ?? ph!) * multiplier);
-    const high = Math.ceil((ph ?? pl!) * multiplier);
-    const unitLabel = basis === "PER_SF" ? "SF" : basis === "PER_EACH" ? "EA" : "Job";
-    const tooltip = `Pricing Profile: ${st.name} ($${unitLabel}) × ${multiplier}${basis === "PER_SF" ? " SF" : basis === "PER_EACH" ? " EA" : ""}`.trim();
-    if (low === high) return { kind: "target", value: low, tooltip };
-    return { kind: "range", low, high, tooltip };
   }
 
   return null;
@@ -255,6 +356,10 @@ type Props = {
   rooms: Room[];
   stylePresets: StylePresetOption[];
   sectionTypes: SectionTypeOption[];
+  /** Global Low % (e.g. -10). Used to compute unit low from SectionType priceTarget when override not set. */
+  roomTypeLowPct?: number;
+  /** Global High % (e.g. 10). Used to compute unit high from SectionType priceTarget when override not set. */
+  roomTypeHighPct?: number;
 };
 
 function formatScopeUpdatedAt(value: Date | string | null | undefined): string {
@@ -265,6 +370,17 @@ function formatScopeUpdatedAt(value: Date | string | null | undefined): string {
     day: "numeric",
     year: "numeric",
   }).format(d);
+}
+
+/** Format SectionType for Pricing Profile display: "Bathroom (Interior)" or "Custom" when unmapped. */
+function formatPricingProfileLabel(
+  sectionType: { name: string; category?: string } | null | undefined
+): string {
+  if (!sectionType?.name) return "Custom";
+  const categoryLabel = sectionType.category
+    ? sectionType.category.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+    : "";
+  return categoryLabel ? `${sectionType.name} (${categoryLabel})` : sectionType.name;
 }
 
 /** Sq Ft = (lengthIn/12)*(widthIn/12), 1 decimal; "—" if either missing. */
@@ -440,7 +556,7 @@ function RoomDimensionsRow({
   );
 }
 
-export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, rooms: initialRooms, stylePresets, sectionTypes }: Props) {
+export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, rooms: initialRooms, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [rooms, setRooms] = useState<Room[]>(() =>
@@ -457,6 +573,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [unmatchedRooms, setUnmatchedRooms] = useState<UnmatchedRoomItem[] | null>(null);
   const [activeRoomTypes, setActiveRoomTypes] = useState<RoomTypeOption[]>([]);
   const [updatingRoomTypeId, setUpdatingRoomTypeId] = useState<string | null>(null);
+  const [updatingSectionTypeId, setUpdatingSectionTypeId] = useState<string | null>(null);
   const [updatingProjectStylePreset, setUpdatingProjectStylePreset] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -568,6 +685,13 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
     await updateRoomsRoomType([roomId], roomTypeId);
     router.refresh();
     setUpdatingRoomTypeId(null);
+  }
+
+  async function handleSectionTypeChange(roomId: string, sectionTypeId: string | null) {
+    setUpdatingSectionTypeId(roomId);
+    await updateRoomsSectionType([roomId], sectionTypeId);
+    router.refresh();
+    setUpdatingSectionTypeId(null);
   }
 
   async function handleProjectStylePresetChange(stylePresetId: string | null) {
@@ -694,8 +818,12 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               room={room}
               activeRoomTypes={activeRoomTypes}
               sectionTypes={sectionTypes}
+              roomTypeLowPct={roomTypeLowPct}
+              roomTypeHighPct={roomTypeHighPct}
               updatingRoomTypeId={updatingRoomTypeId}
+              updatingSectionTypeId={updatingSectionTypeId}
               onRoomTypeChange={handleRoomTypeChange}
+              onSectionTypeChange={handleSectionTypeChange}
               onDimensionsSaved={() => router.refresh()}
               isEditing={editingId === room.id}
               isRewriting={rewritingRoomId === room.id}
@@ -728,8 +856,12 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   room={room}
                   activeRoomTypes={activeRoomTypes}
                   sectionTypes={sectionTypes}
+                  roomTypeLowPct={roomTypeLowPct}
+                  roomTypeHighPct={roomTypeHighPct}
                   updatingRoomTypeId={updatingRoomTypeId}
+                  updatingSectionTypeId={updatingSectionTypeId}
                   onRoomTypeChange={handleRoomTypeChange}
+                  onSectionTypeChange={handleSectionTypeChange}
                   onDimensionsSaved={() => router.refresh()}
                   isEditing={editingId === room.id}
                   isRewriting={rewritingRoomId === room.id}
@@ -756,8 +888,12 @@ function StaticRoomCard({
   room,
   activeRoomTypes,
   sectionTypes,
+  roomTypeLowPct,
+  roomTypeHighPct,
   updatingRoomTypeId,
+  updatingSectionTypeId,
   onRoomTypeChange,
+  onSectionTypeChange,
   onDimensionsSaved,
   isEditing,
   isRewriting,
@@ -771,8 +907,12 @@ function StaticRoomCard({
   room: Room;
   activeRoomTypes: RoomTypeOption[];
   sectionTypes: SectionTypeOption[];
+  roomTypeLowPct: number;
+  roomTypeHighPct: number;
   updatingRoomTypeId: string | null;
+  updatingSectionTypeId: string | null;
   onRoomTypeChange: (roomId: string, roomTypeId: string | null) => void;
+  onSectionTypeChange: (roomId: string, sectionTypeId: string | null) => void;
   onDimensionsSaved: () => void;
   isEditing: boolean;
   isRewriting: boolean;
@@ -817,22 +957,22 @@ function StaticRoomCard({
                 Pricing Profile:
               </span>
               <select
-                value={room.roomTypeId ?? ""}
+                value={room.sectionTypeId ?? ""}
                 onChange={(e) =>
-                  onRoomTypeChange(room.id, e.target.value || null)
+                  onSectionTypeChange(room.id, e.target.value || null)
                 }
-                disabled={updatingRoomTypeId === room.id}
+                disabled={updatingSectionTypeId === room.id}
                 className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
                 aria-label="Pricing Profile"
               >
                 <option value="">Custom</option>
-                {activeRoomTypes.map((rt) => (
-                  <option key={rt.id} value={rt.id}>
-                    {rt.name}
+                {sectionTypes.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {formatPricingProfileLabel(st)}
                   </option>
                 ))}
               </select>
-              <SectionPriceRangePill result={getSectionPriceRangeDisplay(room)} />
+              <SectionPriceRangePill result={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)} />
             </div>
             <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
               {room.scopeNarrative || "—"}
@@ -966,8 +1106,12 @@ function SortableRoomCard({
   room,
   activeRoomTypes,
   sectionTypes,
+  roomTypeLowPct,
+  roomTypeHighPct,
   updatingRoomTypeId,
+  updatingSectionTypeId,
   onRoomTypeChange,
+  onSectionTypeChange,
   onDimensionsSaved,
   isEditing,
   isRewriting,
@@ -981,8 +1125,12 @@ function SortableRoomCard({
   room: Room;
   activeRoomTypes: RoomTypeOption[];
   sectionTypes: SectionTypeOption[];
+  roomTypeLowPct: number;
+  roomTypeHighPct: number;
   updatingRoomTypeId: string | null;
+  updatingSectionTypeId: string | null;
   onRoomTypeChange: (roomId: string, roomTypeId: string | null) => void;
+  onSectionTypeChange: (roomId: string, sectionTypeId: string | null) => void;
   onDimensionsSaved: () => void;
   isEditing: boolean;
   isRewriting: boolean;
@@ -1066,22 +1214,22 @@ function SortableRoomCard({
                   Pricing Profile:
                 </span>
                 <select
-                  value={room.roomTypeId ?? ""}
+                  value={room.sectionTypeId ?? ""}
                   onChange={(e) =>
-                    onRoomTypeChange(room.id, e.target.value || null)
+                    onSectionTypeChange(room.id, e.target.value || null)
                   }
-                  disabled={updatingRoomTypeId === room.id}
+                  disabled={updatingSectionTypeId === room.id}
                   className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
                   aria-label="Pricing Profile"
                 >
                   <option value="">Custom</option>
-                  {activeRoomTypes.map((rt) => (
-                    <option key={rt.id} value={rt.id}>
-                      {rt.name}
+                  {sectionTypes.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {formatPricingProfileLabel(st)}
                     </option>
                   ))}
                 </select>
-                <SectionPriceRangePill result={getSectionPriceRangeDisplay(room)} />
+                <SectionPriceRangePill result={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)} />
               </div>
               <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
                 {room.scopeNarrative || "—"}

@@ -56,11 +56,11 @@ npm run dev
 2. Add **Rooms** (room type, narrative), **Media** (upload, tag, caption), **Timeline**, and **Investment** line items.
 3. Open **Preview** to see the draft.
 4. Click **Publish** → confirm. This creates a locked snapshot and sets the project slug.
-5. Share the public link: `/p/[slug]`.
+5. Share the public link: `/p/[id]` (id is the proposal’s secure cuid; the link is shown in the Publish tab).
 
 ### 6. Export PDF
 
-- Open `/p/[slug]/pdf` (or use the download button on the public page). The PDF is generated server-side from the **published** snapshot (Playwright), so it matches the shared web view.
+- Open `/p/[id]/pdf` (or use the download button on the public page). The PDF is generated server-side from the **published** snapshot (Playwright), so it matches the shared web view.
 - For PDF export, the server loads the public page at `NEXT_PUBLIC_APP_URL` (or `https://VERCEL_URL` / `http://localhost:3000`). Set `NEXT_PUBLIC_APP_URL` in production so the PDF renderer can reach your app. Install Playwright browsers once: `npx playwright install chromium`.
 
 ## Commands

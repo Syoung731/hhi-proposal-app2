@@ -47,16 +47,13 @@ const pointerSensor = {
   activationConstraint: { distance: 8 },
 };
 
-export type StylePresetOption = { id: string; name: string };
-
 export type MediaGridProps = {
   projectId: string;
   roomId?: string;
   items: MediaItem[];
   rooms: RoomItem[];
-  projectStylePresetId?: string | null;
-  roomStylePresetId?: string | null;
-  stylePresets?: StylePresetOption[];
+  /** Project-level style preset name for "Rendering: Per Scope of Work + <name>" label; null = scope only */
+  projectStylePresetName?: string | null;
   onReorderSuccess: () => void;
   onDelete: (id: string) => void;
   onRenderDone?: () => void;
@@ -67,9 +64,7 @@ function MediaGrid({
   roomId,
   items,
   rooms,
-  projectStylePresetId = null,
-  roomStylePresetId = null,
-  stylePresets = [],
+  projectStylePresetName = null,
   onReorderSuccess,
   onDelete,
   onRenderDone,
@@ -120,9 +115,7 @@ function MediaGrid({
                 projectId={projectId}
                 roomId={roomId}
                 media={m}
-                projectStylePresetId={projectStylePresetId}
-                roomStylePresetId={roomStylePresetId}
-                stylePresets={stylePresets}
+                projectStylePresetName={projectStylePresetName}
                 onDelete={onDelete}
                 onRenderDone={onRenderDone}
               />
@@ -138,18 +131,14 @@ function SortableMediaCard({
   projectId,
   roomId,
   media: m,
-  projectStylePresetId = null,
-  roomStylePresetId = null,
-  stylePresets = [],
+  projectStylePresetName = null,
   onDelete,
   onRenderDone,
 }: {
   projectId: string;
   roomId?: string;
   media: MediaItem;
-  projectStylePresetId?: string | null;
-  roomStylePresetId?: string | null;
-  stylePresets?: { id: string; name: string }[];
+  projectStylePresetName?: string | null;
   onDelete: (id: string) => void;
   onRenderDone?: () => void;
 }) {
@@ -157,7 +146,6 @@ function SortableMediaCard({
   const [rendering, setRendering] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const {
     attributes,
     listeners,
@@ -175,23 +163,13 @@ function SortableMediaCard({
 
   const showRenderButton = m.type === MediaType.EXISTING && roomId != null;
 
-  // Effective preset: dropdown selection > room override > project default > first active
-  function getEffectivePresetId(): string | null {
-    if (selectedPresetId) return selectedPresetId;
-    if (roomStylePresetId) return roomStylePresetId;
-    if (projectStylePresetId) return projectStylePresetId;
-    const first = stylePresets[0];
-    return first ? first.id : null;
-  }
-
   async function handleRenderThis() {
     if (!projectId || !roomId || !m?.id) return;
     if (rendering) return;
     setRendering(true);
     setRenderError(null);
     try {
-      const effectivePresetId = getEffectivePresetId();
-      const result = await startRoomRenderAction(projectId, roomId, [m.id], effectivePresetId ?? undefined);
+      const result = await startRoomRenderAction(projectId, roomId, m.id);
       if ("ok" in result && result.ok) {
         setShowDone(true);
         onRenderDone?.();
@@ -299,54 +277,40 @@ function SortableMediaCard({
             </button>
           </div>
           {showRenderButton && (
-            <select
-              value={selectedPresetId}
-              onChange={(e) => setSelectedPresetId(e.target.value)}
+            <button
+              type="button"
+              data-testid="render-btn"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleRenderThis();
+              }}
               disabled={rendering}
-              className="w-40 shrink-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200"
-              aria-label="Style preset for this render"
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-70 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
             >
-              <option value="">Auto</option>
-              {stylePresets.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              {rendering ? (
+                <>
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" aria-hidden />
+                  Rendering…
+                </>
+              ) : showDone ? (
+                "Done"
+              ) : (
+                "Render Photo"
+              )}
+            </button>
           )}
         </div>
         {showRenderButton && (
-          <div className="flex items-center justify-between gap-2 min-h-[28px]">
+          <div className="min-h-[20px]">
             {renderError ? (
               <span className="text-xs text-red-600 dark:text-red-400" role="alert">
                 {renderError}
               </span>
             ) : (
-              <span />
-            )}
-            {!renderError && (
-              <button
-                type="button"
-                data-testid="render-btn"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleRenderThis();
-                }}
-                disabled={rendering}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-70 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                {rendering ? (
-                  <>
-                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" aria-hidden />
-                    Rendering…
-                  </>
-                ) : showDone ? (
-                  "Done"
-                ) : (
-                  "Render Photo"
-                )}
-              </button>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Rendering: Per Scope of Work{projectStylePresetName ? ` + ${projectStylePresetName}` : ""}
+              </p>
             )}
           </div>
         )}

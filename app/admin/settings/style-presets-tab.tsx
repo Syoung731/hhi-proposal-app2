@@ -7,9 +7,10 @@ import {
   createStylePreset,
   updateStylePreset,
   deleteStylePreset,
-  reorderStylePreset,
+  reorderStylePresets,
   toggleStylePresetActive,
 } from "./actions";
+import { ReorderableList } from "@/components/ui/reorderable-list";
 import type { CreateStylePresetData } from "./actions";
 
 const inputClass =
@@ -126,7 +127,7 @@ export function StylePresetsTab({ stylePresets: initialPresets }: Props) {
   async function handleDelete(id: string) {
     const preset = presets.find((p) => p.id === id);
     const msg = preset
-      ? `Remove style preset "${preset.name}"? Projects, rooms, and renderings using it will have their preset cleared.`
+      ? `Remove style preset "${preset.name}"? Projects, sections, and renderings using it will have their preset cleared.`
       : "Remove this style preset?";
     if (!confirm(msg)) return;
     const result = await deleteStylePreset(id);
@@ -139,9 +140,16 @@ export function StylePresetsTab({ stylePresets: initialPresets }: Props) {
     router.refresh();
   }
 
-  async function handleReorder(id: string, direction: "up" | "down") {
-    await reorderStylePreset(id, direction);
-    router.refresh();
+  async function handleReorderPresets(newPresets: StylePresetForUI[]) {
+    setPresets(newPresets);
+    const result = await reorderStylePresets(newPresets.map((p) => p.id));
+    if (result.error) {
+      setErrorMessage(result.error);
+      setStatus("error");
+      router.refresh();
+    } else {
+      router.refresh();
+    }
   }
 
   return (
@@ -260,145 +268,113 @@ export function StylePresetsTab({ stylePresets: initialPresets }: Props) {
       )}
 
       <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-50 dark:bg-zinc-800/50">
-            <tr>
-              <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                Order
-              </th>
-              <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                Name
-              </th>
-              <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                Active
-              </th>
-              <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {presets.map((preset, index) => (
-              <tr
-                key={preset.id}
-                className="border-t border-zinc-200 dark:border-zinc-700"
-              >
-                <td className="px-4 py-2">
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleReorder(preset.id, "up")}
-                      disabled={index === 0}
-                      className="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 disabled:opacity-30 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                      aria-label="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReorder(preset.id, "down")}
-                      disabled={index === presets.length - 1}
-                      className="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 disabled:opacity-30 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                      aria-label="Move down"
-                    >
-                      ↓
-                    </button>
-                  </div>
-                </td>
-                <td className="px-4 py-2">
-                  {editingId === preset.id ? (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="max-w-[200px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                        placeholder="Name"
-                      />
-                      <textarea
-                        value={editPrompt}
-                        onChange={(e) => setEditPrompt(e.target.value)}
-                        className="max-w-full rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                        rows={3}
-                        placeholder="Prompt"
-                      />
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-1">
-                          <input
-                            type="checkbox"
-                            checked={editActive}
-                            onChange={(e) => setEditActive(e.target.checked)}
-                            className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
-                          />
-                          <span className="text-xs">Active</span>
-                        </label>
+        <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 bg-zinc-50 px-4 py-2 text-sm font-medium text-zinc-900 dark:bg-zinc-800/50 dark:text-zinc-100">
+          <span>Order</span>
+          <span>Name</span>
+          <span>Active</span>
+          <span>Actions</span>
+        </div>
+        <ReorderableList
+          items={presets}
+          onReorder={handleReorderPresets}
+          renderItem={(preset) => (
+            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 gap-y-2 text-sm md:grid-cols-[1fr_auto_auto]">
+              <div className="min-w-0">
+                {editingId === preset.id ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="max-w-[200px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      placeholder="Name"
+                    />
+                    <textarea
+                      value={editPrompt}
+                      onChange={(e) => setEditPrompt(e.target.value)}
+                      className="max-w-full rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      rows={3}
+                      placeholder="Prompt"
+                    />
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1">
                         <input
-                          type="number"
-                          value={editSortOrder}
-                          onChange={(e) =>
-                            setEditSortOrder(Number(e.target.value) || 0)
-                          }
-                          className="w-16 rounded border border-zinc-300 px-1 py-0.5 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                          type="checkbox"
+                          checked={editActive}
+                          onChange={(e) => setEditActive(e.target.checked)}
+                          className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
                         />
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleSaveEdit(preset.id)}
-                          className="text-sm text-zinc-600 hover:underline dark:text-zinc-400"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="text-sm text-zinc-500 hover:underline"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                        <span className="text-xs">Active</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={editSortOrder}
+                        onChange={(e) =>
+                          setEditSortOrder(Number(e.target.value) || 0)
+                        }
+                        className="w-16 rounded border border-zinc-300 px-1 py-0.5 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      />
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => startEdit(preset)}
-                      className="text-left font-medium text-zinc-900 hover:underline dark:text-zinc-100"
-                    >
-                      {preset.name}
-                    </button>
-                  )}
-                </td>
-                <td className="px-4 py-2">
-                  {editingId !== preset.id && (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleActive(preset.id, preset.isActive)}
-                      className={
-                        "rounded-full px-2 py-0.5 text-xs font-medium " +
-                        (preset.isActive
-                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-                          : "bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400")
-                      }
-                    >
-                      {preset.isActive ? "Yes" : "No"}
-                    </button>
-                  )}
-                </td>
-                <td className="px-4 py-2">
-                  {editingId !== preset.id && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(preset.id)}
-                      className="text-sm text-red-600 hover:underline dark:text-red-400"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEdit(preset.id)}
+                        className="text-sm text-zinc-600 hover:underline dark:text-zinc-400"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="text-sm text-zinc-500 hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => startEdit(preset)}
+                    className="text-left font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+                  >
+                    {preset.name}
+                  </button>
+                )}
+              </div>
+              <div className="shrink-0">
+                {editingId !== preset.id && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleToggleActive(preset.id, preset.isActive)
+                    }
+                    className={
+                      "rounded-full px-2 py-0.5 text-xs font-medium " +
+                      (preset.isActive
+                        ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                        : "bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400")
+                    }
+                  >
+                    {preset.isActive ? "Yes" : "No"}
+                  </button>
+                )}
+              </div>
+              <div className="shrink-0">
+                {editingId !== preset.id && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(preset.id)}
+                    className="text-sm text-red-600 hover:underline dark:text-red-400"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          className="rounded-none border-t-0"
+        />
       </div>
     </div>
   );

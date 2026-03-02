@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import type { Prisma } from "@/app/generated/prisma";
+import type { SectionCategory, MeasurementMode, EstimateUnit, PricingBasis } from "@/app/generated/prisma";
 import { SUPER_ADMIN_EMAIL } from "@/app/lib/constants";
 
 /** Get or create the singleton CompanySettings. Auto-create on first visit with defaults. */
@@ -128,6 +129,115 @@ export async function saveProposalDefaultsAction(
   return {};
 }
 
+// Room type global percentage offsets: low = target * (1 + lowPct/100), high = target * (1 + highPct/100)
+const ROOM_TYPE_LOW_PCT_MIN = -80;
+const ROOM_TYPE_LOW_PCT_MAX = 0;
+const ROOM_TYPE_HIGH_PCT_MIN = 0;
+const ROOM_TYPE_HIGH_PCT_MAX = 200;
+
+function validateRoomTypePct(
+  lowPct: number | null | undefined,
+  highPct: number | null | undefined
+): { error?: string } {
+  if (lowPct !== null && lowPct !== undefined) {
+    if (typeof lowPct !== "number" || Number.isNaN(lowPct))
+      return { error: "Low % must be a number" };
+    if (lowPct < ROOM_TYPE_LOW_PCT_MIN || lowPct > ROOM_TYPE_LOW_PCT_MAX)
+      return { error: `Low % must be between ${ROOM_TYPE_LOW_PCT_MIN} and ${ROOM_TYPE_LOW_PCT_MAX}` };
+    if (lowPct >= 0) return { error: "Low % should be below target (negative)" };
+  }
+  if (highPct !== null && highPct !== undefined) {
+    if (typeof highPct !== "number" || Number.isNaN(highPct))
+      return { error: "High % must be a number" };
+    if (highPct < ROOM_TYPE_HIGH_PCT_MIN || highPct > ROOM_TYPE_HIGH_PCT_MAX)
+      return { error: `High % must be between ${ROOM_TYPE_HIGH_PCT_MIN} and ${ROOM_TYPE_HIGH_PCT_MAX}` };
+    if (highPct <= 0) return { error: "High % should be above target (positive)" };
+  }
+  if (
+    lowPct != null && highPct != null &&
+    typeof lowPct === "number" && !Number.isNaN(lowPct) &&
+    typeof highPct === "number" && !Number.isNaN(highPct) &&
+    lowPct >= highPct
+  ) {
+    return { error: "Low % must be less than High %" };
+  }
+  return {};
+}
+
+export async function saveRoomTypePctAction(
+  lowPct: number | null,
+  highPct: number | null
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const err = validateRoomTypePct(lowPct, highPct);
+  if (err.error) return err;
+  const settings = await prisma.companySettings.findFirst();
+  if (!settings) return { error: "Settings not found" };
+  await prisma.companySettings.update({
+    where: { id: settings.id },
+    data: {
+      roomTypeLowPct: lowPct ?? undefined,
+      roomTypeHighPct: highPct ?? undefined,
+    },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+const DEFAULT_ROOM_TYPE_LOW_PCT = -10;
+const DEFAULT_ROOM_TYPE_HIGH_PCT = 10;
+
+/** Recompute and persist Low/High for all RoomTypes that have a Target, using global % from CompanySettings. Does not overwrite manual overrides (non-null Low/High). */
+export async function recomputeRoomTypeLowHighAction(): Promise<{ error?: string }> {
+  await requireAdmin();
+  const settings = await prisma.companySettings.findFirst();
+  if (!settings) return { error: "Settings not found" };
+  const lowPct = settings.roomTypeLowPct ?? DEFAULT_ROOM_TYPE_LOW_PCT;
+  const highPct = settings.roomTypeHighPct ?? DEFAULT_ROOM_TYPE_HIGH_PCT;
+
+  const roomTypes = await prisma.roomType.findMany({
+    where: { pricePerSqFtTarget: { not: null } },
+    select: {
+      id: true,
+      pricePerSqFtTarget: true,
+      pricePerSqFtLow: true,
+      pricePerSqFtHigh: true,
+    },
+  });
+
+  const updates: Array<{ id: string; pricePerSqFtLow?: number; pricePerSqFtHigh?: number }> = [];
+  for (const rt of roomTypes) {
+    const target = rt.pricePerSqFtTarget!;
+    const computedLow = Math.floor(target * (1 + lowPct / 100));
+    const computedHigh = Math.ceil(target * (1 + highPct / 100));
+    const newLow = rt.pricePerSqFtLow == null ? computedLow : undefined;
+    const newHigh = rt.pricePerSqFtHigh == null ? computedHigh : undefined;
+    if (newLow !== undefined || newHigh !== undefined) {
+      updates.push({
+        id: rt.id,
+        ...(newLow !== undefined && { pricePerSqFtLow: newLow }),
+        ...(newHigh !== undefined && { pricePerSqFtHigh: newHigh }),
+      });
+    }
+  }
+
+  if (updates.length > 0) {
+    await prisma.$transaction(
+      updates.map((u) =>
+        prisma.roomType.update({
+          where: { id: u.id },
+          data: {
+            ...(u.pricePerSqFtLow !== undefined && { pricePerSqFtLow: u.pricePerSqFtLow }),
+            ...(u.pricePerSqFtHigh !== undefined && { pricePerSqFtHigh: u.pricePerSqFtHigh }),
+          },
+        })
+      )
+    );
+  }
+  revalidatePath("/admin/settings");
+  return {};
+}
+
 export async function saveIntegrationsAction(
   formData: FormData
 ): Promise<{ error?: string }> {
@@ -151,6 +261,33 @@ export async function saveIntegrationsAction(
   return {};
 }
 
+const PRICE_PER_SQ_FT_MAX = 5000;
+const SECTION_TYPE_PRICE_MAX = 10_000_000;
+
+function validatePricePerSqFt(value: number | null | undefined): { error?: string } {
+  if (value === null || value === undefined) return {};
+  if (typeof value !== "number" || Number.isNaN(value)) return { error: "Price must be a number" };
+  if (value <= 0) return { error: "Price per sq ft must be greater than 0" };
+  if (value >= PRICE_PER_SQ_FT_MAX) return { error: `Price per sq ft must be less than ${PRICE_PER_SQ_FT_MAX}` };
+  return {};
+}
+
+/** Validate generic section type price (any basis). Do not treat blank as 0. */
+function validateSectionTypePrice(value: number | null | undefined): { error?: string } {
+  if (value === null || value === undefined) return {};
+  if (typeof value !== "number" || Number.isNaN(value)) return { error: "Price must be a number" };
+  if (value <= 0) return { error: "Price must be greater than 0" };
+  if (value >= SECTION_TYPE_PRICE_MAX) return { error: `Price must be less than ${SECTION_TYPE_PRICE_MAX}` };
+  return {};
+}
+
+function parseOptionalFloat(formData: FormData, key: string): number | null {
+  const raw = formData.get(key);
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(String(raw).trim());
+  return Number.isNaN(n) ? null : n;
+}
+
 export async function getRoomTypes() {
   await requireAdmin();
   return prisma.roomType.findMany({ orderBy: { sortOrder: "asc" } });
@@ -163,6 +300,9 @@ export async function addRoomTypeAction(
   const name = (formData.get("name") as string)?.trim() ?? "";
   if (!name) return { error: "Name is required" };
   const exterior = formData.get("exterior") === "on" || formData.get("exterior") === "true";
+  const pricePerSqFtTarget = parseOptionalFloat(formData, "pricePerSqFtTarget");
+  const vTarget = validatePricePerSqFt(pricePerSqFtTarget);
+  if (vTarget.error) return vTarget;
   const maxOrder = await prisma.roomType
     .aggregate({ _max: { sortOrder: true } })
     .then((r) => r._max.sortOrder ?? -1);
@@ -172,6 +312,7 @@ export async function addRoomTypeAction(
       sortOrder: maxOrder + 1,
       active: true,
       exterior,
+      pricePerSqFtTarget: pricePerSqFtTarget ?? undefined,
     },
   });
   revalidatePath("/admin/settings");
@@ -188,6 +329,101 @@ export async function updateRoomTypeNameAction(
   await prisma.roomType.update({
     where: { id: roomTypeId },
     data: { name: trimmed },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+export type UpdateRoomTypePricingData = {
+  pricePerSqFtLow?: number | null;
+  pricePerSqFtTarget?: number | null;
+  pricePerSqFtHigh?: number | null;
+};
+
+/** Round low/high to whole dollars for storage. Low: floor, High: ceil. */
+function roundLowForStorage(value: number): number {
+  return Math.floor(value);
+}
+function roundHighForStorage(value: number): number {
+  return Math.ceil(value);
+}
+
+/** Section type generic pricing: low round DOWN to 2 decimals, target round to 2, high round UP to 2. */
+function roundSectionTypeLow(value: number): number {
+  return Math.floor(value * 100) / 100;
+}
+function roundSectionTypeTarget(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+function roundSectionTypeHigh(value: number): number {
+  return Math.ceil(value * 100) / 100;
+}
+
+const PRICING_BASIS_VALUES: PricingBasis[] = ["NONE", "PER_SF", "PER_EACH", "PER_JOB"];
+
+export async function updateSectionTypePricingBasisAction(
+  sectionTypeId: string,
+  pricingBasis: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!PRICING_BASIS_VALUES.includes(pricingBasis as PricingBasis)) {
+    return { error: "Invalid pricing basis" };
+  }
+  const existing = await prisma.sectionType.findUnique({
+    where: { id: sectionTypeId },
+    select: { id: true },
+  });
+  if (!existing) return { error: "Section type not found" };
+  await prisma.sectionType.update({
+    where: { id: sectionTypeId },
+    data: { pricingBasis: pricingBasis as PricingBasis },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+export async function updateRoomTypePricingAction(
+  roomTypeId: string,
+  data: UpdateRoomTypePricingData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  let target: number | null | undefined = data.pricePerSqFtTarget;
+  let low: number | null | undefined = data.pricePerSqFtLow;
+  let high: number | null | undefined = data.pricePerSqFtHigh;
+
+  if (target !== undefined && target !== null) {
+    const vTarget = validatePricePerSqFt(target);
+    if (vTarget.error) return vTarget;
+    target = Math.round(target * 100) / 100;
+  }
+  if (low !== undefined && low !== null) {
+    const vLow = validatePricePerSqFt(low);
+    if (vLow.error) return vLow;
+    low = roundLowForStorage(low);
+  }
+  if (high !== undefined && high !== null) {
+    const vHigh = validatePricePerSqFt(high);
+    if (vHigh.error) return vHigh;
+    high = roundHighForStorage(high);
+  }
+
+  const existing = await prisma.roomType.findUnique({
+    where: { id: roomTypeId },
+    select: { pricePerSqFtLow: true, pricePerSqFtHigh: true },
+  });
+  const lowVal = low !== undefined ? low : (existing?.pricePerSqFtLow ?? undefined);
+  const highVal = high !== undefined ? high : (existing?.pricePerSqFtHigh ?? undefined);
+  if (lowVal != null && highVal != null && lowVal > highVal) {
+    return { error: "Low must be less than or equal to High" };
+  }
+
+  await prisma.roomType.update({
+    where: { id: roomTypeId },
+    data: {
+      ...(target !== undefined && { pricePerSqFtTarget: target ?? null }),
+      ...(low !== undefined && { pricePerSqFtLow: low ?? null }),
+      ...(high !== undefined && { pricePerSqFtHigh: high ?? null }),
+    },
   });
   revalidatePath("/admin/settings");
   return {};
@@ -560,6 +796,23 @@ export async function reorderStylePreset(
   return {};
 }
 
+/** Set order of style presets by passing ids in desired order. sortOrder = 1-based index. */
+export async function reorderStylePresets(
+  orderedIds: string[]
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  await prisma.$transaction(
+    orderedIds.map((id, index) =>
+      prisma.stylePreset.update({
+        where: { id },
+        data: { sortOrder: index + 1 },
+      })
+    )
+  );
+  revalidatePath("/admin/settings");
+  return {};
+}
+
 /** Prevent deactivating the last active preset. */
 export async function toggleStylePresetActive(
   id: string,
@@ -580,4 +833,299 @@ export async function toggleStylePresetActive(
   await prisma.stylePreset.update({ where: { id }, data: { isActive: false } });
   revalidatePath("/admin/settings");
   return {};
+}
+
+// ——— Section Types ———
+
+export async function listSectionTypes() {
+  await requireAdmin();
+  return prisma.sectionType.findMany({
+    orderBy: [{ category: "asc" }, { name: "asc" }],
+  });
+}
+
+export type CreateSectionTypeData = {
+  name: string;
+  category: SectionCategory;
+  defaultMeasurementMode: MeasurementMode;
+  defaultEstimateUnit: EstimateUnit;
+  customUnitLabel?: string | null;
+};
+
+export async function createSectionType(
+  data: CreateSectionTypeData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const name = (data.name ?? "").trim();
+  if (!name) return { error: "Name is required" };
+  if (data.defaultEstimateUnit === "CUSTOM") {
+    const label = (data.customUnitLabel ?? "").trim();
+    if (!label) return { error: "Custom unit label is required when estimate unit is CUSTOM" };
+  }
+  const existing = await prisma.sectionType.findUnique({ where: { name } });
+  if (existing) return { error: "A section type with this name already exists" };
+  await prisma.sectionType.create({
+    data: {
+      name,
+      category: data.category,
+      defaultMeasurementMode: data.defaultMeasurementMode,
+      defaultEstimateUnit: data.defaultEstimateUnit,
+      customUnitLabel: data.defaultEstimateUnit === "CUSTOM" ? (data.customUnitLabel ?? "").trim() || null : null,
+    },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+export type UpdateSectionTypeData = {
+  name?: string;
+  category?: SectionCategory;
+  defaultMeasurementMode?: MeasurementMode;
+  defaultEstimateUnit?: EstimateUnit;
+  customUnitLabel?: string | null;
+};
+
+export async function updateSectionType(
+  id: string,
+  data: UpdateSectionTypeData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const existing = await prisma.sectionType.findUnique({ where: { id } });
+  if (!existing) return { error: "Section type not found" };
+  const name = data.name !== undefined ? (data.name ?? "").trim() : undefined;
+  if (name !== undefined && !name) return { error: "Name is required" };
+  const unit = data.defaultEstimateUnit !== undefined ? data.defaultEstimateUnit : existing.defaultEstimateUnit;
+  const labelRaw = data.customUnitLabel !== undefined ? data.customUnitLabel : existing.customUnitLabel;
+  const label = (labelRaw ?? "").trim() || null;
+  if (unit === "CUSTOM" && !label) {
+    return { error: "Custom unit label is required when estimate unit is CUSTOM" };
+  }
+  if (name !== undefined && name !== existing.name) {
+    const duplicate = await prisma.sectionType.findUnique({ where: { name } });
+    if (duplicate) return { error: "A section type with this name already exists" };
+  }
+  await prisma.sectionType.update({
+    where: { id },
+    data: {
+      ...(name !== undefined && { name }),
+      ...(data.category !== undefined && { category: data.category }),
+      ...(data.defaultMeasurementMode !== undefined && { defaultMeasurementMode: data.defaultMeasurementMode }),
+      ...(data.defaultEstimateUnit !== undefined && { defaultEstimateUnit: data.defaultEstimateUnit }),
+      customUnitLabel: unit === "CUSTOM" ? label : null,
+    },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+export async function deleteSectionType(id: string): Promise<{ error?: string }> {
+  await requireAdmin();
+  const st = await prisma.sectionType.findUnique({ where: { id } });
+  if (!st) return { error: "Section type not found" };
+  await prisma.$transaction([
+    prisma.room.updateMany({ where: { sectionTypeId: id }, data: { sectionTypeId: null } }),
+    prisma.sectionType.delete({ where: { id } }),
+  ]);
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+export type UpdateSectionTypePricingData = {
+  priceLow?: number | null;
+  priceTarget?: number | null;
+  priceHigh?: number | null;
+};
+
+/** Update generic pricing for a SectionType. Accepts number > 0, null (clear), or undefined (don't touch).
+ * Rounding: low down to 2 decimals, target to 2, high up to 2. Never coerce blank to 0. */
+export async function updateSectionTypePricingAction(
+  sectionTypeId: string,
+  data: UpdateSectionTypePricingData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const existing = await prisma.sectionType.findUnique({
+    where: { id: sectionTypeId },
+    select: { priceLow: true, priceTarget: true, priceHigh: true },
+  });
+  if (!existing) return { error: "Section type not found" };
+
+  let target: number | null | undefined = data.priceTarget;
+  let low: number | null | undefined = data.priceLow;
+  let high: number | null | undefined = data.priceHigh;
+
+  if (target !== undefined && target !== null) {
+    const vTarget = validateSectionTypePrice(target);
+    if (vTarget.error) return vTarget;
+    target = roundSectionTypeTarget(target);
+  }
+  if (low !== undefined && low !== null) {
+    const vLow = validateSectionTypePrice(low);
+    if (vLow.error) return vLow;
+    low = roundSectionTypeLow(low);
+  }
+  if (high !== undefined && high !== null) {
+    const vHigh = validateSectionTypePrice(high);
+    if (vHigh.error) return vHigh;
+    high = roundSectionTypeHigh(high);
+  }
+
+  const lowVal = low !== undefined ? low : (existing.priceLow ?? undefined);
+  const highVal = high !== undefined ? high : (existing.priceHigh ?? undefined);
+  if (lowVal != null && highVal != null && lowVal > highVal) {
+    return { error: "Low must be less than or equal to High" };
+  }
+
+  await prisma.sectionType.update({
+    where: { id: sectionTypeId },
+    data: {
+      ...(target !== undefined && { priceTarget: target }),
+      ...(low !== undefined && { priceLow: low }),
+      ...(high !== undefined && { priceHigh: high }),
+    },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Recompute display only: does NOT write priceLow/priceHigh to DB. PER_SF Low/High are computed from Target + % in UI; overrides are explicit only. */
+export async function recomputeSectionTypeLowHighForOneAction(
+  sectionTypeId: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  // No DB writes: computed values must not be materialized. Display is computed client-side when priceLow/priceHigh are null.
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Recompute display only: does NOT write priceLow/priceHigh to DB. PER_SF Low/High are computed from Target + % in UI; overrides are explicit only. */
+export async function recomputeSectionTypeLowHighAction(): Promise<{ error?: string }> {
+  await requireAdmin();
+  // No DB writes: computed values must not be materialized. Display is computed client-side when priceLow/priceHigh are null.
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+const CLEANUP_OVERRIDE_TOLERANCE = 0.01;
+
+/** One-time cleanup: for PER_SF section types, set priceLow/priceHigh to null when they match computed values (within tolerance). Returns number of rows updated. */
+export async function cleanupSectionTypeComputedOverridesAction(): Promise<
+  { error?: string; cleaned?: number }
+> {
+  await requireAdmin();
+  const settings = await prisma.companySettings.findFirst();
+  const lowPct = settings?.roomTypeLowPct ?? DEFAULT_ROOM_TYPE_LOW_PCT;
+  const highPct = settings?.roomTypeHighPct ?? DEFAULT_ROOM_TYPE_HIGH_PCT;
+
+  const sectionTypes = await prisma.sectionType.findMany({
+    where: { pricingBasis: "PER_SF", priceTarget: { not: null } },
+    select: {
+      id: true,
+      priceTarget: true,
+      priceLow: true,
+      priceHigh: true,
+    },
+  });
+
+  let cleaned = 0;
+  const updates: Array<{ id: string; priceLow?: number | null; priceHigh?: number | null }> = [];
+
+  for (const st of sectionTypes) {
+    const target = st.priceTarget!;
+    const expectedLow = roundSectionTypeLow(target * (1 + lowPct / 100));
+    const expectedHigh = roundSectionTypeHigh(target * (1 + highPct / 100));
+    const clearLow =
+      st.priceLow != null &&
+      Math.abs(st.priceLow - expectedLow) <= CLEANUP_OVERRIDE_TOLERANCE;
+    const clearHigh =
+      st.priceHigh != null &&
+      Math.abs(st.priceHigh - expectedHigh) <= CLEANUP_OVERRIDE_TOLERANCE;
+    if (clearLow || clearHigh) {
+      updates.push({
+        id: st.id,
+        ...(clearLow && { priceLow: null }),
+        ...(clearHigh && { priceHigh: null }),
+      });
+      cleaned += 1;
+    }
+  }
+
+  if (updates.length > 0) {
+    await prisma.$transaction(
+      updates.map((u) =>
+        prisma.sectionType.update({
+          where: { id: u.id },
+          data: {
+            ...(u.priceLow !== undefined && { priceLow: u.priceLow }),
+            ...(u.priceHigh !== undefined && { priceHigh: u.priceHigh }),
+          },
+        })
+      )
+    );
+  }
+  revalidatePath("/admin/settings");
+  return { cleaned };
+}
+
+/** One-time seed of HHI default section types. Only Super Admin can run. Does not duplicate existing names. */
+export async function seedSectionTypesAction(): Promise<{ error?: string; inserted?: number }> {
+  const { email } = await requireAdmin();
+  if (email?.toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase()) {
+    return { error: "Only the Super Admin can run the section types seed." };
+  }
+
+  type SeedRow = {
+    name: string;
+    category: SectionCategory;
+    defaultMeasurementMode: MeasurementMode;
+    defaultEstimateUnit: EstimateUnit;
+    customUnitLabel: string | null;
+  };
+
+  const defaults: SeedRow[] = [
+    { name: "Kitchen", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Bathroom", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Bedroom", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Living Room", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Dining", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Hallway", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Laundry", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Pantry", category: "INTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Deck", category: "EXTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Screened Porch", category: "EXTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Exterior Paint", category: "EXTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Roof", category: "EXTERIOR", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SQ", customUnitLabel: null },
+    { name: "Landscaping", category: "EXTERIOR", defaultMeasurementMode: "NONE", defaultEstimateUnit: "CUSTOM", customUnitLabel: "Job" },
+    { name: "Water Heater", category: "SYSTEMS", defaultMeasurementMode: "COUNT", defaultEstimateUnit: "EA", customUnitLabel: null },
+    { name: "HVAC", category: "SYSTEMS", defaultMeasurementMode: "COUNT", defaultEstimateUnit: "EA", customUnitLabel: null },
+    { name: "Electrical", category: "SYSTEMS", defaultMeasurementMode: "NONE", defaultEstimateUnit: "CUSTOM", customUnitLabel: "Job" },
+    { name: "Plumbing", category: "SYSTEMS", defaultMeasurementMode: "NONE", defaultEstimateUnit: "CUSTOM", customUnitLabel: "Job" },
+    { name: "Whole-Home Interior", category: "WHOLE_HOME", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Whole-Home Remodel", category: "WHOLE_HOME", defaultMeasurementMode: "NONE", defaultEstimateUnit: "CUSTOM", customUnitLabel: "Job" },
+    { name: "Addition", category: "ADDITION", defaultMeasurementMode: "AREA", defaultEstimateUnit: "SF", customUnitLabel: null },
+    { name: "Replace Faucet", category: "FAST", defaultMeasurementMode: "COUNT", defaultEstimateUnit: "EA", customUnitLabel: null },
+    { name: "Replace Toilet", category: "FAST", defaultMeasurementMode: "COUNT", defaultEstimateUnit: "EA", customUnitLabel: null },
+    { name: "Replace Water Heater", category: "FAST", defaultMeasurementMode: "COUNT", defaultEstimateUnit: "EA", customUnitLabel: null },
+    { name: "Patch Drywall", category: "FAST", defaultMeasurementMode: "NONE", defaultEstimateUnit: "CUSTOM", customUnitLabel: "Job" },
+  ];
+
+  const existingNames = new Set(
+    (await prisma.sectionType.findMany({ select: { name: true } })).map((r) => r.name)
+  );
+  let inserted = 0;
+  for (const row of defaults) {
+    if (existingNames.has(row.name)) continue;
+    await prisma.sectionType.create({
+      data: {
+        name: row.name,
+        category: row.category,
+        defaultMeasurementMode: row.defaultMeasurementMode,
+        defaultEstimateUnit: row.defaultEstimateUnit,
+        customUnitLabel: row.customUnitLabel,
+      },
+    });
+    existingNames.add(row.name);
+    inserted++;
+  }
+  revalidatePath("/admin/settings");
+  return { inserted };
 }

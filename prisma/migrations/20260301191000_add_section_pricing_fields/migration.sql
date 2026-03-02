@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "Room" ADD COLUMN     "unitRateLow" DOUBLE PRECISION,
+ADD COLUMN     "unitRateTarget" DOUBLE PRECISION,
+ADD COLUMN     "unitRateHigh" DOUBLE PRECISION,
+ADD COLUMN     "totalLow" DOUBLE PRECISION,
+ADD COLUMN     "totalTarget" DOUBLE PRECISION,
+ADD COLUMN     "totalHigh" DOUBLE PRECISION,
+ADD COLUMN     "pricingNotes" TEXT;

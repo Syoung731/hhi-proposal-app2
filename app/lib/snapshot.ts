@@ -49,8 +49,10 @@ export type SnapshotData = {
     id: string;
     label: string;
     rangeLow: number | null;
+    rangeTarget?: number | null;
     rangeHigh: number | null;
     notes: string | null;
     sortOrder: number;
+    includeInTotals?: boolean;
   }>;
 };

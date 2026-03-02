@@ -3,13 +3,15 @@
 import dotenv from "dotenv";
 import { defineConfig } from "prisma/config";
 
-// Explicitly load .env first
+// Load .env from project root
 dotenv.config({ path: ".env" });
 
-// Fail fast if DATABASE_URL is missing
-if (!process.env.DATABASE_URL) {
+// We use:
+// - DIRECT_URL (non-pooler) for Prisma Migrate / schema operations
+// - DATABASE_URL (pooler) for app runtime (PrismaClient) if you want pooling
+if (!process.env.DIRECT_URL) {
   throw new Error(
-    "DATABASE_URL is missing. Ensure you have a .env file in the project root with DATABASE_URL defined."
+    "DIRECT_URL is missing. In Neon, turn OFF Connection pooling and copy the non-pooler connection string into .env as DIRECT_URL."
   );
 }
 
@@ -20,6 +22,7 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env.DATABASE_URL,
+    // IMPORTANT: Use the DIRECT (non-pooler) Neon URL here to avoid advisory-lock timeouts
+    url: process.env.DIRECT_URL,
   },
 });

@@ -3,35 +3,83 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 
-export async function createInvestmentLineItemAction(
-  projectId: string,
-  formData: FormData
+/** Ensure exactly one InvestmentLineItem per bucket (Base, Alternates, Allowances); recompute rollups from sections. */
+export async function ensureInvestmentLineItemsForBuckets(
+  projectId: string
 ): Promise<{ error?: string }> {
   await requireAdmin();
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (!project) return { error: "Project not found" };
-  const label = (formData.get("label") as string)?.trim() ?? "";
-  if (!label) return { error: "Label is required" };
-  const rangeLow = formData.get("rangeLow");
-  const rangeHigh = formData.get("rangeHigh");
-  const notes = (formData.get("notes") as string)?.trim() || null;
-  const maxOrder = await prisma.investmentLineItem
-    .aggregate({ where: { projectId }, _max: { sortOrder: true } })
-    .then((r) => r._max.sortOrder ?? -1);
-  await prisma.investmentLineItem.create({
-    data: {
-      projectId,
-      label,
-      rangeLow: rangeLow !== null && rangeLow !== "" ? parseInt(String(rangeLow), 10) : undefined,
-      rangeHigh: rangeHigh !== null && rangeHigh !== "" ? parseInt(String(rangeHigh), 10) : undefined,
-      notes,
-      sortOrder: maxOrder + 1,
-    },
+  await recomputeInvestmentRollups(projectId);
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+export type UpdateInvestmentLineItemPatch = {
+  label?: string;
+  rangeLow?: number | null;
+  rangeTarget?: number | null;
+  rangeHigh?: number | null;
+  notes?: string | null;
+  isOverride?: boolean;
+  overrideLow?: number | null;
+  overrideTarget?: number | null;
+  overrideHigh?: number | null;
+  overrideNotes?: string | null;
+  includeInTotals?: boolean;
+};
+
+export async function updateInvestmentLineItem(
+  projectId: string,
+  itemId: string,
+  patch: UpdateInvestmentLineItemPatch
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const item = await prisma.investmentLineItem.findFirst({
+    where: { id: itemId, projectId },
+  });
+  if (!item) return { error: "Item not found" };
+  const data: Parameters<typeof prisma.investmentLineItem.update>[0]["data"] = {};
+  if (patch.label !== undefined) data.label = patch.label;
+  if (patch.rangeLow !== undefined) data.rangeLow = patch.rangeLow;
+  if (patch.rangeTarget !== undefined) data.rangeTarget = patch.rangeTarget;
+  if (patch.rangeHigh !== undefined) data.rangeHigh = patch.rangeHigh;
+  if (patch.notes !== undefined) data.notes = patch.notes;
+  if (patch.includeInTotals !== undefined) data.includeInTotals = patch.includeInTotals;
+  if (patch.isOverride !== undefined) {
+    data.isOverride = patch.isOverride;
+    if (!patch.isOverride) {
+      data.overrideLow = null;
+      data.overrideTarget = null;
+      data.overrideHigh = null;
+      data.overrideNotes = null;
+    }
+  }
+  if (patch.isOverride !== false) {
+    if (patch.overrideLow !== undefined) data.overrideLow = patch.overrideLow;
+    if (patch.overrideTarget !== undefined) data.overrideTarget = patch.overrideTarget;
+    if (patch.overrideHigh !== undefined) data.overrideHigh = patch.overrideHigh;
+    if (patch.overrideNotes !== undefined) data.overrideNotes = patch.overrideNotes;
+  }
+  await prisma.investmentLineItem.update({
+    where: { id: itemId },
+    data,
   });
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
+}
+
+/** No longer used: investment items are exactly 3 per project (one per bucket). Use ensureInvestmentLineItemsForBuckets. */
+export async function createInvestmentLineItemAction(
+  _projectId: string,
+  _formData: FormData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  return { error: "Investment line items are managed per bucket (Base, Alternates, Allowances)." };
 }
 
 export async function updateInvestmentLineItemAction(
@@ -46,14 +94,21 @@ export async function updateInvestmentLineItemAction(
   if (!item) return { error: "Item not found" };
   const label = (formData.get("label") as string)?.trim();
   const rangeLow = formData.get("rangeLow");
+  const rangeTarget = formData.get("rangeTarget");
   const rangeHigh = formData.get("rangeHigh");
   const notes = (formData.get("notes") as string)?.trim() || null;
+  const parseOpt = (v: FormDataEntryValue | null): number | null => {
+    if (v === null || v === "") return null;
+    const n = parseInt(String(v), 10);
+    return Number.isNaN(n) ? null : n;
+  };
   await prisma.investmentLineItem.update({
     where: { id: itemId },
     data: {
       ...(label !== undefined && { label }),
-      rangeLow: rangeLow !== null && rangeLow !== "" ? parseInt(String(rangeLow), 10) : null,
-      rangeHigh: rangeHigh !== null && rangeHigh !== "" ? parseInt(String(rangeHigh), 10) : null,
+      rangeLow: parseOpt(rangeLow),
+      rangeTarget: parseOpt(rangeTarget),
+      rangeHigh: parseOpt(rangeHigh),
       notes,
     },
   });

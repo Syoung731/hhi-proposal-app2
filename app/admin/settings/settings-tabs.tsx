@@ -5,6 +5,7 @@ import { CompanyProfileTab } from "./company-profile-tab";
 import { BrandingTab } from "./branding-tab";
 import { ProposalDefaultsTab } from "./proposal-defaults-tab";
 import { RoomTypesTab } from "./room-types-tab";
+import { SectionTypesTab } from "./section-types-tab";
 import { StylePresetsTab, type StylePresetForUI } from "./style-presets-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { EmployeesTab } from "./employees-tab";
@@ -13,7 +14,8 @@ const TABS = [
   { slug: "company", label: "Company Profile" },
   { slug: "branding", label: "Branding" },
   { slug: "defaults", label: "Proposal Defaults" },
-  { slug: "room-types", label: "Room Types" },
+  { slug: "room-types", label: "Pricing Profiles" },
+  { slug: "section-types", label: "Section Types" },
   { slug: "style-presets", label: "Style Presets" },
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
@@ -38,6 +40,8 @@ export type CompanySettingsForUI = {
   defaultProposalDisclaimer: string;
   defaultTimelineNote: string | null;
   integrationsJson: unknown;
+  roomTypeLowPct: number | null;
+  roomTypeHighPct: number | null;
 };
 
 export type RoomTypeForUI = {
@@ -46,6 +50,9 @@ export type RoomTypeForUI = {
   sortOrder: number;
   active: boolean;
   exterior: boolean;
+  pricePerSqFtLow: number | null;
+  pricePerSqFtTarget: number | null;
+  pricePerSqFtHigh: number | null;
 };
 
 export type EmployeeForUI = {
@@ -60,15 +67,29 @@ export type EmployeeForUI = {
   sortOrder: number;
 };
 
+export type SectionTypeForUI = {
+  id: string;
+  name: string;
+  category: string;
+  defaultMeasurementMode: string;
+  defaultEstimateUnit: string;
+  customUnitLabel: string | null;
+  pricingBasis: string;
+  priceLow: number | null;
+  priceTarget: number | null;
+  priceHigh: number | null;
+};
+
 type Props = {
   settings: CompanySettingsForUI;
-  roomTypes: RoomTypeForUI[];
+  sectionTypes: SectionTypeForUI[];
+  canSeedSectionTypes: boolean;
   stylePresets: StylePresetForUI[];
   employees: EmployeeForUI[];
   currentUserIsAdmin: boolean;
 };
 
-export function SettingsTabs({ settings, roomTypes, stylePresets, employees, currentUserIsAdmin }: Props) {
+export function SettingsTabs({ settings, sectionTypes, canSeedSectionTypes, stylePresets, employees, currentUserIsAdmin }: Props) {
   const [currentTab, setCurrentTab] = useState<string>("company");
   const currentLabel = TABS.find((t) => t.slug === currentTab)?.label ?? currentTab;
 
@@ -119,7 +140,17 @@ export function SettingsTabs({ settings, roomTypes, stylePresets, employees, cur
             <ProposalDefaultsTab settings={settings} />
           )}
           {currentTab === "room-types" && (
-            <RoomTypesTab roomTypes={roomTypes} />
+            <RoomTypesTab
+              sectionTypes={sectionTypes}
+              roomTypeLowPct={settings.roomTypeLowPct}
+              roomTypeHighPct={settings.roomTypeHighPct}
+            />
+          )}
+          {currentTab === "section-types" && (
+            <SectionTypesTab
+              sectionTypes={sectionTypes}
+              canSeed={canSeedSectionTypes}
+            />
           )}
           {currentTab === "style-presets" && (
             <StylePresetsTab stylePresets={stylePresets} />

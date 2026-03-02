@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Room" ADD COLUMN     "ceilingHeightFt" DOUBLE PRECISION,
+ADD COLUMN     "lengthFt" DOUBLE PRECISION,
+ADD COLUMN     "widthFt" DOUBLE PRECISION;

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
-import { updateProjectOverviewAction, updateProjectTranscriptAction, updateProjectStylePresetAction } from "./actions";
+import { updateProjectOverviewAction, updateProjectTranscriptAction, type OverviewFieldErrors } from "./actions";
 import { generateOverviewFromTranscriptAction } from "./generate-overview-action";
 
 const inputClass =
@@ -30,7 +31,7 @@ function normalize(s: string | null | undefined): string {
   return (s ?? "").trim();
 }
 
-/** AI draft state: overview fields + rooms from last generate (rooms used on Rooms tab). */
+/** AI draft state: overview fields + rooms from last generate (rooms used on Sections tab). */
 type AiDraftState = {
   overview: OverviewDraft;
   rooms?: { name: string; description: string }[];
@@ -73,8 +74,6 @@ const DIFF_FIELD_LABELS: Record<DiffFieldId, string> = {
 type AutosaveStatus = "idle" | "saving" | "saved" | "failed";
 type ApplySaveStatus = "idle" | "saving" | "saved" | "failed";
 
-type StylePresetOption = { id: string; name: string };
-
 type Props = {
   projectId: string;
   project: {
@@ -92,19 +91,14 @@ type Props = {
     transcriptText: string | null;
     objective: string | null;
     coverHeroImageId: string | null;
-    stylePresetId: string | null;
-    stylePreset: { id: string; name: string } | null;
   };
-  stylePresets: StylePresetOption[];
-  media: { id: string; url: string; kind: string; type: string; caption: string | null }[];
 };
 
 const hasExistingTranscript = (text: string | null) =>
   !!text?.trim();
 
-export function OverviewTab({ projectId, project, stylePresets }: Props) {
+export function OverviewTab({ projectId, project }: Props) {
   const router = useRouter();
-  const [defaultPresetSaving, setDefaultPresetSaving] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const transcriptRef = useRef<HTMLTextAreaElement>(null);
   const transcriptFileInputRef = useRef<HTMLInputElement>(null);
@@ -130,6 +124,7 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
+  const [saveFieldErrors, setSaveFieldErrors] = useState<OverviewFieldErrors | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const DEBOUNCE_MS = 800;
@@ -215,7 +210,7 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
     setLoading(true);
     try {
       const result = await generateOverviewFromTranscriptAction(projectId);
-      const overview = result.overview ?? {};
+      const overview = (result.overview ?? {}) as OverviewDraft;
       const changedFields = DIFF_FIELD_IDS.filter((field) =>
         normalize(getCurrentValue(field)) !== normalize(getAiValueFromOverview(overview, field))
       ) as DiffFieldId[];
@@ -248,6 +243,19 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
     return v != null ? String(v).trim() : "";
   }
 
+  function setAiValue(field: DiffFieldId, value: string) {
+    setAiDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        overview: {
+          ...prev.overview,
+          [field]: value,
+        },
+      };
+    });
+  }
+
   function isApplyChecked(field: DiffFieldId, isChanged: boolean): boolean {
     return applySelections[field] ?? isChanged;
   }
@@ -272,17 +280,30 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
   async function persistOverviewFromForm(): Promise<boolean> {
     setApplySaveStatus("saving");
     setApplyError(null);
+    setSaveFieldErrors(null);
     try {
       const formData = buildFormDataFromForm();
       const result = await updateProjectOverviewAction(projectId, formData);
+      if (result.fieldErrors && Object.keys(result.fieldErrors).length > 0) {
+        setApplySaveStatus("failed");
+        setApplyError(result.error ?? "Please complete all required fields.");
+        setSaveFieldErrors(result.fieldErrors);
+        return false;
+      }
       if (result.error) {
         setApplySaveStatus("failed");
         setApplyError(result.error);
         return false;
       }
       setApplySaveStatus("saved");
-      setAiDraft(null);
-      setAiOpen(false);
+      setApplyError(null);
+      // Clear all AI suggestion UI state so the panel and "Changed" markers disappear immediately
+      flushSync(() => {
+        setAiDraft(null);
+        setAiOpen(false);
+        setApplySelections({});
+        setSaveFieldErrors(null);
+      });
       router.refresh();
       setTimeout(() => setApplySaveStatus("idle"), 2000);
       return true;
@@ -310,7 +331,18 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
   }
 
   async function submit(formData: FormData) {
-    await updateProjectOverviewAction(projectId, formData);
+    setSaveFieldErrors(null);
+    const result = await updateProjectOverviewAction(projectId, formData);
+    if (result.fieldErrors && Object.keys(result.fieldErrors).length > 0) {
+      setSaveFieldErrors(result.fieldErrors);
+      return;
+    }
+    if (result.error && !result.fieldErrors) {
+      setError(result.error);
+      return;
+    }
+    setSaveFieldErrors(null);
+    setError(null);
     router.refresh();
   }
 
@@ -371,8 +403,21 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
   const generateDisabled =
     loading || !hasTranscript || autosaveStatus === "saving";
 
+  function handleOverviewSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    submit(buildFormDataFromForm());
+  }
+
   return (
-    <form ref={formRef} action={submit} className="max-w-2xl space-y-4">
+    <form ref={formRef} onSubmit={handleOverviewSubmit} className="max-w-2xl space-y-4">
+      {saveFieldErrors && Object.keys(saveFieldErrors).length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+          <p className="font-medium">Please complete all required fields.</p>
+          <p className="mt-1 text-red-700 dark:text-red-300">
+            Fix the errors below and save again.
+          </p>
+        </div>
+      )}
       {aiDraft && (
         <div
           ref={aiPanelRef}
@@ -424,7 +469,7 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
 
               {aiDraft.rooms != null && aiDraft.rooms.length > 0 && (
                 <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-                  Rooms detected: {aiDraft.rooms.length} (used on Rooms tab)
+                  Sections detected: {aiDraft.rooms.length} (used on Sections tab)
                 </p>
               )}
 
@@ -446,18 +491,39 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
                           Changed
                         </span>
                       </div>
-                      <div className="mt-1 grid gap-1 text-zinc-600 dark:text-zinc-400">
+                      <div className="mt-1 grid gap-2 text-zinc-600 dark:text-zinc-400">
                         <div>
-                          <span className="text-xs text-zinc-500 dark:text-zinc-500">Current: </span>
+                          <span className="text-xs text-zinc-500 dark:text-zinc-500">
+                            Current:{" "}
+                          </span>
                           <span className="break-words">
                             {current || <em className="text-zinc-400">—</em>}
                           </span>
                         </div>
                         <div>
-                          <span className="text-xs text-zinc-500 dark:text-zinc-500">AI: </span>
-                          <span className="break-words">
-                            {ai || <em className="text-zinc-400">—</em>}
+                          <span className="text-xs text-zinc-500 dark:text-zinc-500">
+                            AI suggestion:
                           </span>
+                          {field === "objective" ? (
+                            <textarea
+                              className="mt-1 w-full rounded-md border border-amber-200 bg-white px-2 py-1 text-sm text-zinc-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400 dark:border-amber-700 dark:bg-zinc-900 dark:text-zinc-100"
+                              rows={3}
+                              value={ai}
+                              onChange={(e) => setAiValue(field, e.target.value)}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              className="mt-1 w-full rounded-md border border-amber-200 bg-white px-2 py-1 text-sm text-zinc-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400 dark:border-amber-700 dark:bg-zinc-900 dark:text-zinc-100"
+                              value={ai}
+                              onChange={(e) => setAiValue(field, e.target.value)}
+                            />
+                          )}
+                          {field === "title" && (
+                            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                              Format: Street - Project Type (e.g. 34 Sussex Lane - Multiple Bathroom + Laundry Updates)
+                            </p>
+                          )}
                         </div>
                       </div>
                       <label className="mt-2 flex cursor-pointer items-center gap-2">
@@ -537,7 +603,7 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
             htmlFor="transcriptFile"
             className="cursor-pointer rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
           >
-            Choose Transcript – Plaud Note
+            Choose Transcript – AI Notetaker
           </label>
           {transcriptFileName && (
             <span className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -622,37 +688,58 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
       </div>
 
       <div>
-        <label className={labelClass}>Title</label>
+        <label className={labelClass} htmlFor="title">Title <span className="text-red-600 dark:text-red-400">*</span></label>
         <input
+          id="title"
           name="title"
           defaultValue={project.title}
           required
+          aria-invalid={!!saveFieldErrors?.title}
+          aria-describedby={saveFieldErrors?.title ? "title-error" : undefined}
           className={inputClass}
         />
+        {saveFieldErrors?.title && (
+          <p id="title-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.title}</p>
+        )}
       </div>
       <div>
-        <label className={labelClass}>Subtitle</label>
+        <label className={labelClass} htmlFor="subtitle">Subtitle <span className="text-red-600 dark:text-red-400">*</span></label>
         <input
+          id="subtitle"
           name="subtitle"
           defaultValue={project.subtitle ?? ""}
+          required
+          aria-invalid={!!saveFieldErrors?.subtitle}
+          aria-describedby={saveFieldErrors?.subtitle ? "subtitle-error" : undefined}
           className={inputClass}
         />
+        {saveFieldErrors?.subtitle && (
+          <p id="subtitle-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.subtitle}</p>
+        )}
       </div>
 
       {/* Address */}
       <div className="space-y-2">
         <span className={labelClass}>Address</span>
         <div>
-          <label className="mb-0.5 block text-xs text-zinc-500">Address line 1</label>
+          <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="addressLine1">Address line 1 <span className="text-red-600 dark:text-red-400">*</span></label>
           <input
+            id="addressLine1"
             name="addressLine1"
             defaultValue={project.addressLine1 ?? ""}
+            required
+            aria-invalid={!!saveFieldErrors?.addressLine1}
+            aria-describedby={saveFieldErrors?.addressLine1 ? "addressLine1-error" : undefined}
             className={inputClass}
           />
+          {saveFieldErrors?.addressLine1 && (
+            <p id="addressLine1-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.addressLine1}</p>
+          )}
         </div>
         <div>
-          <label className="mb-0.5 block text-xs text-zinc-500">Address line 2</label>
+          <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="addressLine2">Address line 2</label>
           <input
+            id="addressLine2"
             name="addressLine2"
             defaultValue={project.addressLine2 ?? ""}
             className={inputClass}
@@ -660,74 +747,119 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">City</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="city">City <span className="text-red-600 dark:text-red-400">*</span></label>
             <input
+              id="city"
               name="city"
               defaultValue={project.city ?? ""}
+              required
+              aria-invalid={!!saveFieldErrors?.city}
+              aria-describedby={saveFieldErrors?.city ? "city-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.city && (
+              <p id="city-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.city}</p>
+            )}
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">State</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="state">State <span className="text-red-600 dark:text-red-400">*</span></label>
             <input
+              id="state"
               name="state"
               defaultValue={project.state ?? ""}
+              required
+              aria-invalid={!!saveFieldErrors?.state}
+              aria-describedby={saveFieldErrors?.state ? "state-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.state && (
+              <p id="state-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.state}</p>
+            )}
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">Zip</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="zip">Zip <span className="text-red-600 dark:text-red-400">*</span></label>
             <input
+              id="zip"
               name="zip"
               defaultValue={project.zip ?? ""}
+              required
+              aria-invalid={!!saveFieldErrors?.zip}
+              aria-describedby={saveFieldErrors?.zip ? "zip-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.zip && (
+              <p id="zip-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.zip}</p>
+            )}
           </div>
         </div>
       </div>
 
       {/* Client 1 */}
       <div className="space-y-2">
-        <span className={labelClass}>Client 1</span>
+        <span className={labelClass}>Client 1 (at least one owner) <span className="text-red-600 dark:text-red-400">*</span></span>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">First name</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client1First">First name</label>
             <input
+              id="client1First"
               name="client1First"
               defaultValue={project.client1First ?? ""}
+              aria-invalid={!!saveFieldErrors?.client1First}
+              aria-describedby={saveFieldErrors?.client1First ? "client1First-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.client1First && (
+              <p id="client1First-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client1First}</p>
+            )}
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">Last name</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client1Last">Last name</label>
             <input
+              id="client1Last"
               name="client1Last"
               defaultValue={project.client1Last ?? ""}
+              aria-invalid={!!saveFieldErrors?.client1Last}
+              aria-describedby={saveFieldErrors?.client1Last ? "client1Last-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.client1Last && (
+              <p id="client1Last-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client1Last}</p>
+            )}
           </div>
         </div>
       </div>
 
       {/* Client 2 */}
       <div className="space-y-2">
-        <span className={labelClass}>Client 2</span>
+        <span className={labelClass}>Client 2 (optional; if one name given, both required)</span>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">First name</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client2First">First name</label>
             <input
+              id="client2First"
               name="client2First"
               defaultValue={project.client2First ?? ""}
+              aria-invalid={!!saveFieldErrors?.client2First}
+              aria-describedby={saveFieldErrors?.client2First ? "client2First-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.client2First && (
+              <p id="client2First-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client2First}</p>
+            )}
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-zinc-500">Last name</label>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client2Last">Last name</label>
             <input
+              id="client2Last"
               name="client2Last"
               defaultValue={project.client2Last ?? ""}
+              aria-invalid={!!saveFieldErrors?.client2Last}
+              aria-describedby={saveFieldErrors?.client2Last ? "client2Last-error" : undefined}
               className={inputClass}
             />
+            {saveFieldErrors?.client2Last && (
+              <p id="client2Last-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client2Last}</p>
+            )}
           </div>
         </div>
       </div>
@@ -740,40 +872,6 @@ export function OverviewTab({ projectId, project, stylePresets }: Props) {
           rows={4}
           className={inputClass}
         />
-      </div>
-
-      {/* Defaults – project-level default style preset for renderings */}
-      <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
-        <span className={labelClass}>Defaults</span>
-        <div>
-          <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
-            Default Style Preset
-          </label>
-          <select
-            value={project.stylePresetId ?? ""}
-            onChange={async (e) => {
-              const value = e.target.value || null;
-              setDefaultPresetSaving(true);
-              await updateProjectStylePresetAction(projectId, value);
-              setDefaultPresetSaving(false);
-              router.refresh();
-            }}
-            disabled={defaultPresetSaving}
-            className="mt-1 max-w-md rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-          >
-            <option value="">None (use first active preset when rendering)</option>
-            {stylePresets.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {defaultPresetSaving && (
-            <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">
-              Saving…
-            </span>
-          )}
-        </div>
       </div>
 
       <button

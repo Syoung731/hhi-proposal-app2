@@ -18,6 +18,21 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
     },
   });
   if (!project) return { error: "Project not found" };
+  const effectiveInvestmentItems = project.investmentLineItems.map((i) => {
+    const rangeLow = i.isOverride ? i.overrideLow : i.rangeLow;
+    const rangeTarget = i.isOverride ? i.overrideTarget : i.rangeTarget;
+    const rangeHigh = i.isOverride ? i.overrideHigh : i.rangeHigh;
+    return {
+      id: i.id,
+      label: i.label,
+      rangeLow,
+      rangeTarget,
+      rangeHigh,
+      notes: i.notes,
+      sortOrder: i.sortOrder,
+      includeInTotals: i.includeInTotals,
+    };
+  });
   const newVersion = project.publishedVersion + 1;
   const snapshot: SnapshotData = {
     version: newVersion,
@@ -58,16 +73,9 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
       durationText: p.durationText,
       sortOrder: p.sortOrder,
     })),
-    investmentLineItems: project.investmentLineItems.map((i) => ({
-      id: i.id,
-      label: i.label,
-      rangeLow: i.rangeLow,
-      rangeHigh: i.rangeHigh,
-      notes: i.notes,
-      sortOrder: i.sortOrder,
-    })),
+    investmentLineItems: effectiveInvestmentItems,
   };
-  await prisma.$transaction([
+  const [, , proposal] = await prisma.$transaction([
     prisma.publishedSnapshot.create({
       data: {
         projectId: project.id,
@@ -79,9 +87,15 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
       where: { id: projectId },
       data: { publishedVersion: newVersion, status: ProjectStatus.PUBLISHED },
     }),
+    prisma.proposal.upsert({
+      where: { projectId: project.id },
+      create: { projectId: project.id, isPublic: true },
+      update: { isPublic: true },
+      select: { id: true },
+    }),
   ]);
   revalidatePath(`/admin/projects/${projectId}`);
-  revalidatePath(`/p/${project.slug}`);
-  revalidatePath(`/p/${project.slug}/pdf`);
+  revalidatePath(`/p/${proposal.id}`);
+  revalidatePath(`/p/${proposal.id}/pdf`);
   return {};
 }

@@ -58,37 +58,89 @@ model Project {
   publishedSnapshots  PublishedSnapshot[]
   rooms               Room[]
   timelinePhases      TimelinePhase[]
+  proposal            Proposal?
 
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])
 }
 
-model Room {
-  id             String       @id @default(cuid())
-  projectId      String
-  roomTypeId     String?
-  stylePresetId  String?
-  scopeNarrative String       @default("")
-  sortOrder      Int          @default(0)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  name           String
-  scopeSource    String       @default("AI")
-  scopeUpdatedAt DateTime     @default(now())
-  media          Media[]
-  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  roomType       RoomType?    @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
-  stylePreset    StylePreset? @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+model Proposal {
+  id                  String   @id @default(cuid())
+  projectId            String   @unique
+  isPublic             Boolean  @default(false)
+  publicLayoutConfig   Json?
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+  @@index([isPublic])
+}
+
+model Room {
+  id                   String            @id @default(cuid())
+  projectId            String
+  roomTypeId           String?
+  stylePresetId        String?
+  sectionTypeId        String?
+  estPricePerSqFt      Float?
+  lengthFt             Float?
+  widthFt              Float?
+  ceilingHeightFt      Float?
+  lengthIn             Int?
+  widthIn              Int?
+  ceilingHeightIn      Int?
+  scopeNarrative       String            @default("")
+  sortOrder            Int               @default(0)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  name                 String
+  scopeSource          String            @default("AI")
+  scopeUpdatedAt       DateTime          @default(now())
+  selectedRenderMediaId String?
+  // Section / measurement fields
+  measurementMode      MeasurementMode?
+  areaSqFt             Float?
+  quantity             Int?
+  origin               SectionOrigin     @default(MANUAL)
+  // Estimating fields
+  estimateUnit         EstimateUnit?
+  customUnitLabel      String?
+  unitRate             Float?
+  unitQuantity         Float?
+  unitQuantityManualOverride Boolean @default(false)
+  // Section pricing (Low/Target/High)
+  unitRateLow          Float?
+  unitRateTarget       Float?
+  unitRateHigh         Float?
+  totalLow             Float?
+  totalTarget          Float?
+  totalHigh            Float?
+  pricingNotes         String?
+  bucket               SectionBucket           @default(BASE)
+  media                     Media[]
+  project                   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  roomType                  RoomType?           @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
+  stylePreset               StylePreset?        @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  sectionType               SectionType?        @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([projectId, bucket])
   @@index([projectId, sortOrder])
   @@index([roomTypeId])
   @@index([stylePresetId])
+  @@index([sectionTypeId])
+  @@index([origin])
+  @@index([estimateUnit])
+}
+
+enum MediaPlacement {
+  SECTION
+  FRONT_PAGE
+  UNASSIGNED
 }
 
 model Media {
-  id              String       @id @default(cuid())
+  id              String          @id @default(cuid())
   projectId       String
   roomId          String?
   kind            MediaKind
@@ -98,26 +150,35 @@ model Media {
   height          Int?
   caption         String?
   tags            String[]
-  sortOrder       Int          @default(0)
-  createdAt       DateTime     @default(now())
+  sortOrder       Int             @default(0)
+  createdAt       DateTime        @default(now())
   sourceMediaId   String?
+  parentMediaId   String?
+  editInstruction String?
   stylePresetId   String?
   renderProvider  String?
   renderModel     String?
-  promptVersion   Int          @default(1)
-  project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  room            Room?        @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  sourceMedia     Media?        @relation("MediaSource", fields: [sourceMediaId], references: [id], onDelete: SetNull)
-  renderingsFrom  Media[]       @relation("MediaSource")
-  stylePreset     StylePreset?  @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
-  type            MediaType    @default(EXISTING)
+  renderStatus    RenderStatus?
+  renderError     String?
+  promptVersion   Int             @default(1)
+  placement       MediaPlacement  @default(UNASSIGNED)
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room            Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  sourceMedia     Media?          @relation("MediaSource", fields: [sourceMediaId], references: [id], onDelete: SetNull)
+  renderingsFrom  Media[]         @relation("MediaSource")
+  parent          Media?          @relation("MediaParent", fields: [parentMediaId], references: [id], onDelete: SetNull)
+  children        Media[]        @relation("MediaParent")
+  stylePreset     StylePreset?    @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  type            MediaType      @default(EXISTING)
 
   @@index([projectId])
   @@index([roomId])
   @@index([projectId, kind])
   @@index([projectId, type])
   @@index([projectId, sortOrder])
+  @@index([projectId, placement])
   @@index([sourceMediaId])
+  @@index([parentMediaId])
   @@index([stylePresetId])
 }
 
@@ -136,17 +197,26 @@ model TimelinePhase {
 }
 
 model InvestmentLineItem {
-  id        String   @id @default(cuid())
-  projectId String
-  label     String
-  rangeLow  Int?
-  rangeHigh Int?
-  notes     String?
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  projectId       String
+  bucket          SectionBucket
+  label           String
+  rangeLow        Int?
+  rangeTarget     Int?
+  rangeHigh       Int?
+  notes           String?
+  overrideLow     Int?
+  overrideTarget  Int?
+  overrideHigh    Int?
+  overrideNotes   String?
+  isOverride      Boolean       @default(false)
+  includeInTotals Boolean       @default(true)
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@unique([projectId, bucket])
   @@index([projectId])
   @@index([projectId, sortOrder])
 }
@@ -185,10 +255,66 @@ enum MediaType {
   RENDERING
 }
 
+enum RenderStatus {
+  QUEUED
+  RENDERING
+  DONE
+  FAILED
+}
+
 enum TimelinePhaseType {
   DESIGN_FEASIBILITY
   PRECONSTRUCTION
   CONSTRUCTION
+}
+
+enum SectionCategory {
+  INTERIOR
+  EXTERIOR
+  SYSTEMS
+  WHOLE_HOME
+  ADDITION
+  FAST
+}
+
+enum MeasurementMode {
+  NONE
+  DIMENSIONS
+  AREA
+  COUNT
+}
+
+enum EstimateUnit {
+  SF
+  LF
+  EA
+  SQ
+  HR
+  DAY
+  ROOM
+  UNIT
+  GAL
+  CUSTOM
+}
+
+enum SectionOrigin {
+  MANUAL
+  AI_TRANSCRIPT
+  TEMPLATE
+  IMPORTED
+}
+
+enum SectionBucket {
+  BASE
+  ALTERNATE
+  ALLOWANCE
+}
+
+enum PricingBasis {
+  NONE
+  PER_SF
+  PER_EACH
+  PER_JOB
 }
 
 model Employee {
@@ -227,20 +353,47 @@ model CompanySettings {
   defaultProposalDisclaimer String? @default("")
   defaultTimelineNote     String?
   integrationsJson       Json?
+  roomTypeLowPct         Float?   // default -10 in UI; low = target * (1 + lowPct/100)
+  roomTypeHighPct        Float?   // default +10 in UI; high = target * (1 + highPct/100)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 }
 
 // Library of room types (e.g. Kitchen, Primary Bath). Reusable across projects.
 model RoomType {
-  id        String   @id @default(cuid())
-  name      String
-  sortOrder Int      @default(0)
-  active    Boolean  @default(true)
-  exterior  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  rooms     Room[]
+  id                 String   @id @default(cuid())
+  name               String
+  sortOrder          Int      @default(0)
+  active             Boolean  @default(true)
+  exterior           Boolean  @default(false)
+  pricePerSqFtLow    Float?
+  pricePerSqFtTarget Float?
+  pricePerSqFtHigh   Float?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  rooms              Room[]
 
   @@index([sortOrder])
+}
+
+// Section types (UI: Sections). Defines category, default measurement mode, estimate unit, and pricing.
+model SectionType {
+  id                    String           @id @default(cuid())
+  name                  String           @unique
+  category              SectionCategory
+  defaultMeasurementMode MeasurementMode
+  defaultEstimateUnit   EstimateUnit
+  customUnitLabel       String?
+  pricingBasis          PricingBasis      @default(NONE)
+  priceLow              Float?
+  priceTarget           Float?
+  priceHigh             Float?
+  pricePerSqFtLow       Float?           // deprecated: use priceLow when pricingBasis = PER_SF
+  pricePerSqFtTarget    Float?
+  pricePerSqFtHigh      Float?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  rooms                 Room[]
+
+  @@index([category])
 }

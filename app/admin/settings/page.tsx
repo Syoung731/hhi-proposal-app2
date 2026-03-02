@@ -1,15 +1,20 @@
-import { checkIsAdmin } from "@/app/lib/auth";
-import { getOrCreateCompanySettings, getRoomTypes, listEmployees, listStylePresets } from "./actions";
+import { checkIsAdmin, getCurrentUserEmail } from "@/app/lib/auth";
+import { SUPER_ADMIN_EMAIL } from "@/app/lib/constants";
+import { getOrCreateCompanySettings, listSectionTypes, listEmployees, listStylePresets } from "./actions";
 import { SettingsTabs } from "./settings-tabs";
 
 export default async function AdminSettingsPage() {
-  const [settings, roomTypes, employees, stylePresets, currentUserIsAdmin] = await Promise.all([
+  const [settings, sectionTypes, employees, stylePresets, currentUserIsAdmin, currentEmail] = await Promise.all([
     getOrCreateCompanySettings(),
-    getRoomTypes(),
+    listSectionTypes(),
     listEmployees(),
     listStylePresets(),
     checkIsAdmin(),
+    getCurrentUserEmail(),
   ]);
+  const canSeedSectionTypes =
+    currentUserIsAdmin &&
+    (currentEmail?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase());
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="mx-auto w-full max-w-[1400px] px-6 py-10">
@@ -33,14 +38,22 @@ export default async function AdminSettingsPage() {
           defaultProposalDisclaimer: settings.defaultProposalDisclaimer ?? "",
           defaultTimelineNote: settings.defaultTimelineNote,
           integrationsJson: settings.integrationsJson,
+          roomTypeLowPct: settings.roomTypeLowPct,
+          roomTypeHighPct: settings.roomTypeHighPct,
         }}
-        roomTypes={roomTypes.map((r) => ({
-          id: r.id,
-          name: r.name,
-          sortOrder: r.sortOrder,
-          active: r.active,
-          exterior: r.exterior,
+        sectionTypes={sectionTypes.map((s) => ({
+          id: s.id,
+          name: s.name,
+          category: s.category,
+          defaultMeasurementMode: s.defaultMeasurementMode,
+          defaultEstimateUnit: s.defaultEstimateUnit,
+          customUnitLabel: s.customUnitLabel,
+          pricingBasis: s.pricingBasis,
+          priceLow: s.priceLow,
+          priceTarget: s.priceTarget,
+          priceHigh: s.priceHigh,
         }))}
+        canSeedSectionTypes={canSeedSectionTypes}
         stylePresets={stylePresets.map((p) => ({
           id: p.id,
           name: p.name,

@@ -7,11 +7,13 @@ import { publishProjectAction } from "./actions";
 
 type Props = {
   projectId: string;
-  slug: string;
+  proposalId: string | null;
   publishedVersion: number;
 };
 
-export function PublishTab({ projectId, slug, publishedVersion }: Props) {
+const draftPreviewUrl = (projectId: string) => `/admin/projects/${projectId}/preview/draft`;
+
+export function PublishTab({ projectId, proposalId, publishedVersion }: Props) {
   const router = useRouter();
   const [publishing, setPublishing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -25,44 +27,76 @@ export function PublishTab({ projectId, slug, publishedVersion }: Props) {
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-zinc-600 dark:text-zinc-400">
-        Publishing creates a locked snapshot of the current draft. The public page and PDF will show
-        this version until you publish again.
-      </p>
-      {publishedVersion > 0 && (
-        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-          Current published version: {publishedVersion}. Share link:{" "}
+    <div className="space-y-6">
+      {/* Preview (Draft) — embedded iframe */}
+      <section className="rounded-lg border border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-800/30">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Preview (Draft)
+          </h2>
           <Link
-            href={`/p/${slug}`}
+            href={draftPreviewUrl(projectId)}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-zinc-700 underline dark:text-zinc-300"
+            className="text-sm font-medium text-zinc-600 hover:underline dark:text-zinc-400"
           >
-            /p/{slug}
+            Open preview in new tab →
           </Link>
+        </div>
+        <div className="p-4">
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+            <iframe
+              src={draftPreviewUrl(projectId)}
+              title="Draft preview"
+              className="h-[70vh] w-full min-h-[400px]"
+              sandbox="allow-same-origin allow-scripts"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Publish controls */}
+      <section className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-800/30">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Publish</h2>
+        <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+          Publishing creates a locked snapshot of the current draft. The public page and PDF will show
+          this version until you publish again.
         </p>
-      )}
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={() => setConfirmOpen(true)}
-          disabled={publishing}
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          {publishing ? "Publishing…" : "Publish"}
-        </button>
-        {publishedVersion > 0 && (
-          <Link
-            href={`/p/${slug}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            View public page
-          </Link>
+        {publishedVersion > 0 && proposalId && (
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
+            Current published version: {publishedVersion}. Share link:{" "}
+            <Link
+              href={`/p/${proposalId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-700 underline dark:text-zinc-300"
+            >
+              /p/{proposalId}
+            </Link>
+          </p>
         )}
-      </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            disabled={publishing}
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {publishing ? "Publishing…" : "Publish"}
+          </button>
+          {publishedVersion > 0 && proposalId && (
+            <Link
+              href={`/p/${proposalId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              View public page
+            </Link>
+          )}
+        </div>
+      </section>
+
       {confirmOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"

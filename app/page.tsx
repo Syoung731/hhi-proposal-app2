@@ -1,20 +1,36 @@
 import Link from "next/link";
 
-export default function Home() {
+export default function RootPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-zinc-50 px-4 dark:bg-zinc-950">
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.5rem",
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>
         HHI Builders Proposal App
       </h1>
-      <p className="text-center text-zinc-600 dark:text-zinc-400">
-        Create and share proposal websites with PDF export.
-      </p>
       <Link
-        href="/admin/projects"
-        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        href="/admin"
+        style={{
+          display: "inline-block",
+          marginTop: "1rem",
+          padding: "0.5rem 1rem",
+          backgroundColor: "#0066cc",
+          color: "white",
+          textDecoration: "none",
+          borderRadius: "4px",
+          fontWeight: 500,
+        }}
       >
-        Admin: Projects
+        Go to Admin
       </Link>
-    </div>
+    </main>
   );
 }

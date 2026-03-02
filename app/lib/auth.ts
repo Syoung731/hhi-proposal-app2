@@ -80,3 +80,15 @@ export async function requireAdmin() {
 
   return { user, email: emailLower, userId: user.id };
 }
+
+/** Current signed-in user's primary email, or null if not signed in. */
+export async function getCurrentUserEmail(): Promise<string | null> {
+  const user = await currentUser();
+  if (!user) return null;
+  const email =
+    user.emailAddresses?.find((e) => e.id === user.primaryEmailAddressId)
+      ?.emailAddress ??
+    user.emailAddresses?.[0]?.emailAddress ??
+    null;
+  return email ?? null;
+}

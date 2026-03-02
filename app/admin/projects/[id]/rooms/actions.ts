@@ -4,12 +4,32 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { normalizeRoomName } from "@/app/lib/room-utils";
+import { parseFeetInchesToInches } from "@/app/lib/dimensions";
+import {
+  computeUnitQuantity,
+  type RoomLikeForUnitQuantity,
+} from "@/app/lib/section-unit-quantity";
+import { computeSectionTotals } from "@/app/lib/section-totals";
+import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 import {
   extractRoomsFromTranscript,
   rewriteRoomScopeNarrative,
 } from "@/app/lib/ai/extract-from-transcript";
+import { z } from "zod";
 
 export type UnmatchedRoomItem = { name: string; roomIds: string[] };
+
+/** AI-extracted room/section shape; optional dimensions may be present and are persisted. */
+type ExtractedSection = {
+  name: string;
+  scopeNarrative: string;
+  lengthIn?: number | null;
+  widthIn?: number | null;
+  ceilingHeightIn?: number | null;
+  length?: string | null;
+  width?: string | null;
+  ceilingHeight?: string | null;
+};
 
 /** Normalize for dedupe comparison: trim, collapse spaces, normalize separators, collapse again, lowercase. */
 function normalizeRoomNameForCompare(name: string): string {
@@ -78,6 +98,40 @@ async function getRoomTypeNormalizedMap(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Build map: normalized section type name -> sectionTypeId for matching (e.g. "primary bath" -> Bathroom SectionType id). */
+async function getSectionTypeNormalizedMap(): Promise<Map<string, string>> {
+  const types = await prisma.sectionType.findMany({
+    select: { id: true, name: true },
+  });
+  const map = new Map<string, string>();
+  for (const t of types) {
+    const key = normalizeRoomName(t.name);
+    if (key && !map.has(key)) map.set(key, t.id);
+  }
+  return map;
+}
+
+const nullableNumberFormField = z
+  .union([z.string(), z.number(), z.null(), z.undefined()])
+  .transform((value, ctx) => {
+    if (value === undefined || value === null) return null;
+    const s = String(value).trim();
+    if (!s) return null;
+    const n = Number(s);
+    if (Number.isNaN(n)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Must be a number.",
+      });
+      return z.NEVER;
+    }
+    return n;
+  });
+
+const roomNumericFieldsSchema = z.object({
+  estPricePerSqFt: nullableNumberFormField,
+});
+
 export async function createRoomAction(projectId: string, formData: FormData): Promise<{ error?: string }> {
   await requireAdmin();
   const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -87,16 +141,22 @@ export async function createRoomAction(projectId: string, formData: FormData): P
   const maxOrder = await prisma.room
     .aggregate({ where: { projectId }, _max: { sortOrder: true } })
     .then((r) => r._max.sortOrder ?? -1);
+  const sectionTypeIdRaw = (formData.get("sectionTypeId") as string)?.trim() || null;
+  const sectionTypeId = sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : null;
   await prisma.room.create({
     data: {
       projectId,
-      name: name || "Room",
+      name: name || "Section",
       scopeNarrative,
       scopeSource: "MANUAL",
       scopeUpdatedAt: new Date(),
       sortOrder: maxOrder + 1,
+      sectionTypeId,
+      origin: "MANUAL",
+      bucket: "BASE",
     },
   });
+  await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
@@ -108,19 +168,254 @@ export async function updateRoomAction(
   formData: FormData
 ): Promise<{ error?: string }> {
   await requireAdmin();
-  const room = await prisma.room.findFirst({ where: { id: roomId, projectId } });
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    include: {
+      sectionType: {
+        select: {
+          defaultMeasurementMode: true,
+          defaultEstimateUnit: true,
+          pricingBasis: true,
+          priceLow: true,
+          priceTarget: true,
+          priceHigh: true,
+        },
+      },
+      roomType: { select: { pricePerSqFtLow: true, pricePerSqFtTarget: true, pricePerSqFtHigh: true } },
+    },
+  });
   if (!room) return { error: "Room not found" };
   const name = (formData.get("name") as string)?.trim() ?? "";
   const scopeNarrative = (formData.get("scopeNarrative") as string)?.trim() ?? "";
+  const numericResult = roomNumericFieldsSchema.safeParse({
+    estPricePerSqFt: formData.get("estPricePerSqFt") as unknown,
+  });
+  if (!numericResult.success) {
+    const estIssue = numericResult.error.issues.find(
+      (issue) => issue.path[0] === "estPricePerSqFt"
+    );
+    if (estIssue) {
+      return { error: "Price per sq ft must be a number greater than 0." };
+    }
+    return { error: "Invalid price." };
+  }
+  const { estPricePerSqFt } = numericResult.data;
+  if (estPricePerSqFt !== null && estPricePerSqFt <= 0) {
+    return { error: "Price per sq ft must be a number greater than 0." };
+  }
+
+  const lengthRaw = (formData.get("lengthIn") as string)?.trim() ?? "";
+  const widthRaw = (formData.get("widthIn") as string)?.trim() ?? "";
+  const ceilingHeightRaw = (formData.get("ceilingHeightIn") as string)?.trim() ?? "";
+
+  let lengthIn: number | null = null;
+  let widthIn: number | null = null;
+  let ceilingHeightIn: number | null = null;
+
+  if (lengthRaw !== "") {
+    const parsed = parseFeetInchesToInches(lengthRaw);
+    if (parsed.error) return { error: `Length: ${parsed.error}` };
+    lengthIn = parsed.inches;
+  }
+  if (widthRaw !== "") {
+    const parsed = parseFeetInchesToInches(widthRaw);
+    if (parsed.error) return { error: `Width: ${parsed.error}` };
+    widthIn = parsed.inches;
+  }
+  if (ceilingHeightRaw !== "") {
+    const parsed = parseFeetInchesToInches(ceilingHeightRaw);
+    if (parsed.error) return { error: `Ceiling height: ${parsed.error}` };
+    ceilingHeightIn = parsed.inches;
+  }
+
+  const sectionTypeIdRaw = (formData.get("sectionTypeId") as string)?.trim() || null;
+  const sectionTypeId = sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : null;
+  const originRaw = (formData.get("origin") as string)?.trim();
+  const origin = ["MANUAL", "AI_TRANSCRIPT", "TEMPLATE", "IMPORTED"].includes(originRaw ?? "")
+    ? (originRaw as "MANUAL" | "AI_TRANSCRIPT" | "TEMPLATE" | "IMPORTED")
+    : room.origin;
+  const measurementModeRaw = (formData.get("measurementMode") as string)?.trim() || null;
+  const measurementMode =
+    measurementModeRaw === "" || measurementModeRaw === "USE_TYPE_DEFAULT"
+      ? null
+      : ["NONE", "DIMENSIONS", "AREA", "COUNT"].includes(measurementModeRaw ?? "")
+        ? (measurementModeRaw as "NONE" | "DIMENSIONS" | "AREA" | "COUNT")
+        : null;
+  const areaSqFtRaw = (formData.get("areaSqFt") as string)?.trim();
+  const areaSqFt = areaSqFtRaw === "" ? null : Number(areaSqFtRaw);
+  const quantityRaw = (formData.get("quantity") as string)?.trim();
+  const quantity = quantityRaw === "" ? null : parseInt(quantityRaw ?? "", 10);
+  const estimateUnitRaw = (formData.get("estimateUnit") as string)?.trim() || null;
+  const estimateUnit =
+    estimateUnitRaw === "" || estimateUnitRaw === "USE_TYPE_DEFAULT"
+      ? null
+      : ["SF", "LF", "EA", "SQ", "HR", "DAY", "ROOM", "UNIT", "GAL", "CUSTOM"].includes(estimateUnitRaw ?? "")
+        ? (estimateUnitRaw as "SF" | "LF" | "EA" | "SQ" | "HR" | "DAY" | "ROOM" | "UNIT" | "GAL" | "CUSTOM")
+        : null;
+  const customUnitLabel = (formData.get("customUnitLabel") as string)?.trim() || null;
+  const unitQuantityManualOverride = formData.get("unitQuantityManualOverride") === "true";
+  const unitQuantityOverrideRaw = (formData.get("unitQuantityOverride") as string)?.trim();
+  const unitQuantityOverride = unitQuantityOverrideRaw === "" ? null : Number(unitQuantityOverrideRaw);
+  const bucketRaw = (formData.get("bucket") as string)?.trim();
+  const bucket = ["BASE", "ALTERNATE", "ALLOWANCE"].includes(bucketRaw ?? "")
+    ? (bucketRaw as "BASE" | "ALTERNATE" | "ALLOWANCE")
+    : room.bucket;
+  const unitRateLowRaw = (formData.get("unitRateLow") as string)?.trim();
+  const unitRateTargetRaw = (formData.get("unitRateTarget") as string)?.trim();
+  const unitRateHighRaw = (formData.get("unitRateHigh") as string)?.trim();
+  const unitRateLowForm = unitRateLowRaw === "" ? null : Number(unitRateLowRaw);
+  const unitRateTargetForm = unitRateTargetRaw === "" ? null : Number(unitRateTargetRaw);
+  const unitRateHighForm = unitRateHighRaw === "" ? null : Number(unitRateHighRaw);
+  const hasUnitRateOverride =
+    unitRateLowForm != null && !Number.isNaN(unitRateLowForm) ||
+    unitRateTargetForm != null && !Number.isNaN(unitRateTargetForm) ||
+    unitRateHighForm != null && !Number.isNaN(unitRateHighForm);
+
+  // areaSqFt: from form if valid number; else from lengthIn/widthIn when both present
+  let resolvedAreaSqFt: number | null = null;
+  if (areaSqFt != null && !Number.isNaN(areaSqFt) && areaSqFt >= 0) {
+    resolvedAreaSqFt = areaSqFt;
+  } else if (lengthIn != null && widthIn != null && lengthIn > 0 && widthIn > 0) {
+    resolvedAreaSqFt = Math.round((lengthIn / 12) * (widthIn / 12) * 100) / 100;
+  } else {
+    resolvedAreaSqFt = room.areaSqFt;
+  }
+
+  const mergedForUnitQty: RoomLikeForUnitQuantity = {
+    ...room,
+    lengthIn,
+    widthIn,
+    areaSqFt: resolvedAreaSqFt,
+    quantity: quantity ?? room.quantity,
+    measurementMode: measurementMode ?? undefined,
+  };
+  const defaultMode = room.sectionType?.defaultMeasurementMode ?? null;
+  const defaultUnit = room.sectionType?.defaultEstimateUnit ?? null;
+  const effectiveMode = measurementMode ?? defaultMode ?? "NONE";
+  const effectiveUnit = estimateUnit ?? defaultUnit ?? "SF";
+  const computedUnitQty = computeUnitQuantity(mergedForUnitQty, defaultMode);
+  let unitQuantity: number | null =
+    unitQuantityManualOverride && unitQuantityOverride != null && !Number.isNaN(unitQuantityOverride)
+      ? unitQuantityOverride
+      : unitQuantityManualOverride
+        ? room.unitQuantity
+        : computedUnitQty;
+
+  // Unit rates: form override, or from sectionType (Pricing Profile) by basis, or from roomType (legacy)
+  let unitRateLow = room.unitRateLow;
+  let unitRateTarget = room.unitRateTarget;
+  let unitRateHigh = room.unitRateHigh;
+  let forceUnitQuantityOne = false;
+
+  if (hasUnitRateOverride) {
+    unitRateLow = unitRateLowForm != null && !Number.isNaN(unitRateLowForm) ? unitRateLowForm : unitRateLow;
+    unitRateTarget = unitRateTargetForm != null && !Number.isNaN(unitRateTargetForm) ? unitRateTargetForm : unitRateTarget;
+    unitRateHigh = unitRateHighForm != null && !Number.isNaN(unitRateHighForm) ? unitRateHighForm : unitRateHigh;
+  } else if (room.sectionTypeId && room.sectionType) {
+    const st = room.sectionType;
+    const basis = st.pricingBasis ?? "NONE";
+    if (basis === "PER_SF" && (effectiveMode === "AREA" || effectiveMode === "DIMENSIONS")) {
+      unitRateLow = st.priceLow ?? unitRateLow;
+      unitRateTarget = st.priceTarget ?? unitRateTarget;
+      unitRateHigh = st.priceHigh ?? unitRateHigh;
+    } else if (basis === "PER_EACH") {
+      unitRateLow = st.priceLow ?? unitRateLow;
+      unitRateTarget = st.priceTarget ?? unitRateTarget;
+      unitRateHigh = st.priceHigh ?? unitRateHigh;
+      // Quantity comes from COUNT or form; no override
+    } else if (basis === "PER_JOB") {
+      unitRateLow = st.priceLow ?? unitRateLow;
+      unitRateTarget = st.priceTarget ?? unitRateTarget;
+      unitRateHigh = st.priceHigh ?? unitRateHigh;
+      forceUnitQuantityOne = true;
+    }
+    // NONE: do not set unit rates from sectionType
+  } else if (
+    room.roomTypeId &&
+    room.roomType &&
+    (effectiveMode === "AREA" || effectiveMode === "DIMENSIONS")
+  ) {
+    unitRateLow = room.roomType.pricePerSqFtLow ?? unitRateLow;
+    unitRateTarget = room.roomType.pricePerSqFtTarget ?? unitRateTarget;
+    unitRateHigh = room.roomType.pricePerSqFtHigh ?? unitRateHigh;
+  }
+
+  if (forceUnitQuantityOne) {
+    unitQuantity = 1;
+  }
+
+  const data: {
+    name: string;
+    scopeNarrative: string;
+    scopeSource: string;
+    scopeUpdatedAt: Date;
+    estPricePerSqFt: number | null;
+    lengthIn: number | null;
+    widthIn: number | null;
+    ceilingHeightIn: number | null;
+    sectionTypeId: string | null;
+    origin: "MANUAL" | "AI_TRANSCRIPT" | "TEMPLATE" | "IMPORTED";
+    measurementMode: "NONE" | "DIMENSIONS" | "AREA" | "COUNT" | null;
+    areaSqFt: number | null;
+    quantity: number | null;
+    estimateUnit: "SF" | "LF" | "EA" | "SQ" | "HR" | "DAY" | "ROOM" | "UNIT" | "GAL" | "CUSTOM" | null;
+    customUnitLabel: string | null;
+    unitQuantity: number | null;
+    unitQuantityManualOverride: boolean;
+    unitRateLow: number | null;
+    unitRateTarget: number | null;
+    unitRateHigh: number | null;
+    totalLow: number | null;
+    totalTarget: number | null;
+    totalHigh: number | null;
+    bucket: "BASE" | "ALTERNATE" | "ALLOWANCE";
+  } = {
+    name: name || "Section",
+    scopeNarrative,
+    scopeSource: "MANUAL",
+    scopeUpdatedAt: new Date(),
+    estPricePerSqFt,
+    lengthIn,
+    widthIn,
+    ceilingHeightIn,
+    sectionTypeId,
+    origin,
+    measurementMode,
+    areaSqFt: resolvedAreaSqFt,
+    quantity: quantity != null && !Number.isNaN(quantity) ? quantity : null,
+    estimateUnit,
+    customUnitLabel: estimateUnit === "CUSTOM" ? customUnitLabel : null,
+    unitQuantity: unitQuantity ?? null,
+    unitQuantityManualOverride,
+    unitRateLow,
+    unitRateTarget,
+    unitRateHigh,
+    totalLow: null,
+    totalTarget: null,
+    totalHigh: null,
+    bucket,
+  };
+  if (!unitQuantityManualOverride && !forceUnitQuantityOne) {
+    data.unitQuantity = computedUnitQty;
+  }
+  const totals = computeSectionTotals(
+    {
+      estimateUnit: data.estimateUnit,
+      unitQuantity: data.unitQuantity,
+      unitRateLow: data.unitRateLow,
+      unitRateTarget: data.unitRateTarget,
+      unitRateHigh: data.unitRateHigh,
+    },
+    room.sectionType
+  );
+  data.totalLow = totals.totalLow;
+  data.totalTarget = totals.totalTarget;
+  data.totalHigh = totals.totalHigh;
   await prisma.room.update({
     where: { id: roomId },
-    data: {
-      name: name || "Room",
-      scopeNarrative,
-      scopeSource: "MANUAL",
-      scopeUpdatedAt: new Date(),
-    },
+    data,
   });
+  await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
@@ -152,6 +447,7 @@ export async function deleteRoomAction(projectId: string, roomId: string): Promi
   const room = await prisma.room.findFirst({ where: { id: roomId, projectId } });
   if (!room) return { error: "Room not found" };
   await prisma.room.delete({ where: { id: roomId } });
+  await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
@@ -242,7 +538,7 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
     return { created: 0, skipped: 0, error: "No transcript available." };
   }
 
-  let rooms: { name: string; scopeNarrative: string }[];
+  let rooms: ExtractedSection[];
   try {
     const result = await extractRoomsFromTranscript(transcriptText);
     rooms = result.rooms ?? [];
@@ -265,9 +561,21 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
   const maxOrder = _max.sortOrder ?? -1;
 
   const roomTypeMap = await getRoomTypeNormalizedMap();
-  const toCreate: { name: string; scopeNarrative: string; sortOrder: number; roomTypeId?: string }[] = [];
+  const sectionTypeMap = await getSectionTypeNormalizedMap();
+  const toCreate: {
+    name: string;
+    scopeNarrative: string;
+    sortOrder: number;
+    roomTypeId?: string;
+    sectionTypeId?: string;
+    lengthIn?: number | null;
+    widthIn?: number | null;
+    ceilingHeightIn?: number | null;
+    areaSqFt?: number | null;
+  }[] = [];
   let nextOrder = maxOrder + 1;
   let skipped = 0;
+  let loggedOneRoomDims = false;
 
   for (const r of rooms) {
     const rawName = (r.name ?? "").trim();
@@ -285,7 +593,37 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
     const name = displayNameForCanonical(canonicalName);
     const normalizedForMatch = normalizeRoomName(name);
     const roomTypeId = normalizedForMatch ? roomTypeMap.get(normalizedForMatch) : undefined;
-    toCreate.push({ name, scopeNarrative, sortOrder: nextOrder++, roomTypeId });
+    const sectionTypeId = normalizedForMatch ? sectionTypeMap.get(normalizedForMatch) : undefined;
+    const lengthIn = r.lengthIn ?? null;
+    const widthIn = r.widthIn ?? null;
+    const ceilingHeightIn = r.ceilingHeightIn ?? null;
+    const areaSqFt =
+      lengthIn != null && widthIn != null && lengthIn > 0 && widthIn > 0
+        ? Math.round((lengthIn / 12) * (widthIn / 12) * 100) / 100
+        : null;
+    if (!loggedOneRoomDims && (lengthIn != null || widthIn != null || ceilingHeightIn != null)) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[generateRoomsFromTranscript] sample room dims:", {
+          name,
+          lengthIn,
+          widthIn,
+          ceilingHeightIn,
+          areaSqFt,
+        });
+      }
+      loggedOneRoomDims = true;
+    }
+    toCreate.push({
+      name,
+      scopeNarrative,
+      sortOrder: nextOrder++,
+      roomTypeId,
+      sectionTypeId,
+      lengthIn,
+      widthIn,
+      ceilingHeightIn,
+      areaSqFt,
+    });
   }
 
   let unmatchedRooms: UnmatchedRoomItem[] = [];
@@ -299,11 +637,17 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
         scopeUpdatedAt: new Date(),
         sortOrder: row.sortOrder,
         roomTypeId: row.roomTypeId ?? null,
+        sectionTypeId: row.sectionTypeId ?? null,
+        lengthIn: row.lengthIn ?? null,
+        widthIn: row.widthIn ?? null,
+        ceilingHeightIn: row.ceilingHeightIn ?? null,
+        areaSqFt: row.areaSqFt ?? null,
+        origin: "AI_TRANSCRIPT",
       })),
     });
     const byName = new Map<string, string[]>();
     for (const room of created) {
-      if (!room.roomTypeId) {
+      if (!room.sectionTypeId) {
         const arr = byName.get(room.name) ?? [];
         arr.push(room.id);
         byName.set(room.name, arr);
@@ -327,7 +671,12 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
   await requireAdmin();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, transcriptText: true },
+    select: {
+      id: true,
+      transcriptText: true,
+      stylePresetId: true,
+      stylePreset: { select: { prompt: true } },
+    },
   });
   if (!project) {
     return { created: 0, updated: 0, skipped: 0, error: "Project not found." };
@@ -337,9 +686,24 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
     return { created: 0, updated: 0, skipped: 0, error: "No transcript available." };
   }
 
-  let roomsFromAi: { name: string; scopeNarrative: string }[];
+  let stylePresetPrompt = "";
+  if (project.stylePresetId && project.stylePreset?.prompt) {
+    stylePresetPrompt = project.stylePreset.prompt;
+  } else {
+    const first = await prisma.stylePreset.findFirst({
+      where: { isActive: true },
+      orderBy: { sortOrder: "asc" },
+      select: { prompt: true },
+    });
+    if (first) stylePresetPrompt = first.prompt;
+  }
+
+  let roomsFromAi: ExtractedSection[];
   try {
-    const result = await extractRoomsFromTranscript(transcriptText);
+    const result = await extractRoomsFromTranscript(
+      transcriptText,
+      stylePresetPrompt || undefined
+    );
     roomsFromAi = result.rooms ?? [];
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to extract rooms from transcript.";
@@ -348,7 +712,7 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
 
   const existingRooms = await prisma.room.findMany({
     where: { projectId },
-    select: { id: true, name: true, sortOrder: true },
+    select: { id: true, name: true, sortOrder: true, lengthIn: true, widthIn: true, ceilingHeightIn: true },
   });
 
   const canonicalToExisting = new Map<string, { id: string }>();
@@ -366,8 +730,19 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
   let nextOrder = (_max.sortOrder ?? -1) + 1;
 
   const roomTypeMap = await getRoomTypeNormalizedMap();
-  const updateOps: Promise<unknown>[] = [];
-  const toCreate: { name: string; scopeNarrative: string; sortOrder: number; roomTypeId?: string }[] = [];
+  const sectionTypeMap = await getSectionTypeNormalizedMap();
+  const toUpdate: { id: string; scopeNarrative: string; lengthIn?: number | null; widthIn?: number | null; ceilingHeightIn?: number | null }[] = [];
+  const toCreate: {
+    name: string;
+    scopeNarrative: string;
+    sortOrder: number;
+    roomTypeId?: string;
+    sectionTypeId?: string;
+    lengthIn?: number | null;
+    widthIn?: number | null;
+    ceilingHeightIn?: number | null;
+    areaSqFt?: number | null;
+  }[] = [];
   let updated = 0;
   let skipped = 0;
   const seenCanonicals = new Set<string>();
@@ -388,24 +763,43 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
     }
     seenCanonicals.add(canonicalName);
 
+    const existingRoom = existingRooms.find((x) => x.id === canonicalToExisting.get(canonicalName)?.id);
     const existing = canonicalToExisting.get(canonicalName);
     if (existing) {
-      updateOps.push(
-        prisma.room.update({
-          where: { id: existing.id },
-          data: {
-            scopeNarrative,
-            scopeSource: "AI",
-            scopeUpdatedAt: new Date(),
-          },
-        })
-      );
+      const lengthIn = r.lengthIn != null && existingRoom?.lengthIn == null ? r.lengthIn : existingRoom?.lengthIn ?? null;
+      const widthIn = r.widthIn != null && existingRoom?.widthIn == null ? r.widthIn : existingRoom?.widthIn ?? null;
+      const ceilingHeightIn = r.ceilingHeightIn != null && existingRoom?.ceilingHeightIn == null ? r.ceilingHeightIn : existingRoom?.ceilingHeightIn ?? null;
+      toUpdate.push({
+        id: existing.id,
+        scopeNarrative,
+        lengthIn,
+        widthIn,
+        ceilingHeightIn,
+      });
       updated++;
     } else {
       const name = displayNameForCanonical(canonicalName);
       const normalizedForMatch = normalizeRoomName(name);
       const roomTypeId = normalizedForMatch ? roomTypeMap.get(normalizedForMatch) : undefined;
-      toCreate.push({ name, scopeNarrative, sortOrder: nextOrder++, roomTypeId });
+      const sectionTypeId = normalizedForMatch ? sectionTypeMap.get(normalizedForMatch) : undefined;
+      const lengthIn = r.lengthIn ?? null;
+      const widthIn = r.widthIn ?? null;
+      const ceilingHeightIn = r.ceilingHeightIn ?? null;
+      const areaSqFt =
+        lengthIn != null && widthIn != null && lengthIn > 0 && widthIn > 0
+          ? Math.round((lengthIn / 12) * (widthIn / 12) * 100) / 100
+          : null;
+      toCreate.push({
+        name,
+        scopeNarrative,
+        sortOrder: nextOrder++,
+        roomTypeId,
+        sectionTypeId,
+        lengthIn,
+        widthIn,
+        ceilingHeightIn,
+        areaSqFt,
+      });
     }
   }
 
@@ -420,11 +814,17 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
         scopeUpdatedAt: new Date(),
         sortOrder: row.sortOrder,
         roomTypeId: row.roomTypeId ?? null,
+        sectionTypeId: row.sectionTypeId ?? null,
+        lengthIn: row.lengthIn ?? null,
+        widthIn: row.widthIn ?? null,
+        ceilingHeightIn: row.ceilingHeightIn ?? null,
+        areaSqFt: row.areaSqFt ?? null,
+        origin: "AI_TRANSCRIPT",
       })),
     });
     const byName = new Map<string, string[]>();
     for (const room of created) {
-      if (!room.roomTypeId) {
+      if (!room.sectionTypeId) {
         const arr = byName.get(room.name) ?? [];
         arr.push(room.id);
         byName.set(room.name, arr);
@@ -433,9 +833,70 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
     unmatchedRooms = [...byName.entries()].map(([name, roomIds]) => ({ name, roomIds }));
   }
 
-  if (updateOps.length > 0) {
+  if (toUpdate.length > 0) {
+    const roomsToUpdate = await prisma.room.findMany({
+      where: { id: { in: toUpdate.map((u) => u.id) } },
+      include: { sectionType: { select: { defaultMeasurementMode: true, defaultEstimateUnit: true } } },
+    });
+    const roomMap = new Map(roomsToUpdate.map((room) => [room.id, room]));
+    const updateOps: Promise<unknown>[] = toUpdate.map((u) => {
+      const room = roomMap.get(u.id);
+      const data: {
+        scopeNarrative: string;
+        scopeSource: string;
+        scopeUpdatedAt: Date;
+        lengthIn?: number | null;
+        widthIn?: number | null;
+        ceilingHeightIn?: number | null;
+        areaSqFt?: number | null;
+        unitQuantity?: number | null;
+        totalLow?: number | null;
+        totalTarget?: number | null;
+        totalHigh?: number | null;
+      } = {
+        scopeNarrative: u.scopeNarrative,
+        scopeSource: "AI",
+        scopeUpdatedAt: new Date(),
+      };
+      if (u.lengthIn != null) data.lengthIn = u.lengthIn;
+      if (u.widthIn != null) data.widthIn = u.widthIn;
+      if (u.ceilingHeightIn != null) data.ceilingHeightIn = u.ceilingHeightIn;
+      const effectiveMode = room?.measurementMode ?? room?.sectionType?.defaultMeasurementMode ?? null;
+      if (
+        room &&
+        room.areaSqFt == null &&
+        (effectiveMode === "AREA" || effectiveMode === "DIMENSIONS") &&
+        u.lengthIn != null &&
+        u.widthIn != null &&
+        u.lengthIn > 0 &&
+        u.widthIn > 0
+      ) {
+        data.areaSqFt = Math.round((u.lengthIn / 12) * (u.widthIn / 12) * 100) / 100;
+      }
+      // Do not overwrite rates or pricingNotes; only recompute totals when unitQuantity changes
+      if (room && !room.unitQuantityManualOverride) {
+        const merged: RoomLikeForUnitQuantity = { ...room, lengthIn: u.lengthIn, widthIn: u.widthIn, areaSqFt: data.areaSqFt ?? room.areaSqFt };
+        const newUnitQty = computeUnitQuantity(merged, room.sectionType?.defaultMeasurementMode ?? null);
+        data.unitQuantity = newUnitQty;
+        const totals = computeSectionTotals(
+          {
+            estimateUnit: room.estimateUnit,
+            unitQuantity: newUnitQty,
+            unitRateLow: room.unitRateLow,
+            unitRateTarget: room.unitRateTarget,
+            unitRateHigh: room.unitRateHigh,
+          },
+          room.sectionType
+        );
+        data.totalLow = totals.totalLow;
+        data.totalTarget = totals.totalTarget;
+        data.totalHigh = totals.totalHigh;
+      }
+      return prisma.room.update({ where: { id: u.id }, data });
+    });
     await Promise.all(updateOps);
   }
+  await recomputeInvestmentRollups(projectId);
 
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -447,6 +908,34 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
   };
 }
 
+/** Resolve effective style preset for AI: project.stylePresetId else room.stylePresetId else first active. */
+async function getEffectiveStylePresetPrompt(
+  projectStylePresetId: string | null,
+  projectStylePreset: { prompt: string } | null,
+  roomStylePresetId: string | null,
+  roomStylePreset: { prompt: string } | null
+): Promise<string> {
+  const projectId = projectStylePresetId ?? null;
+  const roomId = roomStylePresetId ?? null;
+  let effectiveId: string | null = projectId ?? roomId;
+  if (!effectiveId) {
+    const first = await prisma.stylePreset.findFirst({
+      where: { isActive: true },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, prompt: true },
+    });
+    if (first) return first.prompt;
+    return "";
+  }
+  if (effectiveId === projectId && projectStylePreset) return projectStylePreset.prompt;
+  if (effectiveId === roomId && roomStylePreset) return roomStylePreset.prompt;
+  const preset = await prisma.stylePreset.findUnique({
+    where: { id: effectiveId },
+    select: { prompt: true },
+  });
+  return preset?.prompt ?? "";
+}
+
 export async function rewriteRoomScopeAction(
   projectId: string,
   roomId: string
@@ -454,7 +943,11 @@ export async function rewriteRoomScopeAction(
   await requireAdmin();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { transcriptText: true },
+    select: {
+      transcriptText: true,
+      stylePresetId: true,
+      stylePreset: { select: { prompt: true } },
+    },
   });
   if (!project) return { error: "Project not found." };
   const transcriptText = project.transcriptText?.trim() ?? "";
@@ -462,16 +955,30 @@ export async function rewriteRoomScopeAction(
 
   const room = await prisma.room.findFirst({
     where: { id: roomId, projectId },
-    select: { id: true, name: true, scopeNarrative: true },
+    select: {
+      id: true,
+      name: true,
+      scopeNarrative: true,
+      stylePresetId: true,
+      stylePreset: { select: { prompt: true } },
+    },
   });
   if (!room) return { error: "Room not found." };
+
+  const stylePresetPrompt = await getEffectiveStylePresetPrompt(
+    project.stylePresetId,
+    project.stylePreset,
+    room.stylePresetId,
+    room.stylePreset
+  );
 
   let newNarrative: string;
   try {
     newNarrative = await rewriteRoomScopeNarrative(
       transcriptText,
       room.name,
-      room.scopeNarrative ?? ""
+      room.scopeNarrative ?? "",
+      stylePresetPrompt || undefined
     );
   } catch (e) {
     const message =
@@ -540,14 +1047,39 @@ export async function updateRoomsRoomType(
   return {};
 }
 
+/** Set sectionTypeId (Pricing Profile) on the given rooms. Pass null to clear. */
+export async function updateRoomsSectionType(
+  roomIds: string[],
+  sectionTypeId: string | null
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!roomIds.length) return {};
+  await prisma.room.updateMany({
+    where: { id: { in: roomIds } },
+    data: { sectionTypeId },
+  });
+  revalidatePath("/admin/projects");
+  const project = await prisma.room.findFirst({
+    where: { id: roomIds[0] },
+    select: { projectId: true },
+  });
+  if (project) {
+    revalidatePath(`/admin/projects/${project.projectId}`);
+    revalidatePath(`/admin/projects/${project.projectId}/preview`);
+  }
+  return {};
+}
+
 export type NewRoomTypeResolution = {
   name: string;
   roomIds: string[];
-  roomTypeId?: string;
+  /** Map to existing Pricing Profile (SectionType). */
+  sectionTypeId?: string;
+  /** Create a new SectionType and assign it. */
   createNew?: { exterior: boolean };
 };
 
-/** Apply mappings/creates from the New Room Types modal. */
+/** Apply mappings/creates from the Unmatched sections modal. Stores mapping on Room.sectionTypeId (Pricing Profile). */
 export async function bulkResolveNewRoomTypes(
   projectId: string,
   resolutions: NewRoomTypeResolution[]
@@ -555,19 +1087,43 @@ export async function bulkResolveNewRoomTypes(
   await requireAdmin();
   for (const res of resolutions) {
     if (!res.roomIds.length) continue;
-    let roomTypeId: string | undefined;
-    if (res.roomTypeId) {
-      roomTypeId = res.roomTypeId;
+    let sectionTypeId: string | undefined;
+    if (res.sectionTypeId) {
+      sectionTypeId = res.sectionTypeId;
     } else if (res.createNew) {
-      const out = await createRoomType(res.name, res.createNew.exterior);
+      const out = await getOrCreateSectionTypeForName(res.name, res.createNew.exterior);
       if (out.error) return { error: out.error };
-      roomTypeId = out.roomTypeId;
+      sectionTypeId = out.sectionTypeId;
     }
-    if (roomTypeId) {
-      await updateRoomsRoomType(res.roomIds, roomTypeId);
+    if (sectionTypeId) {
+      await updateRoomsSectionType(res.roomIds, sectionTypeId);
     }
   }
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
+}
+
+/** Get existing SectionType by normalized name or create one (INTERIOR/EXTERIOR, AREA, SF). */
+async function getOrCreateSectionTypeForName(
+  name: string,
+  exterior: boolean
+): Promise<{ sectionTypeId?: string; error?: string }> {
+  const trimmed = name?.trim() ?? "";
+  if (!trimmed) return { error: "Name is required" };
+  const category = exterior ? "EXTERIOR" : "INTERIOR";
+  const existing = await prisma.sectionType.findFirst({
+    where: { name: { equals: trimmed, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (existing) return { sectionTypeId: existing.id };
+  const created = await prisma.sectionType.create({
+    data: {
+      name: trimmed,
+      category,
+      defaultMeasurementMode: "AREA",
+      defaultEstimateUnit: "SF",
+    },
+  });
+  return { sectionTypeId: created.id };
 }

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
-import { listActiveStylePresets, listSectionTypes } from "@/app/admin/settings/actions";
+import { listActiveStylePresets, listSectionTypes, getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import { ensureInvestmentLineItemsForBuckets } from "./investment/actions";
 import { ProjectTabs } from "./tabs";
 
@@ -57,12 +57,15 @@ export default async function AdminProjectPage({
     await ensureInvestmentLineItemsForBuckets(id);
   }
 
-  const [project, stylePresets, sectionTypes] = await Promise.all([
+  const [project, stylePresets, sectionTypes, companySettings] = await Promise.all([
     getProject(id),
     listActiveStylePresets(),
     listSectionTypes(),
+    getOrCreateCompanySettings(),
   ]);
   if (!project) notFound();
+  const roomTypeLowPct = companySettings.roomTypeLowPct ?? -10;
+  const roomTypeHighPct = companySettings.roomTypeHighPct ?? 10;
   return (
     <div>
       <div className="mb-4">
@@ -73,24 +76,18 @@ export default async function AdminProjectPage({
           ← Projects
         </Link>
       </div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6">
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
           {project.title}
         </h1>
-        <Link
-          href={`/admin/projects/${id}/preview`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          Preview draft
-        </Link>
       </div>
       <ProjectTabs
         project={project}
         stylePresets={stylePresets}
         sectionTypes={sectionTypes ?? []}
         currentTab={tab}
+        roomTypeLowPct={roomTypeLowPct}
+        roomTypeHighPct={roomTypeHighPct}
       />
     </div>
   );

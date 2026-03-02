@@ -1,6 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Resolve node: built-ins for Turbopack server chunks (avoids ChunkLoadError for node:crypto)
+  turbopack: {
+    resolveAlias: {
+      "node:crypto": "crypto",
+      "node:stream": "stream",
+      "node:buffer": "buffer",
+    },
+  },
   // Keep in sync with ALLOWED_IMAGE_HOSTS in app/lib/media.ts
   images: {
     remotePatterns: [
