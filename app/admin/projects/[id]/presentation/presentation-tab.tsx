@@ -8,6 +8,7 @@ import {
 } from "./actions";
 import { PageList } from "./page-list";
 import { PageEditor } from "./page-editor";
+import { SettingsTab } from "./settings-tab";
 import { SaveBar } from "./save-bar";
 import type { PresentationConfigSaved } from "@/app/lib/layout-config";
 import type { PageListItem, PresentationPageId } from "./types";
@@ -29,6 +30,8 @@ export type CoverContentOption = {
   coverHeroImageId?: string | null;
 };
 
+export type BrandIconOption = { id: string; imageUrl: string; name?: string };
+
 type PresentationTabProps = {
   projectId: string;
   initialConfig: unknown;
@@ -37,6 +40,13 @@ type PresentationTabProps = {
   rooms: RoomItem[];
   /** For cover page live preview (project title, subtitle, coverHeroImageId). */
   coverContent?: CoverContentOption | null;
+  /** Optional transcript + overview objective text for Objective AI helpers. */
+  transcriptText?: string | null;
+  overviewText?: string | null;
+  /** Brand icons for Objective Template C column icon picker. */
+  brandIcons?: BrandIconOption[];
+  /** Brand accent color (e.g. CompanySettings.primaryColorHex). Template C bar defaults to this when barColor is unset. */
+  brandingAccentColor?: string | null;
 };
 
 /** Concept count = root RENDERING count per room (parentMediaId null). */
@@ -82,6 +92,10 @@ export function PresentationTab({
   media: initialMedia,
   rooms,
   coverContent,
+  transcriptText,
+  overviewText,
+  brandIcons = [],
+  brandingAccentColor = null,
 }: PresentationTabProps) {
   const router = useRouter();
   const [media, setMedia] = useState<MediaItem[]>(initialMedia);
@@ -92,6 +106,7 @@ export function PresentationTab({
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleRefreshConcepts = useCallback(async () => {
     setRefreshing(true);
@@ -217,14 +232,23 @@ export function PresentationTab({
         <aside className="w-80 shrink-0 border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/50">
           <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-700">
             <span className="font-medium text-zinc-700 dark:text-zinc-300">Pages</span>
-            <button
-              type="button"
-              onClick={handleRefreshConcepts}
-              disabled={refreshing}
-              className="shrink-0 rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-200 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-700 disabled:opacity-50"
-            >
-              {refreshing ? "…" : "Refresh"}
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-200 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              >
+                Settings
+              </button>
+              <button
+                type="button"
+                onClick={handleRefreshConcepts}
+                disabled={refreshing}
+                className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-200 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-700 disabled:opacity-50"
+              >
+                {refreshing ? "…" : "Reload"}
+              </button>
+            </div>
           </div>
           <PageList
             items={pageListItems}
@@ -254,6 +278,10 @@ export function PresentationTab({
               conceptMediaByRoom={conceptMediaByRoom}
               coverContent={coverContent}
               projectId={projectId}
+              transcriptText={transcriptText}
+              overviewText={overviewText}
+              brandIcons={brandIcons}
+              brandingAccentColor={brandingAccentColor}
             />
           </div>
           <div className="shrink-0 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
@@ -261,10 +289,52 @@ export function PresentationTab({
               status={status}
               errorMessage={errorMessage}
               onSave={handleSave}
+              disableSave={
+                config.pages?.objective?.templateId === "C" &&
+                !(config.pages.objective.title ?? "").trim()
+              }
             />
           </div>
         </div>
       </section>
+
+      {/* Settings drawer */}
+      {settingsOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/40"
+            aria-hidden
+            onClick={() => setSettingsOpen(false)}
+          />
+          <div
+            className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+            role="dialog"
+            aria-label="Presentation settings"
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Presentation Settings
+              </h2>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                aria-label="Close settings"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <SettingsTab
+                config={config}
+                onConfigChange={setConfig}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

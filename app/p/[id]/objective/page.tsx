@@ -1,13 +1,16 @@
 import { notFound } from "next/navigation";
 import { getPublicProposalSnapshot } from "@/app/lib/public-proposal";
-import { getLayoutConfig } from "@/app/lib/layout-config";
-import { isBadPlaceholderUrl } from "@/app/lib/media";
 import {
-  EditorialSectionHeading,
-  EditorialTwoCol,
-  EditorialGallery,
-  type EditorialGalleryImage,
-} from "@/components/public/blocks";
+  getLayoutConfig,
+  type PresentationConfigSaved,
+  type PublicLayoutConfigSaved,
+  type ObjectivePageConfig,
+} from "@/app/lib/layout-config";
+import { getLibraryMediaByIds, getBrandIconsByIds } from "@/app/lib/library-media";
+import { ObjectiveTemplateB } from "@/app/components/presentation/objective/objective-template-b";
+import { ObjectiveTemplateC } from "@/app/components/presentation/objective/objective-template-c";
+import { ObjectiveRenderer } from "@/components/public/objective";
+import { prisma } from "@/app/lib/prisma";
 
 export default async function ObjectivePage({
   params,
@@ -20,86 +23,114 @@ export default async function ObjectivePage({
 
   const cfg = getLayoutConfig(data.publicLayoutConfig);
   const { snapshot } = data;
-  const { project, media } = snapshot;
-  const galleryImages: EditorialGalleryImage[] = media
-    .filter((m) => m.url && !isBadPlaceholderUrl(m.url))
-    .slice(0, 4)
-    .map((m) => ({ id: m.id, url: m.url, caption: m.caption }));
+  const { project } = snapshot;
 
-  const pillars = ["Quality", "Clarity", "Execution"];
-  const variant = cfg.pages.objective.variant;
+  const rawPages =
+    data.publicLayoutConfig &&
+    typeof data.publicLayoutConfig === "object" &&
+    "pages" in data.publicLayoutConfig
+      ? (data.publicLayoutConfig as PresentationConfigSaved).pages
+      : undefined;
+  const rawObjective =
+    rawPages?.objective ??
+    (data.publicLayoutConfig as PublicLayoutConfigSaved | null)?.objective;
+  const templateId =
+    rawObjective && typeof rawObjective === "object" && "templateId" in rawObjective
+      ? (rawObjective as ObjectivePageConfig).templateId
+      : undefined;
 
-  if (variant === "fullBleedQuote") {
+  if (templateId === "B") {
+    const objectiveConfig: ObjectivePageConfig = {
+      ...(rawObjective && typeof rawObjective === "object"
+        ? (rawObjective as ObjectivePageConfig)
+        : {}),
+      title: (rawObjective as ObjectivePageConfig)?.title ?? "Project Objective",
+      objectiveText:
+        (rawObjective as ObjectivePageConfig)?.objectiveText ?? project.objective ?? "",
+      commitments: (rawObjective as ObjectivePageConfig)?.commitments ?? [],
+    };
+
+    const companySettings = await prisma.companySettings.findFirst({
+      select: { primaryColorHex: true },
+    });
+    const brandingAccentColor =
+      companySettings?.primaryColorHex?.trim() &&
+      /^#[0-9A-Fa-f]{6}$/.test(companySettings.primaryColorHex.trim())
+        ? companySettings.primaryColorHex.trim()
+        : null;
     return (
-      <article className="space-y-14 pt-8 sm:pt-12">
-        <EditorialSectionHeading
-          kicker="Overview"
-          title="Project Objective"
-          accentRule
-        />
-        <div className="relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-zinc-50/80 py-16 dark:border-zinc-700/80 dark:bg-zinc-800/30 sm:py-20 md:py-24">
-          <blockquote className="mx-auto max-w-[720px] px-8 text-center sm:px-12">
-            <p className="whitespace-pre-wrap text-xl leading-relaxed text-zinc-700 dark:text-zinc-300 sm:text-2xl md:text-[1.6rem]">
-              {project.objective ?? "No objective provided."}
-            </p>
-          </blockquote>
-          {pillars.length > 0 && (
-            <div className="mt-10 flex flex-wrap justify-center gap-x-6 gap-y-1">
-              {pillars.map((label) => (
-                <span
-                  key={label}
-                  className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400"
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
-          )}
+      <article className="flex min-h-0 flex-col pt-8 sm:pt-12">
+        <div className="h-[min(80vh,675px)] w-full max-w-[1200px] mx-auto">
+          <ObjectiveTemplateB
+            config={objectiveConfig}
+            brandingAccentColor={brandingAccentColor}
+          />
         </div>
       </article>
     );
   }
 
+  if (templateId === "C") {
+    const raw = rawObjective as ObjectivePageConfig;
+    const rawCols = raw?.templateC?.columns ?? raw?.columns ?? [];
+    const columnList = Array.isArray(rawCols) ? rawCols.slice(0, 3) : [];
+    while (columnList.length < 3) columnList.push({});
+    const objectiveConfig: ObjectivePageConfig = {
+      ...(rawObjective && typeof rawObjective === "object"
+        ? (rawObjective as ObjectivePageConfig)
+        : {}),
+      title: (rawObjective as ObjectivePageConfig)?.title ?? "Project Objective",
+      objectiveText:
+        (rawObjective as ObjectivePageConfig)?.objectiveText ?? project.objective ?? "",
+      templateC: raw?.templateC ? { ...raw.templateC, columns: columnList } : undefined,
+      columns: columnList,
+    };
+    const cols = objectiveConfig.columns ?? [];
+    const iconIds = cols
+      .slice(0, 3)
+      .map((c) => c?.iconId)
+      .filter((id): id is string => !!id);
+    const [brandIcons, companySettings] = await Promise.all([
+      getBrandIconsByIds(iconIds),
+      prisma.companySettings.findFirst({ select: { primaryColorHex: true } }),
+    ]);
+    const iconUrls = new Map(brandIcons.map((icon) => [icon.id, icon.imageUrl]));
+    const brandingAccentColor = companySettings?.primaryColorHex?.trim() && /^#[0-9A-Fa-f]{6}$/.test(companySettings.primaryColorHex.trim())
+      ? companySettings.primaryColorHex.trim()
+      : null;
+
+    return (
+      <article className="space-y-0">
+        <ObjectiveTemplateC
+          config={objectiveConfig}
+          iconUrls={iconUrls}
+          brandingAccentColor={brandingAccentColor}
+        />
+      </article>
+    );
+  }
+
+  // Template A (or default): use ObjectiveRenderer with merged config and library media for photoSlots
+  const mergedObjective: ObjectivePageConfig = {
+    ...(rawObjective && typeof rawObjective === "object"
+      ? (rawObjective as ObjectivePageConfig)
+      : {}),
+    variant: cfg.pages.objective.variant,
+    title: (rawObjective as ObjectivePageConfig)?.title ?? "Project Objective",
+    objectiveText:
+      (rawObjective as ObjectivePageConfig)?.objectiveText ?? project.objective ?? "",
+    commitments: (rawObjective as ObjectivePageConfig)?.commitments ?? [],
+    photoSlots: (rawObjective as ObjectivePageConfig)?.photoSlots ?? [],
+  };
+  const photoSlotIds = (mergedObjective.photoSlots ?? [])
+    .slice(0, 3)
+    .map((s) => s?.libraryMediaId)
+    .filter((id): id is string => !!id);
+  const objectiveMedia = await getLibraryMediaByIds(photoSlotIds);
+
   return (
     <article className="space-y-14 pt-8 sm:pt-12">
-      <EditorialSectionHeading
-        kicker="Overview"
-        title="Project Objective"
-        accentRule
-      />
-      <EditorialTwoCol
-        className="mt-6"
-        left={
-          <div className="max-w-[520px] space-y-6">
-            <p className="whitespace-pre-wrap text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-              {project.objective ?? "No objective provided."}
-            </p>
-            {pillars.length > 0 && (
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {pillars.map((label) => (
-                  <span
-                    key={label}
-                    className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400"
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        }
-        right={
-          galleryImages.length > 0 ? (
-            <EditorialGallery
-              images={galleryImages}
-              variant="one-large-two-small"
-              aspect="4/3"
-            />
-          ) : (
-            <div className="aspect-[4/3] rounded-2xl border border-zinc-200/80 bg-zinc-50 dark:border-zinc-700/80 dark:bg-zinc-800/50" />
-          )
-        }
-      />
+      <ObjectiveRenderer config={mergedObjective} media={objectiveMedia} />
     </article>
   );
 }

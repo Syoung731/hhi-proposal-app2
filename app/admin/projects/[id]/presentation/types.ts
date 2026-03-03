@@ -1,10 +1,16 @@
-import type { PresentationConfigSaved } from "@/app/lib/layout-config";
+import type {
+  ObjectivePageConfig,
+  PresentationConfigSaved,
+  PresentationSettings,
+} from "@/app/lib/layout-config";
+import { getTemplateCColumns } from "@/app/lib/layout-config";
 
 export type PresentationPageId =
   | "cover"
   | "objective"
   | "whyUs"
   | "transitions"
+  | "settings"
   | `room:${string}`
   | "rollup";
 
@@ -13,6 +19,7 @@ export type PageKind =
   | "objective"
   | "whyUs"
   | "transitions"
+  | "settings"
   | "room"
   | "rollup";
 
@@ -25,13 +32,40 @@ export type PageListItem = {
   badge?: number;
 };
 
+/** Default presentation settings for live view. */
+export const DEFAULT_PRESENTATION_SETTINGS: Required<PresentationSettings> = {
+  background: "light",
+  transition: "fade",
+  speed: "normal",
+};
+
 /** Default full config for the editor. Must satisfy PresentationConfigSaved exactly. */
 export const DEFAULT_PRESENTATION_CONFIG = {
   version: 1,
+  settings: DEFAULT_PRESENTATION_SETTINGS,
   transitions: { mode: "fade" as const },
   pages: {
     cover: { variant: "heroOverlay" as const, heroMediaId: null },
-    objective: { variant: "twoColGallery" as const },
+    objective: {
+      variant: "twoColGallery" as const,
+      templateId: "A",
+      title: "Project Objective",
+      objectiveText: "",
+      commitments: ["", "", ""],
+      photoSlots: [{}, {}, {}],
+      executiveLabel: "Executive Summary",
+      columns: [{}, {}, {}],
+      ai: {
+        suggestedSections: [],
+        suggestedTags: [],
+        suggestedPhotoIds: [],
+        copyLastRunAt: null,
+        photoLastRunAt: null,
+        lastRunAt: null,
+        appliedAt: null,
+        appliedHash: null,
+      },
+    } satisfies ObjectivePageConfig,
     whyUs: { variant: "gridCards" as const },
     rooms: {} as Record<string, { enabled?: boolean; variant?: string; featuredMediaId?: string | null }>,
     rollup: { mode: "auto" as const, variant: "simpleList" as const, roomIds: [] as string[] },
@@ -54,7 +88,7 @@ export function normalizePresentationConfig(
       : {};
   const legacy = s as {
     cover?: { variant?: string; heroMediaId?: string | null };
-    objective?: { variant?: string };
+    objective?: ObjectivePageConfig | { variant?: string };
     difference?: { variant?: string };
     whyUs?: { variant?: string };
     animations?: { mode?: string };
@@ -75,9 +109,14 @@ export function normalizePresentationConfig(
     (pages.cover as { variant?: string } | undefined)?.variant ??
     legacy.cover?.variant ??
     "heroOverlay";
+
+  const rawObjective =
+    (pages.objective as ObjectivePageConfig | undefined) ??
+    (legacy.objective as ObjectivePageConfig | undefined) ??
+    {};
+
   const objectiveVariant =
-    (pages.objective as { variant?: string } | undefined)?.variant ??
-    legacy.objective?.variant ??
+    (rawObjective as { variant?: string } | undefined)?.variant ??
     "twoColGallery";
   const whyUsVariant =
     (pages.whyUs as { variant?: string } | undefined)?.variant ??
@@ -94,8 +133,34 @@ export function normalizePresentationConfig(
       ? rollupRoomIdsRaw
       : [];
 
+  const rawSettings = s.settings as Partial<PresentationSettings> | undefined;
+  type Background = PresentationSettings["background"];
+  type Speed = PresentationSettings["speed"];
+  const background =
+    rawSettings?.background === "light" ||
+    rawSettings?.background === "dark" ||
+    rawSettings?.background === "warm" ||
+    rawSettings?.background === "imageOverlay"
+      ? (rawSettings.background as Background)
+      : DEFAULT_PRESENTATION_SETTINGS.background;
+  const transition =
+    transitionsMode === "none" || transitionsMode === "fade" || transitionsMode === "slide"
+      ? (transitionsMode as PresentationSettings["transition"])
+      : DEFAULT_PRESENTATION_SETTINGS.transition;
+  const speed =
+    rawSettings?.speed === "slow" || rawSettings?.speed === "normal" || rawSettings?.speed === "fast"
+      ? (rawSettings.speed as Speed)
+      : DEFAULT_PRESENTATION_SETTINGS.speed;
+
+  const settings: PresentationSettings = {
+    background,
+    transition,
+    speed,
+  };
+
   return {
     version: typeof s.version === "number" ? s.version : 1,
+    settings,
     transitions: {
       mode:
         transitionsMode === "none" || transitionsMode === "fade" || transitionsMode === "slide"
@@ -112,12 +177,35 @@ export function normalizePresentationConfig(
           (pages.cover as { heroMediaId?: string | null } | undefined)
             ?.heroMediaId ?? legacy.cover?.heroMediaId ?? null,
       },
-      objective: {
-        variant:
+      objective: (() => {
+        const obj = { ...(rawObjective as ObjectivePageConfig) } as ObjectivePageConfig;
+        obj.variant =
           objectiveVariant === "twoColGallery" || objectiveVariant === "fullBleedQuote"
             ? (objectiveVariant as ObjectiveVariant)
-            : "twoColGallery",
-      },
+            : "twoColGallery";
+        // Preserve templateB (underlineColor, dividerColor) when present.
+        if (rawObjective && typeof rawObjective === "object" && "templateB" in rawObjective) {
+          const tb = (rawObjective as ObjectivePageConfig).templateB;
+          if (tb && typeof tb === "object") {
+            obj.templateB = { ...tb };
+          }
+        }
+        // Migrate any legacy templateC.subtitle into the shared top-level subtitle
+        // when subtitle is missing, so it survives template switching.
+        if (!obj.subtitle && obj.templateC?.subtitle) {
+          obj.subtitle = obj.templateC.subtitle;
+        }
+        if (obj.templateId === "C") {
+          const cols = getTemplateCColumns(obj);
+          const barColor =
+            obj.templateC?.barColor?.trim() && /^#[0-9A-Fa-f]{6}$/.test(obj.templateC.barColor.trim())
+              ? obj.templateC.barColor.trim()
+              : undefined;
+          obj.templateC = { ...obj.templateC, barColor, columns: cols };
+          obj.columns = cols;
+        }
+        return obj;
+      })(),
       whyUs: {
         variant:
           whyUsVariant === "gridCards" || whyUsVariant === "iconRows"
