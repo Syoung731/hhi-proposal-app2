@@ -344,6 +344,7 @@ model CompanySettings {
   zip                     String?
   phone                   String?
   email                   String?
+  websiteUrl              String?
   logoUrl                 String?
   logoLightUrl            String?
   logoDarkUrl             String?
@@ -357,6 +358,57 @@ model CompanySettings {
   roomTypeHighPct        Float?   // default +10 in UI; high = target * (1 + highPct/100)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
+}
+
+model BrandIcon {
+  id        String           @id @default(cuid())
+  slug      String           @unique
+  name      String
+  // PNG icon stored in R2
+  imageUrl  String           // public URL to the PNG in R2
+  imageKey  String           // object key in R2 for deletes / moves
+  width     Int?             // optional metadata
+  height    Int?             // optional metadata
+  // Deprecated: legacy inline SVG markup, kept nullable for safe migrations
+  svg       String?
+  tags      String[]
+  category  String?
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  backgrounds BrandBackground[]
+
+  @@index([name])
+}
+
+model BrandBackground {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  baseColorHex   String?  // e.g. #FFFFFF
+  // Overlay choice: either an uploaded/generated image OR a pattern icon reference
+  overlayImageUrl String?
+  overlayImageKey String?
+  overlayIconId   String?  // references BrandIcon.id (optional)
+  overlayOpacity  Int      @default(6)   // percent 0-100 (we’ll keep it percent)
+  overlayScale    Int      @default(100) // percent
+  overlaySpacing  Int      @default(120) // px
+  overlayRotation Int      @default(0)   // degrees
+  // Cached PNG preview for fast grids/pickers
+  previewImageUrl String?
+  previewImageKey String?
+  // Availability toggle: controls whether this background can be selected in the app UI.
+  // Active toggle: internal flag for turning a background on/off globally (e.g. experiments, rollouts).
+  isAvailable     Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  tags            String[] // optional for search/filter
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  overlayIcon BrandIcon? @relation(fields: [overlayIconId], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder])
 }
 
 // Library of room types (e.g. Kitchen, Primary Bath). Reusable across projects.
@@ -374,6 +426,70 @@ model RoomType {
   rooms              Room[]
 
   @@index([sortOrder])
+}
+
+// ---------------------------------------------------------------------------
+// Global Photo Library (past work, reusable across projects)
+// ---------------------------------------------------------------------------
+
+enum LibraryUseType {
+  BEFORE
+  AFTER
+  IN_PROGRESS
+  RENDER
+  DETAIL
+  LIFESTYLE
+}
+
+enum LibraryQuality {
+  HERO_READY
+  STANDARD
+}
+
+enum LibraryOrientation {
+  LANDSCAPE
+  PORTRAIT
+  SQUARE
+  PANORAMA
+  UNKNOWN
+}
+
+model LibraryMedia {
+  id                  String             @id @default(cuid())
+  fileKey             String
+  url                 String
+  thumbnailKey        String?
+  thumbnailUrl        String?
+  title               String?
+  description         String?
+  roomTypeIds         String[]
+  tags                String[]
+  useType             LibraryUseType     @default(AFTER)
+  quality             LibraryQuality     @default(STANDARD)
+  orientation         LibraryOrientation @default(UNKNOWN)
+  marketingApproved   Boolean            @default(false)
+  sourceProjectName   String?
+  sourceProjectId     String?
+  photographer        String?
+  createdByUserId     String?
+  sortOrder           Int                @default(0)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@index([useType])
+  @@index([quality])
+  @@index([orientation])
+  @@index([marketingApproved])
+  @@index([createdAt])
+  @@index([sortOrder])
+}
+
+model LibraryTag {
+  id         String   @id @default(cuid())
+  tag        String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  usageCount Int      @default(0)
 }
 
 // Section types (UI: Sections). Defines category, default measurement mode, estimate unit, and pricing.

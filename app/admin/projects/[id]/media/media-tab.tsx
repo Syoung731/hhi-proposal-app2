@@ -435,7 +435,16 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
       return;
     }
     const newMediaId = result.mediaId ?? result.createdMediaId;
-    const maxSortOrder = Math.max(0, ...renderingsForActive.map((m) => m.sortOrder));
+    // Placeholder must have parentMediaId = root of concept so it appears in same group (UI groups by root's direct children only).
+    const groupForUpdated = conceptGroups.find((g) => g.versions.some((v) => v.id === updateModalRenderId));
+    const rootIdForPlaceholder = groupForUpdated?.root.id ?? updateModalRenderId;
+    const maxSortOrderInConcept = groupForUpdated
+      ? Math.max(
+          groupForUpdated.root.sortOrder,
+          ...groupForUpdated.children.map((m) => m.sortOrder),
+          0
+        ) + 1
+      : Math.max(0, ...renderingsForActive.map((m) => m.sortOrder)) + 1;
     const placeholder: MediaItem = {
       id: newMediaId,
       createdAt: new Date().toISOString(),
@@ -444,10 +453,10 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
       tags: [],
       roomId: activeRoomId,
       url: "",
-      sortOrder: maxSortOrder + 1,
+      sortOrder: maxSortOrderInConcept,
       room: activeRoom ? { id: activeRoom.id, name: activeRoom.name } : null,
       sourceMediaId: effectiveSourceMediaId ?? undefined,
-      parentMediaId: updateModalRenderId,
+      parentMediaId: rootIdForPlaceholder,
       renderStatus: "QUEUED",
     };
     setOptimisticRenderMedia((prev) => [...prev, placeholder]);

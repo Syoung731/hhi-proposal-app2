@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useProposal } from "@/app/p/[id]/ProposalContext";
+import { PresentationFrame } from "@/app/components/presentation/presentation-frame";
 import { ProposalDrawerNav } from "./ProposalDrawerNav";
 import { ProposalProgressDots } from "./ProposalProgressDots";
 import { ProposalPrevNext } from "./ProposalPrevNext";
@@ -11,24 +12,37 @@ const PRESENT_KEY = "proposal-present-mode";
 
 function usePresentationMode(proposalId: string): [boolean, () => void] {
   const searchParams = useSearchParams();
-  const fromQuery = searchParams.get("mode") === "present";
+  const [isPresent, setIsPresent] = useState<boolean>(false);
+  const initialized = useRef(false);
 
-  const [local, setLocal] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
+  // After mount, resolve presentation mode from search params + localStorage.
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+
+    let fromQuery = false;
+    try {
+      fromQuery = searchParams.get("mode") === "present";
+    } catch {
+      // ignore
+    }
+
+    let fromStorage = false;
     try {
       const raw = localStorage.getItem(PRESENT_KEY);
-      if (raw == null) return false;
-      const parsed = JSON.parse(raw) as Record<string, boolean>;
-      return Boolean(parsed[proposalId]);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>;
+        fromStorage = Boolean(parsed[proposalId]);
+      }
     } catch {
-      return false;
+      // ignore
     }
-  });
 
-  const isPresent = fromQuery || local;
+    setIsPresent(fromQuery || fromStorage);
+  }, [proposalId, searchParams]);
 
   const toggle = useCallback(() => {
-    setLocal((prev) => {
+    setIsPresent((prev) => {
       const next = !prev;
       try {
         const raw = localStorage.getItem(PRESENT_KEY);
@@ -45,24 +59,45 @@ function usePresentationMode(proposalId: string): [boolean, () => void] {
   return [isPresent, toggle];
 }
 
+function useScaleToFit(slideW: number, slideH: number) {
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const update = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const next = Math.min(vw / slideW, vh / slideH);
+      setScale(next);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [slideW, slideH]);
+
+  return scale;
+}
+
 type Props = {
   proposalId: string;
   children: React.ReactNode;
 };
 
-const animationClass: Record<string, string> = {
-  none: "",
-  fade: "animate-in fade-in duration-300",
-  slide: "animate-in slide-in-from-right-4 duration-300",
-};
-
 export function ProposalShell({ proposalId, children }: Props) {
   const pathname = usePathname();
-  const { layoutConfig } = useProposal();
-  const transitionMode = layoutConfig.transitions?.mode ?? layoutConfig.animations?.mode;
-  const animClass = animationClass[transitionMode ?? "fade"] ?? "";
+  const { layoutConfig, presentationSettings } = useProposal();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [presentMode, togglePresentMode] = usePresentationMode(proposalId);
+  const [hydrated, setHydrated] = useState(false);
+
+  const SLIDE_W = 1365;
+  const SLIDE_H = 768;
+  const scale = useScaleToFit(SLIDE_W, SLIDE_H);
+
+  const showPresent = hydrated && presentMode;
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
@@ -100,73 +135,89 @@ export function ProposalShell({ proposalId, children }: Props) {
   }, []);
 
   return (
-    <div className="relative min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      {/* Magazine canvas: centered, max width, generous padding */}
-      <main className="mx-auto min-h-screen max-w-[1100px] px-6 pb-28 pt-12 sm:px-10 sm:pb-32 sm:pt-16 md:px-14">
-        {/* Top bar: only menu (and optional presentation toggle); minimal */}
-        <div className="absolute left-4 top-4 z-20 flex items-center gap-2 sm:left-6 sm:top-6">
+    <div
+      className={
+        showPresent
+          ? "fixed inset-0 bg-zinc-50 dark:bg-zinc-950"
+          : "relative min-h-screen bg-zinc-50 dark:bg-zinc-950"
+      }
+    >
+      {/* Top bar: only menu (and optional presentation toggle); minimal */}
+      <div className="absolute left-4 top-4 z-20 flex items-center gap-2 sm:left-6 sm:top-6">
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white/90 text-zinc-600 shadow-sm transition hover:bg-white hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          aria-label="Open menu"
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        {!presentMode && (
           <button
             type="button"
-            onClick={() => setDrawerOpen(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white/90 text-zinc-600 shadow-sm transition hover:bg-white hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-            aria-label="Open menu"
+            onClick={togglePresentMode}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+            aria-label="Presentation mode"
+            title="Presentation mode"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           </button>
-          {!presentMode && (
-            <button
-              type="button"
-              onClick={togglePresentMode}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-              aria-label="Presentation mode"
-              title="Presentation mode"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-            </button>
-          )}
-          {presentMode && (
-            <button
-              type="button"
-              onClick={togglePresentMode}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white/90 text-zinc-600 shadow-sm transition hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800"
-              aria-label="Exit presentation mode"
-              title="Exit presentation mode"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-
-        {/* Content with optional animation on chapter change */}
-        <div
-          key={pathname}
-          className={`proposal-chapter-content ${animClass}`.trim()}
-        >
-          {children}
-        </div>
-
-        {/* Bottom chrome: dots (center), prev/next (sides). Hidden in non-present when "hide chrome" is on — we only hide extra stuff; dots and prev/next stay per spec. */}
-        {presentMode ? (
-          <>
-            <ProposalProgressDots />
-            <ProposalPrevNext />
-          </>
-        ) : (
-          <>
-            <ProposalProgressDots />
-            <ProposalPrevNext />
-          </>
         )}
-      </main>
+        {hydrated && presentMode && (
+          <button
+            type="button"
+            onClick={togglePresentMode}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white/90 text-zinc-600 shadow-sm transition hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800"
+            aria-label="Exit presentation mode"
+            title="Exit presentation mode"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {showPresent ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <div
+            style={{
+              width: SLIDE_W,
+              height: SLIDE_H,
+              transform: `scale(${scale})`,
+              transformOrigin: "center",
+            }}
+            className="relative"
+          >
+            <PresentationFrame
+              settings={presentationSettings}
+              pageKey={pathname}
+            >
+              {children}
+            </PresentationFrame>
+            <ProposalProgressDots />
+            <ProposalPrevNext />
+          </div>
+        </div>
+      ) : (
+        <main className="mx-auto min-h-screen max-w-[1100px] px-6 pb-28 pt-12 sm:px-10 sm:pb-32 sm:pt-16 md:px-14">
+          <PresentationFrame
+            settings={presentationSettings}
+            pageKey={pathname}
+          >
+            {children}
+          </PresentationFrame>
+          <ProposalProgressDots />
+          <ProposalPrevNext />
+        </main>
+      )}
 
       {/* Presentation mode: invisible left/right edge tap zones for prev/next (no swipe required on mobile) */}
-      {presentMode && (
+      {showPresent && (
         <>
           <button
             type="button"

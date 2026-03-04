@@ -844,12 +844,24 @@ export async function startRenderUpdateAction(
   const effectivePresetId = project.stylePresetId;
   const effectivePreset = project.stylePreset;
 
-  const maxOrder = await prisma.media
-    .aggregate({
-      where: { projectId, roomId, type: MediaType.RENDERING },
-      _max: { sortOrder: true },
-    })
-    .then((r) => r._max.sortOrder ?? -1);
+  // New render must be direct child of root so UI grouping shows it (UI only shows parentMediaId === rootId).
+  // sortOrder: max within this concept (root + its direct children) + 1 so version order is v1, v1.1, v1.2.
+  const directChildren = await prisma.media.findMany({
+    where: {
+      projectId,
+      roomId,
+      type: MediaType.RENDERING,
+      parentMediaId: effectiveRootId,
+      sourceMediaId: baseRender.sourceMediaId,
+    },
+    select: { id: true, sortOrder: true },
+  });
+  const maxOrderInConcept = Math.max(
+    rootMedia.sortOrder,
+    ...directChildren.map((m) => m.sortOrder),
+    -1
+  );
+  const newSortOrder = maxOrderInConcept + 1;
 
   const created = await prisma.media.create({
     data: {
@@ -861,9 +873,9 @@ export async function startRenderUpdateAction(
       fileKey: `renderings/pending/${baseRender.id}/${Date.now()}`,
       caption: null,
       tags: [],
-      sortOrder: maxOrder + 1,
+      sortOrder: newSortOrder,
       sourceMediaId: baseRender.sourceMediaId,
-      parentMediaId: baseRenderMediaId,
+      parentMediaId: effectiveRootId,
       editInstruction: trimmed,
       stylePresetId: effectivePresetId,
       renderProvider: "gemini",

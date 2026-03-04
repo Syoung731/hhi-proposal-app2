@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { CompanyProfileTab } from "./company-profile-tab";
 import { BrandingTab } from "./branding-tab";
 import { ProposalDefaultsTab } from "./proposal-defaults-tab";
@@ -10,16 +11,50 @@ import { StylePresetsTab, type StylePresetForUI } from "./style-presets-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { EmployeesTab } from "./employees-tab";
 
-const TABS = [
-  { slug: "company", label: "Company Profile" },
+const DEFAULT_TAB = "company-profile";
+
+const TABS: { slug: string; label: string; href?: string }[] = [
+  { slug: "company-profile", label: "Company Profile" },
   { slug: "branding", label: "Branding" },
-  { slug: "defaults", label: "Proposal Defaults" },
-  { slug: "room-types", label: "Pricing Profiles" },
+  { slug: "proposal-defaults", label: "Proposal Defaults" },
+  { slug: "pricing-profiles", label: "Pricing Profiles" },
   { slug: "section-types", label: "Section Types" },
   { slug: "style-presets", label: "Style Presets" },
+  { slug: "photo-library", label: "Photo Library", href: "/admin/settings/photo-library" },
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
-] as const;
+];
+
+export type BrandIconForUI = {
+  id: string;
+  slug: string;
+  name: string;
+  imageUrl: string;
+  imageKey: string;
+  tags: string[];
+  category: string | null;
+  isActive: boolean;
+};
+
+export type BrandBackgroundForUI = {
+  id: string;
+  slug: string;
+  name: string;
+  baseColorHex: string | null;
+  overlayImageUrl: string | null;
+  overlayImageKey: string | null;
+  overlayIconId: string | null;
+  overlayOpacity: number;
+  overlayScale: number;
+  overlaySpacing: number;
+  overlayRotation: number;
+  previewImageUrl: string | null;
+  previewImageKey: string | null;
+  isAvailable: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  tags: string[];
+};
 
 export type CompanySettingsForUI = {
   id: string;
@@ -31,6 +66,7 @@ export type CompanySettingsForUI = {
   zip: string | null;
   phone: string | null;
   email: string | null;
+  websiteUrl: string | null;
   logoUrl: string | null;
   logoLightUrl: string | null;
   logoDarkUrl: string | null;
@@ -80,6 +116,13 @@ export type SectionTypeForUI = {
   priceHigh: number | null;
 };
 
+export type IconLibraryContext = {
+  companyName: string;
+  websiteUrl: string | null;
+  effectiveAccent: string;
+  effectiveText: string;
+};
+
 type Props = {
   settings: CompanySettingsForUI;
   sectionTypes: SectionTypeForUI[];
@@ -87,11 +130,60 @@ type Props = {
   stylePresets: StylePresetForUI[];
   employees: EmployeeForUI[];
   currentUserIsAdmin: boolean;
+  brandIcons?: BrandIconForUI[];
+  brandBackgrounds?: BrandBackgroundForUI[];
+  iconLibraryContext?: IconLibraryContext;
+  openIconLibrary?: boolean;
+  openBackgroundLibrary?: boolean;
 };
 
-export function SettingsTabs({ settings, sectionTypes, canSeedSectionTypes, stylePresets, employees, currentUserIsAdmin }: Props) {
-  const [currentTab, setCurrentTab] = useState<string>("company");
+export function SettingsTabs({
+  settings,
+  sectionTypes,
+  canSeedSectionTypes,
+  stylePresets,
+  employees,
+  currentUserIsAdmin,
+  brandIcons = [],
+  brandBackgrounds = [],
+  iconLibraryContext,
+  openIconLibrary: initialOpenIconLibrary = false,
+  openBackgroundLibrary: initialOpenBackgroundLibrary = false,
+}: Props) {
+  const [currentTab, setCurrentTab] = useState<string>(DEFAULT_TAB);
+  const [iconLibraryOpen, setIconLibraryOpen] = useState(initialOpenIconLibrary);
+  const [backgroundLibraryOpen, setBackgroundLibraryOpen] = useState(initialOpenBackgroundLibrary);
   const currentLabel = TABS.find((t) => t.slug === currentTab)?.label ?? currentTab;
+
+  useEffect(() => {
+    const validSlugs = new Set(TABS.map((t) => t.slug));
+
+    const applyHash = () => {
+      if (typeof window === "undefined") return;
+      const raw = window.location.hash;
+      if (!raw) {
+        setCurrentTab(DEFAULT_TAB);
+        return;
+      }
+      const hash = raw.replace(/^#/, "");
+      if (validSlugs.has(hash)) {
+        setCurrentTab(hash);
+      } else {
+        setCurrentTab(DEFAULT_TAB);
+      }
+    };
+
+    applyHash();
+
+    const handleHashChange = () => {
+      applyHash();
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => {
+      window.removeEventListener("hashchange", handleHashChange);
+    };
+  }, []);
 
   return (
     <div className="flex gap-8">
@@ -101,19 +193,32 @@ export function SettingsTabs({ settings, sectionTypes, canSeedSectionTypes, styl
             Company Setup
           </p>
           <nav className="space-y-0.5">
-            {TABS.map(({ slug, label }) => {
-              const isActive = currentTab === slug;
+            {TABS.map(({ slug, label, href }) => {
+              const isLink = href != null;
+              const isActive = !isLink && currentTab === slug;
+              const linkClass =
+                "block w-full rounded-lg px-3 py-3 text-left text-sm transition-colors " +
+                (isActive
+                  ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                  : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100");
+              if (href) {
+                return (
+                  <Link key={slug} href={href} className={linkClass}>
+                    {label}
+                  </Link>
+                );
+              }
               return (
                 <button
                   key={slug}
                   type="button"
-                  onClick={() => setCurrentTab(slug)}
-                  className={
-                    "block w-full rounded-lg px-3 py-3 text-left text-sm transition-colors " +
-                    (isActive
-                      ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                      : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100")
-                  }
+                  onClick={() => {
+                    setCurrentTab(slug);
+                    if (typeof window !== "undefined") {
+                      window.history.replaceState(null, "", `#${slug}`);
+                    }
+                  }}
+                  className={linkClass}
                 >
                   {label}
                 </button>
@@ -132,14 +237,41 @@ export function SettingsTabs({ settings, sectionTypes, canSeedSectionTypes, styl
               {currentLabel}
             </p>
           </header>
-          {currentTab === "company" && (
+          {currentTab === "company-profile" && (
             <CompanyProfileTab settings={settings} />
           )}
-          {currentTab === "branding" && <BrandingTab settings={settings} />}
-          {currentTab === "defaults" && (
+          {currentTab === "branding" && (
+            <BrandingTab
+              settings={settings}
+              brandIcons={brandIcons}
+              brandBackgrounds={brandBackgrounds}
+              iconLibraryContext={iconLibraryContext}
+              iconLibraryOpen={iconLibraryOpen}
+              onOpenIconLibrary={() => setIconLibraryOpen(true)}
+              onCloseIconLibrary={() => {
+              setIconLibraryOpen(false);
+              if (typeof window !== "undefined") {
+                const u = new URL(window.location.href);
+                u.searchParams.delete("openIconLibrary");
+                window.history.replaceState(null, "", u.pathname + (u.hash || "#branding"));
+              }
+            }}
+              backgroundLibraryOpen={backgroundLibraryOpen}
+              onOpenBackgroundLibrary={() => setBackgroundLibraryOpen(true)}
+              onCloseBackgroundLibrary={() => {
+                setBackgroundLibraryOpen(false);
+                if (typeof window !== "undefined") {
+                  const u = new URL(window.location.href);
+                  u.searchParams.delete("openBackgroundLibrary");
+                  window.history.replaceState(null, "", u.pathname + (u.hash || "#branding"));
+                }
+              }}
+            />
+          )}
+          {currentTab === "proposal-defaults" && (
             <ProposalDefaultsTab settings={settings} />
           )}
-          {currentTab === "room-types" && (
+          {currentTab === "pricing-profiles" && (
             <RoomTypesTab
               sectionTypes={sectionTypes}
               roomTypeLowPct={settings.roomTypeLowPct}

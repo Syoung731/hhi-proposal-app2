@@ -112,6 +112,19 @@ export function CompanyProfileTab({ settings }: Props) {
           </div>
         </div>
         <div>
+          <label htmlFor="websiteUrl" className={labelClass}>
+            Website URL
+          </label>
+          <input
+            id="websiteUrl"
+            name="websiteUrl"
+            type="url"
+            defaultValue={settings.websiteUrl ?? ""}
+            placeholder="https://www.example.com"
+            className={inputClass}
+          />
+        </div>
+        <div>
           <label htmlFor="phone" className={labelClass}>
             Phone
           </label>

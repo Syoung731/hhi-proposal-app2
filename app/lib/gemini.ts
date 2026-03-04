@@ -172,7 +172,9 @@ export async function generateRenderEdit({
     ? `\n\nAdditional style guidance (do not override the user instruction): ${stylePresetPrompt.trim()}`
     : "";
 
-  const textPrompt = `Edit the image with these instructions. Preserve composition, camera angle, lighting, and materials unless explicitly changed.
+  const textPrompt = `You are editing an interior design rendering of a room or bathroom vanity. The image contains only architecture, cabinetry, countertops, fixtures, and other inanimate objects. There are no people, faces, bodies, animals, or medical content.
+
+Edit the image with these instructions. Preserve composition, camera angle, lighting, and materials unless explicitly changed.
 
 Instruction: ${instruction.trim()}${styleGuidance}
 
@@ -213,6 +215,11 @@ Requirements:
     const feedback = (response as { promptFeedback?: { blockReason?: string; blockReasonMessage?: string } })?.promptFeedback;
     const reason = feedback?.blockReason ?? "No candidates returned";
     const detail = feedback?.blockReasonMessage ?? "";
+    if (reason === "PROHIBITED_CONTENT") {
+      throw new Error(
+        "Gemini blocked this edit as unsafe (PROHIBITED_CONTENT). This sometimes happens even for harmless interior-design edits. Try rephrasing in neutral design language, for example: \"Change the vanity cabinet color to blue. No people or faces, just recolor the cabinetry.\""
+      );
+    }
     throw new Error(`Gemini returned no image: ${reason}. ${detail}`.trim());
   }
 

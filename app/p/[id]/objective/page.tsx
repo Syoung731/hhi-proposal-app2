@@ -40,14 +40,15 @@ export default async function ObjectivePage({
       : undefined;
 
   if (templateId === "B") {
+    const raw = rawObjective as ObjectivePageConfig;
     const objectiveConfig: ObjectivePageConfig = {
       ...(rawObjective && typeof rawObjective === "object"
         ? (rawObjective as ObjectivePageConfig)
         : {}),
-      title: (rawObjective as ObjectivePageConfig)?.title ?? "Project Objective",
-      objectiveText:
-        (rawObjective as ObjectivePageConfig)?.objectiveText ?? project.objective ?? "",
-      commitments: (rawObjective as ObjectivePageConfig)?.commitments ?? [],
+      title: raw?.title ?? "Project Objective",
+      objectiveText: raw?.objectiveText ?? project.objective ?? "",
+      objectiveTextB: raw?.objectiveTextB,
+      commitments: raw?.commitments ?? [],
     };
 
     const companySettings = await prisma.companySettings.findFirst({
@@ -60,7 +61,7 @@ export default async function ObjectivePage({
         : null;
     return (
       <article className="flex min-h-0 flex-col pt-8 sm:pt-12">
-        <div className="h-[min(80vh,675px)] w-full max-w-[1200px] mx-auto">
+        <div className="h-[min(80vh,675px)] w-full max-w-[1200px] mx-auto overflow-hidden">
           <ObjectiveTemplateB
             config={objectiveConfig}
             brandingAccentColor={brandingAccentColor}

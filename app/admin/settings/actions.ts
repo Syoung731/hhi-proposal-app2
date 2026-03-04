@@ -3,9 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { normalizeIconKey } from "@/app/lib/brand-icons";
 import type { Prisma } from "@/app/generated/prisma";
 import type { SectionCategory, MeasurementMode, EstimateUnit, PricingBasis } from "@/app/generated/prisma";
 import { SUPER_ADMIN_EMAIL } from "@/app/lib/constants";
+import { GoogleGenAI } from "@google/genai";
+import { getPresignedUploadUrl, uploadBuffer, deleteR2Objects, readObjectToBuffer } from "@/app/lib/s3";
+import sharp from "sharp";
 
 /** Get or create the singleton CompanySettings. Auto-create on first visit with defaults. */
 export async function getOrCreateCompanySettings() {
@@ -36,6 +40,22 @@ export async function saveCompanyProfileAction(
   const zip = (formData.get("zip") as string)?.trim() || null;
   const phone = (formData.get("phone") as string)?.trim() || null;
   const email = (formData.get("email") as string)?.trim() || null;
+  const rawWebsiteUrl = formData.get("websiteUrl") as string | null;
+  const websiteUrlInput = rawWebsiteUrl ? rawWebsiteUrl.trim() : "";
+
+  let websiteUrl: string | null = null;
+  if (websiteUrlInput) {
+    try {
+      const url = new URL(websiteUrlInput);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return { error: "Website URL must start with http:// or https://" };
+      }
+      websiteUrl = url.toString();
+    } catch {
+      return { error: "Website URL must be a valid http or https URL" };
+    }
+  }
+
   await prisma.companySettings.update({
     where: { id: settings.id },
     data: {
@@ -47,6 +67,7 @@ export async function saveCompanyProfileAction(
       zip,
       phone,
       email,
+      websiteUrl,
     },
   });
   revalidatePath("/admin/settings");
@@ -1128,4 +1149,1115 @@ export async function seedSectionTypesAction(): Promise<{ error?: string; insert
   }
   revalidatePath("/admin/settings");
   return { inserted };
+}
+
+// ——— Brand Icons ———
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash";
+const GEMINI_SVG_MODEL = process.env.GEMINI_SVG_MODEL ?? "gemini-2.5-flash";
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
+const BRAND_ICON_NORMALIZED_SIZE = 256;
+
+async function normalizeAndValidateIconPng(
+  buffer: Buffer
+): Promise<{ error?: string; normalizedBuffer?: Buffer }> {
+  let png: Buffer;
+  try {
+    png = await sharp(buffer, { failOnError: true })
+      .ensureAlpha()
+      .resize(BRAND_ICON_NORMALIZED_SIZE, BRAND_ICON_NORMALIZED_SIZE, {
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+  } catch {
+    return { error: "Icon must be a PNG with a transparent background." };
+  }
+
+  try {
+    const result = await sharp(png)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .raw()
+      .toBuffer({ resolveWithObject: true } as any);
+    const { data, info } = result as unknown as {
+      data: Buffer;
+      info: { channels?: number };
+    };
+    const channels = info.channels ?? 0;
+    if (channels < 4) {
+      return { error: "Icon must be a PNG with a transparent background." };
+    }
+    let hasTransparentPixel = false;
+    for (let i = 3; i < data.length; i += channels) {
+      if (data[i] < 255) {
+        hasTransparentPixel = true;
+        break;
+      }
+    }
+    if (!hasTransparentPixel) {
+      return { error: "Icon must be a PNG with a transparent background." };
+    }
+  } catch {
+    return { error: "Icon must be a PNG with a transparent background." };
+  }
+
+  return { normalizedBuffer: png };
+}
+
+async function normalizeIconPngFromAi(
+  buffer: Buffer
+): Promise<Buffer> {
+  let png: Buffer;
+  try {
+    png = await sharp(buffer, { failOnError: true })
+      .ensureAlpha()
+      .png()
+      .toBuffer();
+  } catch {
+    // If we cannot decode/process the image at all, surface a clear error.
+    throw new Error("Failed to process AI-generated icon image.");
+  }
+
+  try {
+    const result = await sharp(png)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .raw()
+      .toBuffer({ resolveWithObject: true } as any);
+
+    const { data, info } = result as unknown as {
+      data: Buffer;
+      info: { width: number; height: number; channels?: 1 | 2 | 3 | 4 };
+    };
+
+    const channels = (info.channels ?? 4) as 1 | 2 | 3 | 4;
+    // We expect RGBA here because of ensureAlpha(), but if not, just return the basic PNG.
+    if (channels < 4) {
+      return png;
+    }
+
+    // Treat near-white pixels as background and key them out to full transparency.
+    // This assumes the model followed the prompt and used a solid white background.
+    const threshold = 252; // 0–255, how close to pure white (#FFFFFF) we consider "background"
+
+    for (let i = 0; i < data.length; i += channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (r >= threshold && g >= threshold && b >= threshold) {
+        // Set alpha to 0 for background pixels, leave icon pixels untouched.
+        data[i + 3] = 0;
+      }
+    }
+
+    const output = await sharp(data, {
+      raw: {
+        width: info.width,
+        height: info.height,
+        channels,
+      },
+    })
+      .resize(BRAND_ICON_NORMALIZED_SIZE, BRAND_ICON_NORMALIZED_SIZE, {
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+
+    return output;
+  } catch {
+    // If keying fails for any reason, fall back to the basic PNG.
+    return png;
+  }
+}
+
+export type BrandIconSuggestion = {
+  name: string;
+  slug: string;
+  category: string;
+  tags: string[];
+  description: string;
+  visual: string;
+};
+
+function safeJsonParse<T>(raw: string): T | null {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function getGeminiTextClient() {
+  if (!GEMINI_API_KEY?.trim()) {
+    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
+  }
+  return new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+}
+
+export async function suggestBrandIconsAction(
+  input: {
+    companyName?: string | null;
+    websiteUrl?: string | null;
+    description?: string | null;
+    existingKeys?: string[] | null;
+  }
+): Promise<{ error?: string; suggestions?: BrandIconSuggestion[] }> {
+  await requireAdmin();
+
+  const companyName = (input.companyName ?? "").trim();
+  const websiteUrl = (input.websiteUrl ?? "").trim();
+  const description = (input.description ?? "").trim();
+  const existingKeysInput = Array.isArray(input.existingKeys)
+    ? input.existingKeys
+    : [];
+
+  const existingKeySet = new Set(
+    existingKeysInput
+      .map((k) => normalizeIconKey(k))
+      .filter((k) => k.length > 0)
+  );
+
+  let ai: GoogleGenAI;
+  try {
+    ai = await getGeminiTextClient();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: msg };
+  }
+
+  const contextLines: string[] = [];
+  if (companyName) contextLines.push(`Company name: ${companyName}`);
+  if (websiteUrl) contextLines.push(`Website URL: ${websiteUrl}`);
+  if (description) contextLines.push(`Company description: ${description}`);
+
+  const prompt = `
+You are helping a residential design-build-remodel company create a small SVG icon library for use in proposal documents and UI.
+
+Business context:
+${contextLines.join("\n") || "Design-build-remodel contractor focused on residential projects."}
+
+Task:
+Suggest between 10 and 12 concrete, re-usable icon concepts that match a remodeler/proposal workflow. Icons must be easy to draw as a clean 24px stroke icon (Lucide-style).
+
+Icon theming requirements:
+- Avoid abstract ideas like "impact", "exceptionality", "momentum", "value", "experience".
+- Focus ONLY on objects and moments that are clearly drawable:
+  - Services: kitchen, bath, addition, exterior, deck, landscaping, paint, tile, cabinetry, plumbing, electrical, HVAC.
+  - Process: design, estimate, schedule, selections, permits, demo, build, punch list, completion.
+  - Client experience: communication, approvals, warranty, quality check, transparency.
+  - Documents: contract, checklist, invoice, plan set.
+
+Output format:
+Return ONLY a JSON array (no prose, no markdown fences) with 10–12 items. Each item must have this exact shape:
+[
+  {
+    "name": "Kitchen Remodel",
+    "slug": "kitchen-remodel",
+    "category": "services",
+    "tags": ["kitchen", "remodel", "cabinets"],
+    "description": "Shows a simple kitchen scene such as a base cabinet, upper cabinet, and small appliance outline.",
+    "visual": "simple kitchen base cabinet and upper cabinet with small stove outline"
+  }
+]
+
+Field rules:
+- name: short, human-friendly label.
+- slug: kebab-case, lowercase, using only letters, numbers, and dashes.
+- category: ONE of exactly four values: "services", "process", "documents", "experience".
+- tags: 3–6 short, lowercase keywords directly related to remodeler work (e.g. "kitchen", "bathroom", "estimate", "schedule", "contract").
+- description: ONE short sentence describing what the icon should visually depict (not abstract value props).
+- visual: a very short, concrete visual directive that is easy to draw as a line icon; focus on clear shapes and accents, e.g. "house outline with small pencil accent", "document outline with checkmark accent", "tile grid with one highlighted square".
+
+Hard constraints:
+- Do NOT include any text outside the JSON array.
+- Do NOT include markdown code fences.
+- Do NOT use abstract concepts that cannot be drawn as simple objects or scenes.
+- You MUST treat two icons as duplicates if their normalized key matches. The normalized key is computed as:
+  - lowercased
+  - trimmed
+  - "&" replaced with "and"
+  - all punctuation removed
+  - whitespace collapsed to single "-"
+- You MUST NOT propose any icon whose normalized key is in this list of reserved keys:
+  ${Array.from(existingKeySet)
+    .slice(0, 200)
+    .join(", ")}
+`.trim();
+
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
+  try {
+    response = await ai.models.generateContent({
+      model: GEMINI_TEXT_MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      config: {
+        responseModalities: ["TEXT"],
+      },
+    });
+  } catch (e) {
+    const anyErr = e as { status?: unknown; message?: unknown };
+    const status = anyErr?.status;
+    const message = (anyErr?.message ?? String(e)) as string;
+    const isNotFound =
+      status === 404 ||
+      status === "NOT_FOUND" ||
+      /NOT_FOUND/.test(message) ||
+      /404/.test(message);
+    if (isNotFound) {
+      return {
+        error:
+          "Gemini model not available. Update GEMINI_TEXT_MODEL / GEMINI_SVG_MODEL env var.",
+      };
+    }
+    return { error: `Gemini suggestion request failed: ${message}` };
+  }
+
+  const candidates = (response as { candidates?: unknown[] })?.candidates;
+  const parts = (candidates?.[0] as { content?: { parts?: { text?: string }[] } })?.content?.parts;
+  const textPart = parts?.find(
+    (p): p is { text: string } => typeof (p as { text?: string }).text === "string"
+  );
+  const raw = textPart?.text?.trim() ?? "";
+  if (!raw) {
+    return { error: "Gemini returned an empty response for icon suggestions." };
+  }
+
+  // Strip common markdown fences or leading text if present.
+  const cleaned = raw
+    .replace(/```json/gi, "```")
+    .replace(/```/g, "")
+    .trim();
+
+  const parsed = safeJsonParse<BrandIconSuggestion[] | { icons?: BrandIconSuggestion[] }>(cleaned);
+  if (!parsed) {
+    return {
+      error:
+        "Failed to parse Gemini response as JSON. Try again or simplify the company description.",
+    };
+  }
+
+  const suggestionsArray = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed.icons)
+      ? parsed.icons
+      : null;
+
+  if (!suggestionsArray || suggestionsArray.length === 0) {
+    return { error: "Gemini did not return any icon suggestions." };
+  }
+
+  const ALLOWED_CATEGORIES = new Set(["services", "process", "documents", "experience"]);
+
+  const suggestions: BrandIconSuggestion[] = suggestionsArray
+    .map((item) => {
+      const name = (item.name ?? "").toString().trim();
+      const slug = (item.slug ?? "").toString().trim();
+      const rawCategory = (item.category ?? "").toString().trim().toLowerCase();
+      const tags = Array.isArray(item.tags)
+        ? item.tags.map((t) => (t ?? "").toString().trim().toLowerCase()).filter(Boolean)
+        : [];
+      const description = (item.description ?? "").toString().trim();
+      const visual = (item.visual ?? "").toString().trim();
+
+      let category = rawCategory;
+      if (!ALLOWED_CATEGORIES.has(category)) {
+        if (rawCategory.startsWith("service")) category = "services";
+        else if (rawCategory.startsWith("doc")) category = "documents";
+        else if (rawCategory.includes("client") || rawCategory.includes("experience")) {
+          category = "experience";
+        } else if (rawCategory.includes("process") || rawCategory.includes("workflow")) {
+          category = "process";
+        }
+      }
+      if (!ALLOWED_CATEGORIES.has(category)) {
+        // Default ambiguous categories to "services" since most icons are service-like.
+        category = "services";
+      }
+
+      const normalizedTags = tags.slice(0, 6);
+      while (normalizedTags.length < 3 && normalizedTags.length > 0) {
+        normalizedTags.push(normalizedTags[normalizedTags.length - 1]!);
+      }
+
+      return {
+        name,
+        slug,
+        category,
+        tags: normalizedTags,
+        description,
+        visual,
+      } satisfies BrandIconSuggestion;
+    })
+    .filter((s) => s.name && s.slug && s.visual);
+
+  if (suggestions.length === 0) {
+    return { error: "Gemini suggestions could not be normalized into usable icon ideas." };
+  }
+
+  // Server-side dedupe: remove anything that collides with existing keys,
+  // and ensure no duplicates within this batch (by normalized key).
+  const seen = new Set(existingKeySet);
+  const deduped: BrandIconSuggestion[] = [];
+  for (const s of suggestions) {
+    const key = normalizeIconKey(s.slug ?? s.name ?? "");
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(s);
+  }
+
+  if (deduped.length === 0) {
+    return {
+      error:
+        "Gemini suggestions were filtered out as duplicates of existing icons. Try again with a different description or after clearing some icons.",
+    };
+  }
+
+  return { suggestions: deduped };
+}
+
+export async function generateBrandIconPngAction(
+  input: { name: string; visual: string; description?: string | null }
+): Promise<{ error?: string; imageUrl?: string; imageKey?: string; width?: number; height?: number }> {
+  await requireAdmin();
+
+  const { effectiveAccent, effectiveText } = await getEffectiveBrandColors();
+
+  const name = (input.name ?? "").toString().trim();
+  const visual = (input.visual ?? "").toString().trim();
+  const description = (input.description ?? "").toString().trim();
+
+  if (!name) {
+    return { error: "Name is required for PNG generation." };
+  }
+  if (!visual) {
+    return { error: "Visual directive is required for PNG generation." };
+  }
+
+  if (!GEMINI_API_KEY?.trim()) {
+    return { error: "GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local." };
+  }
+
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+
+  const prompt = `
+You are designing a single clean, modern PNG icon for a design-build-remodel company.
+
+Icon name: ${name}
+Primary visual directive: ${visual}
+Additional context: ${description || "Simple, clear icon for a home services contractor."}
+
+ICON OUTPUT REQUIREMENTS (STRICT, MUST FOLLOW EXACTLY):
+- Output exactly ONE icon image, not a sheet or grid.
+- The output format SHOULD be a PNG image (no animated formats like GIF or APNG).
+- The canvas must be a 1:1 square (for example 512x512).
+- The BACKGROUND must be a SOLID pure white color (#FFFFFF) with no gradient, no noise, no texture, and no pattern.
+- Absolutely NO fake-transparency checkerboards, grids, tiles, or crosshatch patterns in the background.
+- Do NOT use gradient, textured, photographic, or patterned backgrounds of any kind.
+- Do NOT include drop shadows, inner shadows, outer glows, halos, or cast shadows around or behind the icon.
+- The icon must be a standalone subject on this solid white canvas only. Do NOT add a separate plate, tile, badge, circle, rounded rectangle, frame, or container shape behind it.
+- Only use visible strokes and filled shapes for the subject itself.
+- The icon subject must be centered on the canvas with even padding on all sides so strokes never touch the canvas edge.
+- Line-art inspired style: simple, clean outlines, with optional subtle flat fills.
+
+PALETTE:
+- Full color is allowed. You may use multiple colors for the icon details.
+- Prefer a cohesive, professional palette that would look good on both light and dark UI backgrounds.
+- Avoid neon, extremely saturated, or visually noisy palettes.
+- No photographic textures or photo-like elements.
+
+ADDITIONAL HARD CONSTRAINTS:
+- No text, no letters, no words.
+- No drop shadows, outer glows, inner glows, halos, or lighting effects that look like a shadow or glow around the icon.
+- No gradient BACKGROUND or gradient plate behind the icon. If you use gradients, they must be inside the icon subject only (not covering the canvas).
+- No people or faces; focus on tools, documents, rooms, or process scenes.
+- Keep the icon centered with comfortable padding to all edges so strokes never touch the canvas edge.
+
+Style:
+- Simple and bold enough to be legible at 24px in UI.
+
+Output:
+- Return a single PNG image that follows ALL of the above rules.
+`.trim();
+
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
+  try {
+    response = await ai.models.generateContent({
+      model: GEMINI_IMAGE_MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      config: {
+        responseModalities: ["IMAGE"],
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `Gemini image request failed: ${msg}` };
+  }
+
+  const candidates = (response as { candidates?: unknown[] })?.candidates;
+  const parts = (candidates?.[0] as { content?: { parts?: unknown[] } })?.content?.parts;
+  if (!parts?.length) {
+    return { error: "Gemini returned no image content for icon generation." };
+  }
+
+  let imageBase64: string | undefined;
+  let mimeType: string | undefined;
+  for (const part of parts) {
+    const p = part as { inlineData?: { mimeType?: string; data?: string } };
+    if (p.inlineData?.data) {
+      imageBase64 = p.inlineData.data;
+      mimeType = p.inlineData.mimeType ?? "image/png";
+      break;
+    }
+  }
+
+  if (!imageBase64) {
+    return { error: "Gemini returned no inline image data for icon generation." };
+  }
+
+  const bytes = Buffer.from(imageBase64, "base64");
+  let processedPng: Buffer;
+  try {
+    processedPng = await normalizeIconPngFromAi(bytes);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `Failed to post-process AI icon PNG: ${msg}` };
+  }
+
+  const objectKey = `brand-icons/global/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}.png`;
+
+  try {
+    const { publicUrl, fileKey } = await uploadBuffer(
+      objectKey,
+      processedPng,
+      "image/png"
+    );
+    return {
+      imageUrl: publicUrl,
+      imageKey: fileKey,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `Failed to upload icon PNG to storage: ${msg}` };
+  }
+}
+
+/** Stub for AI-generated background textures. Returns not-implemented until backend is wired. */
+export async function generateBackgroundTextureAction(input: {
+  prompt: string;
+  type: "subtle_texture" | "icon_pattern" | "gradient_texture";
+}): Promise<{ error?: string; images?: { imageUrl: string; imageKey: string }[] }> {
+  await requireAdmin();
+  void input;
+  return {
+    error: "Generate Background (Gemini) is not implemented yet. Backend will be wired later.",
+  };
+}
+
+export type BrandIconCreateData = {
+  slug: string;
+  name: string;
+  imageUrl: string;
+  imageKey: string;
+  tags?: string[];
+  category?: string | null;
+};
+
+export type BrandIconUpdateData = {
+  slug?: string;
+  name?: string;
+  imageUrl?: string;
+  imageKey?: string;
+  tags?: string[];
+  category?: string | null;
+  isActive?: boolean;
+};
+
+const BRAND_ICON_SLUG_REGEX = /^[a-z0-9-]{2,40}$/;
+
+function normalizeBrandIconSlug(raw: string): string {
+  const trimmed = (raw ?? "").trim().toLowerCase();
+  const kebab = trimmed
+    .replace(/[_\s]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return kebab;
+}
+
+function validateBrandIconSlug(slug: string): { error?: string } {
+  if (!slug) return { error: "Slug is required" };
+  if (!BRAND_ICON_SLUG_REGEX.test(slug)) {
+    return {
+      error: "Slug must be 2–40 characters and use only lowercase letters, numbers, and dashes",
+    };
+  }
+  return {};
+}
+
+function normalizeBrandIconTags(tags: string[] | undefined | null): string[] {
+  if (!tags) return [];
+  const normalized = tags
+    .flatMap((t) => (Array.isArray(t) ? t : [t]))
+    .map((t) => (t ?? "").toString().trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set(normalized));
+}
+
+function stripScriptTags(svg: string): string {
+  return svg.replace(/<script[\s\S]*?<\/script>/gi, "");
+}
+
+function stripEventHandlerAttributes(svg: string): string {
+  // Remove on*="..." and on*='...' style event handler attributes
+  return svg
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "");
+}
+
+type Rgb = { r: number; g: number; b: number };
+
+function hexToRgb(hex: string): Rgb | null {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return null;
+  let value = match[1]!.toLowerCase();
+  if (value.length === 3) {
+    value = value
+      .split("")
+      .map((c) => c + c)
+      .join("");
+  }
+  const num = parseInt(value, 16);
+  return {
+    r: (num >> 16) & 255,
+    g: (num >> 8) & 255,
+    b: num & 255,
+  };
+}
+
+function clamp255(n: number) {
+  return Math.max(0, Math.min(255, n));
+}
+
+function sq(n: number) {
+  return n * n;
+}
+
+function rgbDistance(a: Rgb, b: Rgb): number {
+  const dr = a.r - b.r;
+  const dg = a.g - b.g;
+  const db = a.b - b.b;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+function rgbToHsl({ r, g, b }: Rgb): { h: number; s: number; l: number } {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  let h = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) {
+    return { h: 0, s: 0, l };
+  }
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  switch (max) {
+    case rn:
+      h = (gn - bn) / d + (gn < bn ? 6 : 0);
+      break;
+    case gn:
+      h = (bn - rn) / d + 2;
+      break;
+    default:
+      h = (rn - gn) / d + 4;
+      break;
+  }
+  h /= 6;
+  return { h, s, l };
+}
+
+function parseRgbLike(color: string): Rgb | null {
+  const rgbMatch = /rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)/i.exec(color);
+  if (rgbMatch) {
+    return {
+      r: Math.max(0, Math.min(255, Number(rgbMatch[1]))),
+      g: Math.max(0, Math.min(255, Number(rgbMatch[2]))),
+      b: Math.max(0, Math.min(255, Number(rgbMatch[3]))),
+    };
+  }
+  const hslMatch = /hsla?\(\s*([0-9.]+)\s*,\s*([0-9.]+)%\s*,\s*([0-9.]+)%/i.exec(color);
+  if (hslMatch) {
+    const h = (Number(hslMatch[1]) % 360) / 360;
+    const s = Math.max(0, Math.min(1, Number(hslMatch[2]) / 100));
+    const l = Math.max(0, Math.min(1, Number(hslMatch[3]) / 100));
+    if (s === 0) {
+      const v = Math.round(l * 255);
+      return { r: v, g: v, b: v };
+    }
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const hueToRgb = (t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const r = hueToRgb(h + 1 / 3);
+    const g = hueToRgb(h);
+    const b = hueToRgb(h - 1 / 3);
+    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+  }
+  return null;
+}
+
+function findColorTokens(svg: string): string[] {
+  const tokens = new Set<string>();
+  const hexRegex = /#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g;
+  const rgbRegex = /rgba?\([^)]+\)/gi;
+  const hslRegex = /hsla?\([^)]+\)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = hexRegex.exec(svg))) {
+    tokens.add(m[0]);
+  }
+  while ((m = rgbRegex.exec(svg))) {
+    tokens.add(m[0]);
+  }
+  while ((m = hslRegex.exec(svg))) {
+    tokens.add(m[0]);
+  }
+  return Array.from(tokens);
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeSvgColors(svg: string, accentHex: string): string {
+  const accentRgb = hexToRgb(accentHex) ?? { r: 244, g: 114, b: 22 }; // default #F47216
+  const tokens = findColorTokens(svg);
+  if (tokens.length === 0) return svg;
+
+  const replacements = new Map<string, string>();
+  for (const token of tokens) {
+    const hexRgb = hexToRgb(token);
+    const rgb = hexRgb ?? parseRgbLike(token);
+    if (!rgb) {
+      // If we can't parse it confidently, do not replace this token.
+      continue;
+    }
+    const { s, l } = rgbToHsl(rgb);
+    const distanceToAccent = rgbDistance(rgb, accentRgb);
+    const isAccentLike = distanceToAccent < 80 || (s >= 0.55 && l >= 0.45);
+    const mapped = isAccentLike ? "var(--brand-accent)" : "currentColor";
+    replacements.set(token, mapped);
+  }
+
+  if (replacements.size === 0) return svg;
+
+  let result = svg;
+  for (const [from, to] of replacements) {
+    const re = new RegExp(escapeRegExp(from), "g");
+    result = result.replace(re, to);
+  }
+  return result;
+}
+
+function validateAndSanitizeSvg(
+  rawSvg: string,
+  accentHex: string
+): { error?: string; svg?: string } {
+  const svg = (rawSvg ?? "").toString().trim();
+  if (!svg) return { error: "SVG is required" };
+  const lower = svg.toLowerCase();
+  if (!lower.includes("<svg") || !lower.includes("</svg")) {
+    return { error: "SVG must contain <svg> and </svg> tags" };
+  }
+  if (lower.includes("<script")) {
+    return { error: "SVG must not contain <script> tags" };
+  }
+
+  let sanitized = stripScriptTags(svg);
+  sanitized = stripEventHandlerAttributes(sanitized);
+  sanitized = normalizeSvgColors(sanitized, accentHex);
+  const finalLower = sanitized.toLowerCase();
+
+  // Basic safety and forbidden structural elements.
+  if (finalLower.includes("<script")) {
+    return { error: "SVG must not contain <script> tags" };
+  }
+  if (
+    /<\/?\s*(filter|mask|clippath|pattern|image|text|foreignobject|style)\b/i.test(
+      sanitized
+    )
+  ) {
+    return {
+      error:
+        "SVG must not contain filter, mask, clipPath, pattern, image, text, foreignObject, or style elements",
+    };
+  }
+
+  // Enforce 24x24 viewBox.
+  const viewBoxMatch = sanitized.match(/viewBox\s*=\s*["']([^"']+)["']/i);
+  const viewBoxValue = viewBoxMatch?.[1]?.trim();
+  if (!viewBoxValue) {
+    return { error: 'SVG must define viewBox="0 0 24 24"' };
+  }
+  if (viewBoxValue !== "0 0 24 24") {
+    return { error: 'SVG viewBox must be exactly "0 0 24 24"' };
+  }
+
+  // Disallow full-background rects like width="100%" or height="100%".
+  if (/<rect\b[^>]*(width|height)\s*=\s*["']100%["']/i.test(sanitized)) {
+    return { error: "SVG must not use full-size background rectangles" };
+  }
+
+  // Enforce stroke-width to be exactly 1.5 everywhere.
+  const strokeWidthRegex = /stroke-width\s*=\s*["']([^"']+)["']/gi;
+  let swMatch: RegExpExecArray | null;
+  while ((swMatch = strokeWidthRegex.exec(sanitized))) {
+    const rawValue = swMatch[1]?.trim() ?? "";
+    const numeric = parseFloat(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return { error: "SVG stroke-width must be a numeric value" };
+    }
+    if (numeric !== 1.5) {
+      return {
+        error: "SVG stroke-width must be exactly 1.5 for all strokes in the icon system.",
+      };
+    }
+  }
+
+  // Forbid fill="currentColor" and fill="var(--brand-accent)" entirely.
+  const pathTagRegex = /<path\b[^>]*>/gi;
+  let pathMatch: RegExpExecArray | null;
+  while ((pathMatch = pathTagRegex.exec(sanitized))) {
+    const tag = pathMatch[0];
+    const fillMatch = tag.match(/\bfill\s*=\s*["']([^"']*)["']/i);
+    const fill = fillMatch?.[1]?.trim();
+    if (!fill || fill === "none" || fill === "transparent") continue;
+
+    if (fill === "currentColor") {
+      return {
+        error:
+          'SVG must not use fill="currentColor". Use stroke for outlines and fill="none" for main shapes.',
+      };
+    }
+
+    if (fill === "var(--brand-accent)") {
+      return {
+        error:
+          'SVG must not use fill="var(--brand-accent)". Use stroke="var(--brand-accent)" for a small accent instead.',
+      };
+    }
+  }
+
+  // Enforce that var(--brand-accent) is used at most once and only in stroke attributes.
+  const accentStrokeMatches =
+    sanitized.match(/\bstroke\s*=\s*["']var\(--brand-accent\)["']/gi) ?? [];
+  const accentFillMatches =
+    sanitized.match(/\bfill\s*=\s*["']var\(--brand-accent\)["']/gi) ?? [];
+
+  if (accentFillMatches.length > 0) {
+    return {
+      error:
+        'Accent color var(--brand-accent) may only be used in stroke attributes, never in fill.',
+    };
+  }
+
+  if (accentStrokeMatches.length > 1) {
+    return {
+      error:
+        "SVG may use var(--brand-accent) on only one small accent stroke in the icon.",
+    };
+  }
+
+  const accentUsed = accentStrokeMatches.length === 1;
+
+  // If accent is used, forbid any large circles/ellipses (radius/radii > 3).
+  if (accentUsed) {
+    const circleRegex = /<circle\b[^>]*>/gi;
+    let circleMatch: RegExpExecArray | null;
+    while ((circleMatch = circleRegex.exec(sanitized))) {
+      const tag = circleMatch[0];
+      const rMatch = tag.match(/\br\s*=\s*["']([^"']*)["']/i);
+      const rVal = rMatch?.[1]?.trim();
+      if (rVal) {
+        const rNum = parseFloat(rVal);
+        if (Number.isFinite(rNum) && rNum > 3) {
+          return {
+            error:
+              "When using accent color, circles must have radius 3 or smaller to avoid giant accent dots.",
+          };
+        }
+      }
+    }
+
+    const ellipseRegex = /<ellipse\b[^>]*>/gi;
+    let ellipseMatch: RegExpExecArray | null;
+    while ((ellipseMatch = ellipseRegex.exec(sanitized))) {
+      const tag = ellipseMatch[0];
+      const rxMatch = tag.match(/\brx\s*=\s*["']([^"']*)["']/i);
+      const ryMatch = tag.match(/\bry\s*=\s*["']([^"']*)["']/i);
+      const rxVal = rxMatch?.[1]?.trim();
+      const ryVal = ryMatch?.[1]?.trim();
+      const rxNum = rxVal ? parseFloat(rxVal) : NaN;
+      const ryNum = ryVal ? parseFloat(ryVal) : NaN;
+      if (
+        (Number.isFinite(rxNum) && rxNum > 3) ||
+        (Number.isFinite(ryNum) && ryNum > 3)
+      ) {
+        return {
+          error:
+            "When using accent color, ellipses must have radii 3 or smaller to avoid giant accent shapes.",
+        };
+      }
+    }
+  }
+
+  // After normalization, ensure we only have allowed color values.
+  const hexColorRegex = /#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g;
+  const rgbColorRegex = /rgba?\([^)]+\)/gi;
+  const hslColorRegex = /hsla?\([^)]+\)/gi;
+  const disallowedStyleRegex =
+    /\b(?:fill|stroke|color)\s*[:=]\s*["']?(?!currentColor\b|var\(--brand-accent\)|none\b|transparent\b)[^"';>\s]+/gi;
+
+  if (
+    hexColorRegex.test(sanitized) ||
+    rgbColorRegex.test(sanitized) ||
+    hslColorRegex.test(sanitized) ||
+    disallowedStyleRegex.test(sanitized)
+  ) {
+    return {
+      error:
+        "SVG colors must resolve to only currentColor or var(--brand-accent) (plus none/transparent).",
+    };
+  }
+
+  return { svg: sanitized };
+}
+
+async function getEffectiveBrandColors() {
+  const settings = await prisma.companySettings.findFirst();
+  const effectiveAccent = settings?.primaryColorHex ?? "#F47216";
+  const effectiveText = settings?.textColorHex ?? "#18181B";
+  return { effectiveAccent, effectiveText };
+}
+
+export async function listBrandIcons() {
+  await requireAdmin();
+  return prisma.brandIcon.findMany({
+    orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+  });
+}
+
+export async function createBrandIconUploadAction(input: {
+  filename?: string;
+  contentType?: string;
+}): Promise<{ uploadUrl: string; publicUrl: string; objectKey: string } | { error: string }> {
+  await requireAdmin();
+
+  const filename = (input.filename ?? "").toString().trim();
+  const rawContentType = (input.contentType ?? "").toString().trim() || "image/png";
+  const contentType = rawContentType || "image/png";
+
+  if (contentType !== "image/png" || !filename.toLowerCase().endsWith(".png")) {
+    return { error: "Icon must be a PNG with a transparent background." };
+  }
+
+  const ext = "png";
+
+  const objectKey = `brand-icons/global/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}.${ext}`;
+
+  try {
+    const { uploadUrl, publicUrl } = await getPresignedUploadUrl(objectKey, contentType);
+    return { uploadUrl, publicUrl, objectKey };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `Failed to create upload URL: ${msg}` };
+  }
+}
+
+export async function createBrandIcon(
+  data: BrandIconCreateData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const slug = normalizeBrandIconSlug(data.slug);
+  const name = (data.name ?? "").trim();
+  if (!name) return { error: "Name is required" };
+  const slugValidation = validateBrandIconSlug(slug);
+  if (slugValidation.error) return slugValidation;
+
+  let imageUrl = (data.imageUrl ?? "").toString().trim();
+  const imageKey = (data.imageKey ?? "").toString().trim();
+  if (!imageUrl) return { error: "imageUrl is required" };
+  if (!imageKey) return { error: "imageKey is required" };
+
+  try {
+    const original = await readObjectToBuffer(imageKey);
+    const normalized = await normalizeAndValidateIconPng(original);
+    if (normalized.error || !normalized.normalizedBuffer) {
+      return { error: normalized.error ?? "Icon must be a PNG with a transparent background." };
+    }
+    const { publicUrl } = await uploadBuffer(imageKey, normalized.normalizedBuffer, "image/png");
+    if (publicUrl) {
+      imageUrl = publicUrl;
+    }
+  } catch {
+    return { error: "Icon must be a PNG with a transparent background." };
+  }
+
+  const existing = await prisma.brandIcon.findUnique({ where: { slug } });
+  if (existing) return { error: "An icon with this slug already exists" };
+
+  const tags = normalizeBrandIconTags(data.tags);
+  const category =
+    data.category !== undefined && data.category !== null
+      ? data.category.toString().trim() || null
+      : null;
+
+  await prisma.brandIcon.create({
+    data: {
+      slug,
+      name,
+      imageUrl,
+      imageKey,
+      tags,
+      category,
+    } as any,
+  });
+  revalidatePath("/admin/settings/branding/icons");
+  return {};
+}
+
+export async function updateBrandIcon(
+  id: string,
+  data: BrandIconUpdateData
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const existing = await prisma.brandIcon.findUnique({ where: { id } });
+  if (!existing) return { error: "Icon not found" };
+
+  let slug: string | undefined;
+  if (data.slug !== undefined) {
+    slug = normalizeBrandIconSlug(data.slug);
+    const slugValidation = validateBrandIconSlug(slug);
+    if (slugValidation.error) return slugValidation;
+    const duplicate = await prisma.brandIcon.findFirst({
+      where: { slug, id: { not: id } },
+    });
+    if (duplicate) return { error: "An icon with this slug already exists" };
+  }
+
+  let name: string | undefined;
+  if (data.name !== undefined) {
+    name = (data.name ?? "").trim();
+    if (!name) return { error: "Name is required" };
+  }
+
+  let imageUrl: string | undefined;
+  if (data.imageUrl !== undefined) {
+    const url = (data.imageUrl ?? "").toString().trim();
+    if (!url) return { error: "imageUrl cannot be blank" };
+    imageUrl = url;
+  }
+
+  let imageKey: string | undefined;
+  if (data.imageKey !== undefined) {
+    const key = (data.imageKey ?? "").toString().trim();
+    if (!key) return { error: "imageKey cannot be blank" };
+    imageKey = key;
+
+    try {
+      const original = await readObjectToBuffer(key);
+      const normalized = await normalizeAndValidateIconPng(original);
+      if (normalized.error || !normalized.normalizedBuffer) {
+        return { error: normalized.error ?? "Icon must be a PNG with a transparent background." };
+      }
+      const { publicUrl } = await uploadBuffer(key, normalized.normalizedBuffer, "image/png");
+      if (publicUrl) {
+        imageUrl = publicUrl;
+      }
+    } catch {
+      return { error: "Icon must be a PNG with a transparent background." };
+    }
+  }
+
+  const tags =
+    data.tags !== undefined ? normalizeBrandIconTags(data.tags) : undefined;
+  const category =
+    data.category !== undefined
+      ? data.category === null
+        ? null
+        : data.category.toString().trim() || null
+      : undefined;
+
+  const isActive =
+    data.isActive !== undefined ? Boolean(data.isActive) : undefined;
+
+  await prisma.brandIcon.update({
+    where: { id },
+    data: {
+      ...(slug !== undefined && { slug }),
+      ...(name !== undefined && { name }),
+      ...(imageUrl !== undefined && { imageUrl }),
+      ...(imageKey !== undefined && { imageKey }),
+      ...(tags !== undefined && { tags }),
+      ...(category !== undefined && { category }),
+      ...(isActive !== undefined && { isActive }),
+    },
+  });
+  revalidatePath("/admin/settings/branding/icons");
+  return {};
+}
+
+export async function toggleBrandIconActive(
+  id: string,
+  isActive: boolean
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const existing = await prisma.brandIcon.findUnique({ where: { id } });
+  if (!existing) return { error: "Icon not found" };
+  await prisma.brandIcon.update({
+    where: { id },
+    data: { isActive },
+  });
+  revalidatePath("/admin/settings/branding/icons");
+  return {};
+}
+
+export async function deleteBrandIcon(id: string): Promise<{ error?: string }> {
+  await requireAdmin();
+  const existing = await prisma.brandIcon.findUnique({ where: { id } });
+  if (!existing) return { error: "Icon not found" };
+  const imageKey = (existing as { imageKey?: string | null }).imageKey;
+  if (imageKey) {
+    try {
+      await deleteR2Objects([imageKey]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: `Failed to delete icon from storage: ${msg}` };
+    }
+  }
+  await prisma.brandIcon.delete({ where: { id } });
+  revalidatePath("/admin/settings/branding/icons");
+  return {};
 }

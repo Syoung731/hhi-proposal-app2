@@ -58,6 +58,9 @@ function getCoverSourceTooltip(m: MediaItem, typeLabel: string): string {
   return lines.join("\n");
 }
 
+const SELECTED_BORDER = "4px solid #0B5FFF";
+const SELECTED_SHADOW = "0 0 0 2px rgba(11,95,255,0.25)";
+
 function CoverSourceThumb({
   media: m,
   isSelected,
@@ -73,9 +76,14 @@ function CoverSourceThumb({
     <button
       type="button"
       onClick={onSelect}
-      className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 ${
-        isSelected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-600"
+      className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg transition-shadow ${
+        isSelected ? "" : "border-2 border-zinc-200 dark:border-zinc-600"
       }`}
+      style={
+        isSelected
+          ? { border: SELECTED_BORDER, boxShadow: SELECTED_SHADOW }
+          : undefined
+      }
       title={getCoverSourceTooltip(m, typeLabel)}
     >
       {isLegacyBlobUrl(m.url) || !isAllowedHostForNextImage(m.url) ? (
@@ -323,36 +331,47 @@ export function FrontPageHeroEditor({ projectId, media, coverHeroImageId }: Prop
         </p>
         <FrontPageUploadButton projectId={projectId} onSuccess={() => router.refresh()} onError={setHeroRenderError} />
         <div className="mt-3">
-          <p className="mb-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400">Source (Existing & Rendered)</p>
           <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
             Click a thumbnail to use as the hero source.
           </p>
-          <div className="flex flex-wrap gap-2">
-            {existingSourceItems.length === 0 && renderedSourceItems.length === 0 ? (
-              <p className="text-sm text-zinc-500">None yet. Upload above or add section photos in a section.</p>
-            ) : (
-              <>
-                {existingSourceItems.map((m) => (
-                  <CoverSourceThumb
-                    key={m.id}
-                    media={m}
-                    isSelected={m.id === activeSourceMediaId}
-                    onSelect={() => setActiveSourceMediaId(m.id)}
-                    typeLabel="Existing"
-                  />
-                ))}
-                {renderedSourceItems.map((m) => (
-                  <CoverSourceThumb
-                    key={m.id}
-                    media={m}
-                    isSelected={m.id === activeSourceMediaId}
-                    onSelect={() => setActiveSourceMediaId(m.id)}
-                    typeLabel="Rendered"
-                  />
-                ))}
-              </>
-            )}
-          </div>
+          {existingSourceItems.length === 0 && renderedSourceItems.length === 0 ? (
+            <p className="text-sm text-zinc-500">None yet. Upload above or add section photos in a section.</p>
+          ) : (
+            <div className="space-y-3">
+              {existingSourceItems.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400">Existing Photos</p>
+                  <div className="flex flex-wrap gap-2">
+                    {existingSourceItems.map((m) => (
+                      <CoverSourceThumb
+                        key={m.id}
+                        media={m}
+                        isSelected={m.id === activeSourceMediaId}
+                        onSelect={() => setActiveSourceMediaId(m.id)}
+                        typeLabel="Existing"
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {renderedSourceItems.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400">Rendered Photos</p>
+                  <div className="flex flex-wrap gap-2">
+                    {renderedSourceItems.map((m) => (
+                      <CoverSourceThumb
+                        key={m.id}
+                        media={m}
+                        isSelected={m.id === activeSourceMediaId}
+                        onSelect={() => setActiveSourceMediaId(m.id)}
+                        typeLabel="Rendered"
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

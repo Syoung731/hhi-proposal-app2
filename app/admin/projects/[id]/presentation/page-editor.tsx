@@ -22,9 +22,11 @@ import {
   listObjectiveSuggestedPhotosAction,
   suggestObjectiveCopyAction,
   suggestObjectivePhotoFiltersAction,
+  suggestTemplateBFitStatementAction,
   suggestTemplateCColumnsAction,
   suggestTemplateCColumnAction,
 } from "./actions";
+import { simpleStringHash } from "@/app/lib/string-hash";
 import { CoverRenderer } from "@/components/public/cover";
 import { ObjectiveRenderer, type ObjectiveMediaItem } from "@/components/public/objective";
 import { ObjectiveTemplateB } from "@/app/components/presentation/objective/objective-template-b";
@@ -251,6 +253,8 @@ type ObjectiveLivePreviewProps = {
   brandIcons?: { id: string; imageUrl: string; name?: string }[];
   /** Brand accent color. Template C bar / Template B underline default to this when unset. */
   brandingAccentColor?: string | null;
+  /** Template B only: called when statement overflows its container (for auto-fit flow). */
+  onStatementOverflow?: (overflow: boolean) => void;
 };
 
 function ObjectiveLivePreview({
@@ -259,6 +263,7 @@ function ObjectiveLivePreview({
   templateId = "A",
   brandIcons = [],
   brandingAccentColor,
+  onStatementOverflow,
 }: ObjectiveLivePreviewProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.5);
@@ -317,6 +322,7 @@ function ObjectiveLivePreview({
               <ObjectiveTemplateB
                 config={mergedObjectiveConfig}
                 brandingAccentColor={brandingAccentColor}
+                onStatementOverflow={onStatementOverflow}
               />
             ) : templateId === "C" ? (
               <ObjectiveTemplateC
@@ -1701,11 +1707,106 @@ type ObjectiveTemplateBEditorProps = {
 function ObjectiveTemplateBEditor({
   config,
   onChange,
+  projectId,
   brandingAccentColor,
 }: ObjectiveTemplateBEditorProps) {
   const mergedObjectiveConfig = useMemo(() => ({ ...config }), [config]);
   const underlineColor = getTemplateBUnderlineColor(config, brandingAccentColor);
   const dividerColor = getTemplateBDividerColor(config);
+
+  const [statementOverflow, setStatementOverflow] = useState(false);
+  const [fitLoading, setFitLoading] = useState(false);
+  const [fitError, setFitError] = useState<string | null>(null);
+  const lastAutoFitHashRef = useRef<string | null>(null);
+
+  const baseText = (config.objectiveText ?? "").trim();
+  const objectiveTextB = (config.objectiveTextB ?? "").trim();
+  const sourceHash = simpleStringHash(baseText);
+  const storedSourceHash = config.templateB?.objectiveTextBSourceHash ?? null;
+  const alreadyRanForThisBase = storedSourceHash === sourceHash && objectiveTextB.length > 0;
+  const shouldShowFitAgain = statementOverflow && alreadyRanForThisBase;
+
+  const handleStatementOverflow = useCallback(
+    (overflow: boolean) => {
+      setStatementOverflow(overflow);
+      if (!overflow) return;
+      // Auto-run fit at most once per base text (when B override empty or source changed).
+      const needsFit =
+        !objectiveTextB || storedSourceHash !== sourceHash;
+      const canAutoRun =
+        needsFit &&
+        lastAutoFitHashRef.current !== sourceHash &&
+        baseText.length > 0 &&
+        projectId;
+      if (!canAutoRun) return;
+      lastAutoFitHashRef.current = sourceHash;
+      setFitError(null);
+      setFitLoading(true);
+      void suggestTemplateBFitStatementAction({ projectId: projectId!, objectiveText: baseText })
+        .then((result) => {
+          if ("error" in result) {
+            setFitError(result.error);
+            lastAutoFitHashRef.current = null;
+            return;
+          }
+          const now = new Date().toISOString();
+          onChange({
+            ...config,
+            objectiveTextB: result.fitStatement,
+            templateB: {
+              ...config.templateB,
+              underlineColor: config.templateB?.underlineColor,
+              dividerColor: config.templateB?.dividerColor,
+              objectiveTextBLastFitAt: now,
+              objectiveTextBSourceHash: sourceHash,
+            },
+          });
+        })
+        .finally(() => setFitLoading(false));
+    },
+    [
+      baseText,
+      config,
+      objectiveTextB,
+      sourceHash,
+      storedSourceHash,
+      projectId,
+      onChange,
+    ]
+  );
+
+  const runFitCopy = useCallback(async () => {
+    if (!projectId || !baseText) {
+      setFitError("Objective paragraph is required.");
+      return;
+    }
+    setFitError(null);
+    setFitLoading(true);
+    try {
+      const result = await suggestTemplateBFitStatementAction({
+        projectId,
+        objectiveText: baseText,
+      });
+      if ("error" in result) {
+        setFitError(result.error);
+        return;
+      }
+      const now = new Date().toISOString();
+      onChange({
+        ...config,
+        objectiveTextB: result.fitStatement,
+        templateB: {
+          ...config.templateB,
+          underlineColor: config.templateB?.underlineColor,
+          dividerColor: config.templateB?.dividerColor,
+          objectiveTextBLastFitAt: now,
+          objectiveTextBSourceHash: sourceHash,
+        },
+      });
+    } finally {
+      setFitLoading(false);
+    }
+  }, [projectId, baseText, config, sourceHash, onChange]);
 
   const setUnderlineColor = (value: string) => {
     const hex = value.trim() && /^#[0-9A-Fa-f]{6}$/.test(value.trim()) ? value.trim() : undefined;
@@ -1732,10 +1833,50 @@ function ObjectiveTemplateBEditor({
           Template B — Statement + 3 Pillars
         </p>
         <p className="text-zinc-500 dark:text-zinc-400">
-          Uses the shared Objective Content fields above (title, paragraph, and commitments) and renders them
-          in a centered serif layout with three pillars.
+          Template B uses a shorter statement for layout. Uses the shared Objective Content (title, paragraph, commitments) and renders them in a centered serif layout with three pillars.
         </p>
       </section>
+
+      <div className="space-y-4 rounded-xl border border-zinc-200 bg-white/80 p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/60">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          Template B statement (fit copy)
+        </h3>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Shorter statement used only by Template B so the text fits without truncation. If empty, it will be generated automatically when the main paragraph overflows, or use the button below.
+        </p>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            Template B statement override
+          </label>
+          <textarea
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+            rows={2}
+            value={config.objectiveTextB ?? ""}
+            onChange={(e) =>
+              onChange({ ...config, objectiveTextB: e.target.value || undefined })
+            }
+            placeholder="20–36 words, single paragraph. Generated automatically if needed."
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={runFitCopy}
+            disabled={fitLoading || !projectId || !baseText}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {fitLoading ? "Generating…" : "Regenerate Fit Copy"}
+          </button>
+          {shouldShowFitAgain && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              Statement still overflows; click Regenerate Fit Copy to try again.
+            </span>
+          )}
+          {fitError && (
+            <p className="text-xs text-red-600 dark:text-red-400">{fitError}</p>
+          )}
+        </div>
+      </div>
 
       <div className="space-y-4 rounded-xl border border-zinc-200 bg-white/80 p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/60">
         <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -1788,6 +1929,7 @@ function ObjectiveTemplateBEditor({
         media={[]}
         templateId="B"
         brandingAccentColor={brandingAccentColor}
+        onStatementOverflow={handleStatementOverflow}
       />
     </div>
   );

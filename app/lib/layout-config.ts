@@ -54,10 +54,22 @@ export type ObjectivePageConfig = {
    */
   templateC?: ObjectivePageConfigTemplateC;
   /**
-   * Template B–scoped settings: underline and divider colors.
+   * Template B–scoped statement override: shorter copy that fits the B layout (no truncation).
+   * When templateId === "B", this is shown instead of objectiveText when set.
+   */
+  objectiveTextB?: string;
+  /**
+   * Template B–scoped settings: underline and divider colors, plus fit-copy metadata.
    * When templateId === "B", used for headline underline and column divider colors.
    */
-  templateB?: { underlineColor?: string; dividerColor?: string };
+  templateB?: {
+    underlineColor?: string;
+    dividerColor?: string;
+    /** ISO string when Template B fit statement was last generated. */
+    objectiveTextBLastFitAt?: string | null;
+    /** Hash of objectiveText at time of last fit (to avoid re-running when base unchanged). */
+    objectiveTextBSourceHash?: string | null;
+  };
   /** AI helper state for suggested copy / filters / photos (editor-only). */
   ai?: {
     /** Suggested objective paragraph (2–3 concise sentences) from AI. */

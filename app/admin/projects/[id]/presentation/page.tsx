@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getProject } from "../page";
-import { listActiveStylePresets, listSectionTypes } from "@/app/admin/settings/actions";
+import { listActiveStylePresets, listSectionTypes, listBrandIcons } from "@/app/admin/settings/actions";
 import { ProjectTabs } from "../tabs";
 import { PresentationTab } from "./presentation-tab";
 import { prisma } from "@/app/lib/prisma";
@@ -13,15 +13,18 @@ export default async function PresentationSetupPage({
 }) {
   const { id: projectId } = await params;
 
-  const [project, stylePresets, sectionTypes, proposalRow] = await Promise.all([
-    getProject(projectId),
-    listActiveStylePresets(),
-    listSectionTypes(),
-    prisma.proposal.findUnique({
-      where: { projectId },
-      select: { publicLayoutConfig: true },
-    }),
-  ]);
+  const [project, stylePresets, sectionTypes, proposalRow, brandIcons, companySettings] =
+    await Promise.all([
+      getProject(projectId),
+      listActiveStylePresets(),
+      listSectionTypes(),
+      prisma.proposal.findUnique({
+        where: { projectId },
+        select: { publicLayoutConfig: true },
+      }),
+      listBrandIcons(),
+      prisma.companySettings.findFirst({ select: { primaryColorHex: true } }),
+    ]);
 
   if (!project) notFound();
 
@@ -68,6 +71,19 @@ export default async function PresentationSetupPage({
             subtitle: project.subtitle ?? null,
             coverHeroImageId: project.coverHeroImageId ?? null,
           }}
+          transcriptText={project.transcriptText ?? null}
+          overviewText={project.objective ?? null}
+          brandIcons={brandIcons.map((icon) => ({
+            id: icon.id,
+            imageUrl: icon.imageUrl,
+            name: icon.name ?? icon.slug,
+          }))}
+          brandingAccentColor={
+            companySettings?.primaryColorHex?.trim() &&
+            /^#[0-9A-Fa-f]{6}$/.test(companySettings.primaryColorHex.trim())
+              ? companySettings.primaryColorHex.trim()
+              : null
+          }
         />
       </ProjectTabs>
     </div>

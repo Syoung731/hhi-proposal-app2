@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import type { SnapshotData } from "@/app/lib/snapshot";
 import type {
+  PresentationSettings,
   ProposalSection,
   PublicLayoutConfig,
 } from "@/app/lib/layout-config";
@@ -12,6 +13,8 @@ type ProposalContextValue = {
   snapshot: SnapshotData;
   sections: ProposalSection[];
   layoutConfig: PublicLayoutConfig;
+  /** Live-view settings (background, transition, speed). From presentation config. */
+  presentationSettings?: PresentationSettings | null;
 };
 
 const ProposalContext = createContext<ProposalContextValue | null>(null);

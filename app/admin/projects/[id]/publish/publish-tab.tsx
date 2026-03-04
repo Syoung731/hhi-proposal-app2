@@ -11,8 +11,6 @@ type Props = {
   publishedVersion: number;
 };
 
-const draftPreviewUrl = (projectId: string) => `/admin/projects/${projectId}/preview/draft`;
-
 export function PublishTab({ projectId, proposalId, publishedVersion }: Props) {
   const router = useRouter();
   const [publishing, setPublishing] = useState(false);
@@ -28,30 +26,33 @@ export function PublishTab({ projectId, proposalId, publishedVersion }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Preview (Draft) — embedded iframe */}
+      {/* Preview (Draft) — open real public presentation in new tab */}
       <section className="rounded-lg border border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-800/30">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             Preview (Draft)
           </h2>
-          <Link
-            href={draftPreviewUrl(projectId)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-zinc-600 hover:underline dark:text-zinc-400"
-          >
-            Open preview in new tab →
-          </Link>
         </div>
         <div className="p-4">
-          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
-            <iframe
-              src={draftPreviewUrl(projectId)}
-              title="Draft preview"
-              className="h-[70vh] w-full min-h-[400px]"
-              sandbox="allow-same-origin allow-scripts"
-            />
-          </div>
+          {proposalId ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Open a fullscreen draft preview using the real public presentation route.
+              </p>
+              <Link
+                href={`/p/${proposalId}?mode=present&draft=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                Open fullscreen draft preview →
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Create a proposal on the Presentation tab to enable draft preview.
+            </p>
+          )}
         </div>
       </section>
 

@@ -1,10 +1,12 @@
 import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Readable } from "stream";
 
 const endpoint = process.env.R2_ENDPOINT ?? process.env.AWS_S3_ENDPOINT;
 const accessKeyId = process.env.R2_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
@@ -74,6 +76,42 @@ export async function uploadBuffer(
   );
   const publicUrl = publicBaseUrl ? `${publicBaseUrl.replace(/\/$/, "")}/${fileKey}` : "";
   return { fileKey, publicUrl };
+}
+
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Read an object from R2/S3 into a Buffer. Throws if the object is missing or unreadable.
+ */
+export async function readObjectToBuffer(fileKey: string): Promise<Buffer> {
+  const client = getClient();
+  if (!bucket) throw new Error("R2/S3 bucket is not configured");
+  const result = await client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: fileKey,
+    })
+  );
+  const body = result.Body;
+  if (!body) {
+    throw new Error(`Object body was empty for key ${fileKey}`);
+  }
+  if (body instanceof Readable) {
+    return streamToBuffer(body);
+  }
+  // Fallback for environments where Body is not a Node Readable
+  // @ts-expect-error - Body types vary by runtime; handle common async iterable case.
+  if (typeof body[Symbol.asyncIterator] === "function") {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    return streamToBuffer(Readable.from(body as AsyncIterable<Uint8Array>));
+  }
+  throw new Error(`Unsupported Body type for key ${fileKey}`);
 }
 
 const DELETE_BATCH_SIZE = 1000; // S3/R2 DeleteObjects limit per request
