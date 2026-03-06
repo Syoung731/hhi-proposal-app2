@@ -16,10 +16,8 @@ const TITLE_ROW_MAX_PCT = 18;
 const SCOPE_TEXT_SCALE_DEFAULT = 1.0;
 const SCOPE_TEXT_SCALE_MIN = 0.85;
 const SCOPE_TEXT_SCALE_MAX = 1.25;
-const MAX_SCOPE_PCT = 0.28;
 const MIN_SCOPE_PX = 32;
 const MIN_PHOTO_PX = 80;
-const SCOPE_HEADER_PADDING_PX = 40;
 
 type SectionTemplateSplitProps = {
   /** Section/room name (e.g. "Guest Bathroom (Hall Bath With Shower)") */
@@ -65,25 +63,51 @@ function ImageSlot({
   preview?: boolean;
 }) {
   const hasImage = image?.url && !isBadPlaceholderUrl(image.url);
-  const objectFit: "contain" | "cover" = preview ? "contain" : "cover";
+
+  if (!hasImage) {
+    return (
+      <div
+        className={`relative min-h-0 flex-1 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800 ${preview ? "" : "border"}`}
+        style={preview ? undefined : { borderColor: BRAND_ACCENT }}
+      >
+        <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500 dark:text-zinc-400">
+          {emptyLabel}
+        </div>
+      </div>
+    );
+  }
+
+  if (preview) {
+    return (
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={image!.url}
+          alt={image!.caption ?? ""}
+          className="max-h-full max-w-full object-contain object-center"
+          style={{
+            display: "block",
+            width: "auto",
+            height: "auto",
+            border: `1px solid ${BRAND_ACCENT}`,
+            borderRadius: "0.5rem",
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className="relative min-h-0 flex-1 overflow-hidden rounded-lg border bg-zinc-100 dark:bg-zinc-800"
       style={{ borderColor: BRAND_ACCENT }}
     >
-      {hasImage ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={image!.url}
-          alt={image!.caption ?? ""}
-          className="h-full w-full"
-          style={{ objectFit }}
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500 dark:text-zinc-400">
-          {emptyLabel}
-        </div>
-      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={image!.url}
+        alt={image!.caption ?? ""}
+        className="h-full w-full object-cover"
+      />
     </div>
   );
 }
@@ -105,11 +129,8 @@ function StackedSlotsColumn({
   const n = Math.min(Math.max(1, density), 3);
   const slots = Array.from({ length: n }, (_, i) => images[i] ?? null);
   return (
-    <div className="flex flex-1 min-w-0 flex-col min-h-0">
-      <p className={columnLabelClass} style={{ color: BRAND_ACCENT }}>
-        {columnLabel}
-      </p>
-      <div className="mt-1 flex flex-1 min-h-0 flex-col gap-1">
+    <div className="flex h-full min-w-0 flex-1 flex-col min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-1">
         {slots.map((img, i) => (
           <div key={i} className="flex min-h-0 flex-1 flex-col">
             {i > 0 && (
@@ -142,25 +163,26 @@ function ScopePanel({
   scopeText,
   scopeTextScale = SCOPE_TEXT_SCALE_DEFAULT,
   preview,
-  scopeTextRef,
 }: {
   scopeText: string | null | undefined;
   scopeTextScale?: number;
   preview?: boolean;
-  scopeTextRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const text = (scopeText ?? "").trim() || "—";
   const scale = Math.min(SCOPE_TEXT_SCALE_MAX, Math.max(SCOPE_TEXT_SCALE_MIN, scopeTextScale));
   const bodyFontRem = 0.9 * scale;
+  const headerFontRem = 1.25 * bodyFontRem;
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded border border-zinc-200 bg-zinc-50/90 px-3 py-2 dark:border-zinc-600 dark:bg-zinc-800/80">
-      <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+      <p
+        className="shrink-0 font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
+        style={{ fontSize: `${headerFontRem}rem` }}
+      >
         SCOPE OF WORK
       </p>
       <div
-        ref={scopeTextRef}
-        className={`min-h-0 flex-1 overflow-hidden leading-snug text-zinc-700 dark:text-zinc-300 ${
-          preview ? "overflow-y-auto" : "line-clamp-4"
+        className={`min-h-0 flex-1 leading-snug text-zinc-700 dark:text-zinc-300 ${
+          preview ? "overflow-hidden" : "line-clamp-4 overflow-hidden"
         }`}
         style={{ fontSize: `${bodyFontRem}rem` }}
       >
@@ -190,8 +212,6 @@ export function SectionTemplateSplit({
 }: SectionTemplateSplitProps) {
   const slideRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
-  const scopeRef = useRef<HTMLDivElement>(null);
-  const scopeTextRef = useRef<HTMLDivElement>(null);
 
   const [rows, setRows] = useState<{
     titlePx: number;
@@ -222,31 +242,26 @@ export function SectionTemplateSplit({
 
   const titleFontSizeRem = 1.5 * scale;
   const padding = "px-5 py-4";
-  const photoRowFlexClass = "flex min-h-0 gap-3 overflow-hidden";
+  const photoRowFlexClass = "flex min-h-0 gap-1 overflow-hidden";
 
   const computeRows = () => {
     const slide = slideRef.current;
     const header = headerRef.current;
-    const scopeEl = scopeRef.current;
-    const textEl = scopeTextRef.current;
-    if (!slide || !header || !scopeEl) return;
+    if (!slide || !header) return;
     const totalH = slide.clientHeight;
     if (totalH <= 0) return;
     const titlePx = header.offsetHeight;
     const remainingH = totalH - titlePx;
 
-    // Photo area %: reserve at least this much of the slide for the photo row (slider controls this).
-    const minPhotoPxFromSlider = Math.round((totalH * photoPct) / 100);
-    const minPhotoPxReserved = Math.max(MIN_PHOTO_PX, minPhotoPxFromSlider);
+    const targetPhotoPx = clampNum(
+      Math.round((totalH * photoPct) / 100),
+      MIN_PHOTO_PX,
+      remainingH - MIN_SCOPE_PX
+    );
 
-    // Scope: size from content (scrollHeight) at current font scale, but cap so photo area gets its reserved space.
-    const scopeContentH = textEl ? textEl.scrollHeight : 0;
-    const maxScopeByPct = Math.max(MIN_SCOPE_PX, totalH * MAX_SCOPE_PCT);
-    const maxScopeByPhoto = remainingH - minPhotoPxReserved;
-    const maxScopePx = Math.min(maxScopeByPct, maxScopeByPhoto);
-    const desiredScopePx = Math.min(maxScopePx, Math.max(MIN_SCOPE_PX, scopeContentH + SCOPE_HEADER_PADDING_PX));
-    const scopePx = Math.min(desiredScopePx, maxScopePx);
-    const photoPx = remainingH - scopePx;
+    const photoPx = targetPhotoPx;
+    const scopePx = remainingH - photoPx;
+
     setRows({ titlePx, photoPx, scopePx });
   };
 
@@ -258,23 +273,23 @@ export function SectionTemplateSplit({
     return () => ro.disconnect();
   }, []);
 
-  // When scope text or scale changes, clear rows so layout can reflow before we measure.
+  // When scope text or scale changes, clear rows so layout can reflow.
   useLayoutEffect(() => {
     setRows(null);
   }, [scopeText, scopeScale]);
 
-  // Measure on next frame so DOM (and font size) is updated; run when rows is null or when photoPct changes.
+  // Measure on next frame; run when rows is null or when photoPct changes.
   useLayoutEffect(() => {
     const slide = slideRef.current;
     const header = headerRef.current;
     if (!slide || !header) return;
     const raf = requestAnimationFrame(() => {
-      if (slideRef.current && headerRef.current && scopeRef.current) {
+      if (slideRef.current && headerRef.current) {
         computeRows();
       }
     });
     return () => cancelAnimationFrame(raf);
-  }, [scopeText, scopeScale, photoPct, rows]);
+  }, [photoPct, rows]);
 
   const gridRowsStyle =
     rows !== null
@@ -298,7 +313,30 @@ export function SectionTemplateSplit({
           {title}
         </h1>
       </header>
-      <div className={`min-h-0 ${padding} pt-0 ${photoRowFlexClass}`}>
+      <div className={`relative min-h-0 ${padding} pt-0 ${photoRowFlexClass}`}>
+        {/* Labels over the photos, each centered over its column */}
+        <div
+          className="pointer-events-none absolute inset-0 z-10 flex gap-1"
+          aria-hidden
+        >
+          <div className="flex min-w-0 flex-1 items-start justify-center pt-2">
+            <span
+              className="rounded px-1.5 py-0.5 bg-white/90 text-sm font-bold uppercase tracking-[0.2em] dark:bg-zinc-900/90"
+              style={{ color: BRAND_ACCENT }}
+            >
+              Before
+            </span>
+          </div>
+          <div className="shrink-0 w-px" />
+          <div className="flex min-w-0 flex-1 items-start justify-center pt-2">
+            <span
+              className="rounded px-1.5 py-0.5 bg-white/90 text-sm font-bold uppercase tracking-[0.2em] dark:bg-zinc-900/90"
+              style={{ color: BRAND_ACCENT }}
+            >
+              Render
+            </span>
+          </div>
+        </div>
         {onlyAfter && hasAfter ? (
           <div className="min-w-0 flex-1">
             <StackedSlotsColumn
@@ -355,12 +393,11 @@ export function SectionTemplateSplit({
           </>
         )}
       </div>
-      <div ref={scopeRef} className={`min-h-0 shrink-0 overflow-hidden ${padding} pt-0`}>
+      <div className={`min-h-0 shrink-0 overflow-hidden ${padding} pt-0`}>
         <ScopePanel
           scopeText={scopeText}
           scopeTextScale={scopeScale}
           preview={preview}
-          scopeTextRef={scopeTextRef}
         />
       </div>
     </div>

@@ -127,13 +127,24 @@ export function getSectionConfig(
       ? raw.scopeTextScale
       : SCOPE_TEXT_SCALE_DEFAULT
   );
+  const referencePhotoIds = Array.isArray(raw?.referencePhotoIds)
+    ? raw.referencePhotoIds.slice(0, 3)
+    : [];
+  const layoutVariant =
+    raw?.layoutVariant === "heroAfter" ||
+    raw?.layoutVariant === "storyboard" ||
+    raw?.layoutVariant === "comparisonCollage"
+      ? raw.layoutVariant
+      : "split";
+
   return {
     include: raw?.include !== false,
-    layoutVariant: raw?.layoutVariant === "heroAfter" || raw?.layoutVariant === "storyboard" ? raw.layoutVariant : "split",
+    layoutVariant,
     splitDensity,
     featuredConceptMediaId: raw?.featuredConceptMediaId ?? null,
     beforeSelectedMediaIds,
     afterSelectedMediaIds,
+    referencePhotoIds,
     scopeSize,
     titleScale: layout.titleScale,
     photoAreaPct: layout.photoAreaPct,
@@ -477,7 +488,7 @@ export function normalizePresentationConfig(
           for (const [roomId, cfg] of Object.entries(baseRooms)) {
             const v = cfg?.variant;
             const layoutVariant: LayoutV =
-              v === "heroAfter" ? "heroAfter" : v === "storyboard" ? "storyboard" : "split";
+              v === "heroAfter" ? "heroAfter" : v === "storyboard" ? "storyboard" : v === "comparisonCollage" ? "comparisonCollage" : "split";
             built[roomId] = {
               include: cfg?.enabled !== false,
               layoutVariant,
@@ -501,7 +512,7 @@ export function normalizePresentationConfig(
           }
           const raw = built[k] as SectionPageConfig | undefined;
           const layoutVariant: LayoutV =
-            raw?.layoutVariant === "heroAfter" || raw?.layoutVariant === "storyboard"
+            raw?.layoutVariant === "heroAfter" || raw?.layoutVariant === "storyboard" || raw?.layoutVariant === "comparisonCollage"
               ? raw.layoutVariant
               : "split";
           const splitDensity: 1 | 2 | 3 =
@@ -528,13 +539,17 @@ export function normalizePresentationConfig(
               ? raw.scopeTextScale
               : SCOPE_TEXT_SCALE_DEFAULT
           );
+          const referencePhotoIds = Array.isArray(raw?.referencePhotoIds) ? raw.referencePhotoIds.slice(0, 3) : [];
+          const maxBefore = layoutVariant === "comparisonCollage" ? 1 : splitDensity;
+          const maxAfter = layoutVariant === "comparisonCollage" ? 1 : splitDensity;
           normalized[k] = {
             include: raw?.include !== false,
             layoutVariant,
             splitDensity,
             featuredConceptMediaId: raw?.featuredConceptMediaId ?? null,
-            beforeSelectedMediaIds: beforeSource.slice(0, splitDensity),
-            afterSelectedMediaIds: afterSource.slice(0, splitDensity),
+            beforeSelectedMediaIds: beforeSource.slice(0, maxBefore),
+            afterSelectedMediaIds: afterSource.slice(0, maxAfter),
+            referencePhotoIds,
             scopeSize,
             titleScale: layout.titleScale,
             photoAreaPct: layout.photoAreaPct,
@@ -552,7 +567,7 @@ export function normalizePresentationConfig(
         for (const roomId of allRoomIds) {
           const sec = normalized[roomId];
           const cfg = baseRooms[roomId];
-          const layoutV = sec?.layoutVariant ?? (cfg?.variant === "heroAfter" ? "heroAfter" : cfg?.variant === "storyboard" ? "storyboard" : "split");
+          const layoutV = sec?.layoutVariant ?? (cfg?.variant === "heroAfter" ? "heroAfter" : cfg?.variant === "storyboard" ? "storyboard" : cfg?.variant === "comparisonCollage" ? "comparisonCollage" : "split");
           roomsOut[roomId] = {
             enabled: sec?.include !== false,
             variant: layoutV,

@@ -89,6 +89,8 @@ export function ProposalShell({ proposalId, children }: Props) {
   const [presentMode, togglePresentMode] = usePresentationMode(proposalId);
   const [hydrated, setHydrated] = useState(false);
 
+  const isSectionPage = Boolean(pathname?.includes("/section/"));
+
   const SLIDE_W = 1365;
   const SLIDE_H = 768;
   const scale = useScaleToFit(SLIDE_W, SLIDE_H);
@@ -184,6 +186,10 @@ export function ProposalShell({ proposalId, children }: Props) {
 
       {showPresent ? (
         <div className="flex h-full w-full items-center justify-center">
+          <div className="absolute left-0 right-0 top-4 z-20 flex justify-center">
+            <ProposalProgressDots inline />
+          </div>
+          <ProposalPrevNext edge />
           <div
             style={{
               width: SLIDE_W,
@@ -199,20 +205,33 @@ export function ProposalShell({ proposalId, children }: Props) {
             >
               {children}
             </PresentationFrame>
-            <ProposalProgressDots />
-            <ProposalPrevNext />
           </div>
         </div>
-      ) : (
-        <main className="mx-auto min-h-screen max-w-[1100px] px-6 pb-28 pt-12 sm:px-10 sm:pb-32 sm:pt-16 md:px-14">
+      ) : isSectionPage ? (
+        <main className="mx-auto w-full max-w-none px-6 py-8 pb-12 pt-16 sm:px-10 sm:pt-20">
+          <div className="mb-6 flex w-full justify-center">
+            <ProposalProgressDots inline />
+          </div>
           <PresentationFrame
             settings={presentationSettings}
             pageKey={pathname}
           >
             {children}
           </PresentationFrame>
-          <ProposalProgressDots />
-          <ProposalPrevNext />
+          <ProposalPrevNext edge />
+        </main>
+      ) : (
+        <main className="mx-auto min-h-screen max-w-[1100px] px-6 pb-12 pt-16 sm:px-10 sm:pb-12 sm:pt-20 md:px-14">
+          <div className="mb-6 flex w-full justify-center">
+            <ProposalProgressDots inline />
+          </div>
+          <PresentationFrame
+            settings={presentationSettings}
+            pageKey={pathname}
+          >
+            {children}
+          </PresentationFrame>
+          <ProposalPrevNext edge />
         </main>
       )}
 

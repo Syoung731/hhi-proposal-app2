@@ -99,6 +99,8 @@ type PageEditorProps = {
   brandIcons?: { id: string; imageUrl: string; name?: string }[];
   /** Brand accent color. Template C bar defaults to this when barColor is unset; not persisted unless user sets bar color. */
   brandingAccentColor?: string | null;
+  /** Template 4: prefetched Photo Library items so Completed Project Photos show on first load. */
+  libraryPhotos?: LibraryMediaItem[];
 };
 
 /** True when Why Us has no meaningful content: no title and no pillar with headline/body/iconKey. */
@@ -2340,6 +2342,7 @@ export function PageEditor({
   overviewText,
   brandIcons = [],
   brandingAccentColor = null,
+  libraryPhotos,
 }: PageEditorProps) {
   const p = config.pages ?? {};
   const [applyingWhyUsDefaults, setApplyingWhyUsDefaults] = useState(false);
@@ -4124,6 +4127,7 @@ export function PageEditor({
         existingPhotosForRoom={existingPhotosForRoom}
         room={room ?? null}
         media={media}
+        libraryPhotos={libraryPhotos}
       />
     );
   }

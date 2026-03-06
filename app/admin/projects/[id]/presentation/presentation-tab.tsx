@@ -6,6 +6,8 @@ import {
   getPresentationMediaSnapshotAction,
   savePresentationLayoutAction,
 } from "./actions";
+import { listLibraryMediaAction } from "@/app/admin/settings/photo-library/actions";
+import type { LibraryMediaItem } from "@/app/admin/settings/photo-library/types";
 import { PageList } from "./page-list";
 import { PageEditor } from "./page-editor";
 import { SettingsTab } from "./settings-tab";
@@ -124,6 +126,7 @@ export function PresentationTab({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [libraryPhotos, setLibraryPhotos] = useState<LibraryMediaItem[] | undefined>(undefined);
   const [sectionsExpanded, setSectionsExpanded] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     try {
@@ -146,6 +149,22 @@ export function PresentationTab({
     }
     setMedia(result.snapshot);
   }, [projectId]);
+
+  // Prefetch Photo Library so Template 4 (Completed Project Photos) has data on first load.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await listLibraryMediaAction({
+        includeUnapproved: true,
+        pageSize: 100,
+        sort: "newest",
+      });
+      if (!cancelled && !result.error) setLibraryPhotos(result.items);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const conceptCountByRoom = useMemo(() => getConceptCountByRoom(media), [media]);
   const roomsWithConcepts = useMemo(
@@ -529,6 +548,7 @@ export function PresentationTab({
               overviewText={overviewText}
               brandIcons={brandIcons}
               brandingAccentColor={brandingAccentColor}
+              libraryPhotos={libraryPhotos}
             />
           </div>
           <div className="shrink-0 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">

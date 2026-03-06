@@ -1,12 +1,16 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import type { SectionPageConfig } from "@/app/lib/layout-config";
 import type { PresentationConfigSaved } from "@/app/lib/layout-config";
 import { getSectionConfig } from "./types";
 import { formatInchesToFeetInches } from "@/app/lib/dimensions";
 import { SectionTemplateSplit } from "@/components/public/section/SectionTemplateSplit";
+import { SectionTemplateComparisonCollage } from "@/components/public/section/SectionTemplateComparisonCollage";
 import { SlidePreviewFrame } from "./slide-preview-frame";
+import { listLibraryMediaAction } from "@/app/admin/settings/photo-library/actions";
+import type { LibraryMediaItem } from "@/app/admin/settings/photo-library/types";
+import { SECTIONS } from "@/app/lib/sections";
 
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
@@ -21,6 +25,7 @@ const SECTION_TEMPLATES: {
   { id: "split", title: "Template 1", subtitle: "Before/After (Split)" },
   { id: "heroAfter", title: "Template 2", subtitle: "Hero After" },
   { id: "storyboard", title: "Template 3", subtitle: "Storyboard" },
+  { id: "comparisonCollage", title: "Template 4", subtitle: "Before/Render + Reference Collage" },
 ];
 
 const SECTION_DESIGN_W = 1200;
@@ -109,6 +114,80 @@ function resolveAfterImages(
   return finalList.slice(0, n).map((m) => ({ id: m.id, url: m.url, caption: null }));
 }
 
+/**
+ * Infer a Photo Library section/room type from the section title (e.g. "Guest Bathroom" → "Bathroom").
+ * Used for Template 4 to filter Completed Project Photos by relevance.
+ */
+function inferSectionTypeFromTitle(sectionTitle: string): string | null {
+  const t = sectionTitle.trim().toLowerCase();
+  if (!t) return null;
+  // 1) Exact match (case-insensitive)
+  const exact = SECTIONS.find((s) => s.toLowerCase() === t);
+  if (exact) return exact;
+  // 2) Section name contained in title (e.g. "Bathroom" in "Guest Bathroom"); prefer longest match
+  const byLength = [...SECTIONS].sort((a, b) => b.length - a.length);
+  const contained = byLength.find((s) => t.includes(s.toLowerCase()));
+  if (contained) return contained;
+  // 3) Title word matches section (e.g. "bath" → Bathroom, "laundry" → Laundry)
+  const keywords: { word: string; section: string }[] = [
+    { word: "bath", section: "Bathroom" },
+    { word: "laundry", section: "Laundry" },
+    { word: "kitchen", section: "Kitchen" },
+    { word: "deck", section: "Deck" },
+    { word: "porch", section: "Screened Porch" },
+    { word: "living", section: "Living Room" },
+    { word: "bedroom", section: "Bedroom" },
+    { word: "dining", section: "Dining Room" },
+    { word: "office", section: "Office" },
+    { word: "garage", section: "Garage" },
+    { word: "closet", section: "Closet" },
+    { word: "hall", section: "Entry/Hall" },
+    { word: "hallway", section: "Hallway" },
+    { word: "entry", section: "Entry/Hall" },
+    { word: "landscap", section: "Landscaping" },
+    { word: "pool", section: "Pool" },
+    { word: "driveway", section: "Driveway" },
+    { word: "stair", section: "Stairway" },
+    { word: "bar", section: "Wet / Dry Bar" },
+    { word: "pantry", section: "Pantry" },
+    { word: "den", section: "Den" },
+    { word: "family room", section: "Family Room" },
+    { word: "breakfast", section: "Breakfast Nook" },
+    { word: "carolina", section: "Carolina Room" },
+  ];
+  for (const { word, section } of keywords) {
+    if (t.includes(word)) return section;
+  }
+  return null;
+}
+
+/**
+ * Filter and sort library photos for Template 4: matching room type first, then fallback to all.
+ */
+function filterLibraryPhotosBySectionType(
+  photos: LibraryMediaItem[],
+  sectionType: string | null
+): { items: LibraryMediaItem[]; filterLabel: string } {
+  if (!sectionType) {
+    return { items: photos, filterLabel: "Showing all library photos" };
+  }
+  const typeLower = sectionType.toLowerCase();
+  const matching = photos.filter(
+    (p) =>
+      (Array.isArray(p.roomTypeIds) && p.roomTypeIds.some((id) => id.toLowerCase() === typeLower)) ||
+      (Array.isArray(p.tags) && p.tags.some((tag) => tag.toLowerCase().includes(typeLower)))
+  );
+  if (matching.length === 0) {
+    return { items: photos, filterLabel: "Showing all library photos" };
+  }
+  const selectedIds = new Set(matching.map((m) => m.id));
+  const rest = photos.filter((p) => !selectedIds.has(p.id));
+  return {
+    items: [...matching, ...rest],
+    filterLabel: `Showing photos matching: ${sectionType}`,
+  };
+}
+
 type SectionPageEditorProps = {
   sectionKey: string;
   sectionTitle: string;
@@ -122,6 +201,8 @@ type SectionPageEditorProps = {
   room?: { scopeNarrative?: string; lengthIn?: number | null; widthIn?: number | null; ceilingHeightIn?: number | null } | null;
   /** All project media (for before/after image derivation). */
   media?: MediaItem[];
+  /** Template 4: completed-project/reference photos from Photo Library. When not provided and variant is comparisonCollage, editor fetches via listLibraryMediaAction. */
+  libraryPhotos?: LibraryMediaItem[];
 };
 
 /** Thumbnail picker: click toggles selection, max = maxCount, "Selected x / max", order badges, Clear. */
@@ -220,9 +301,11 @@ function MediaThumbnailPicker({
 function SectionLivePreview({
   payload,
   layoutVariant,
+  comparisonReferenceImages = [],
 }: {
   payload: SectionTemplatePayload;
   layoutVariant: SectionLayoutVariant;
+  comparisonReferenceImages?: { id: string; url: string; caption?: string | null }[];
 }) {
   if (layoutVariant === "split") {
     return (
@@ -238,6 +321,27 @@ function SectionLivePreview({
           onlyAfter={false}
           onlyBefore={false}
           splitDensity={payload.splitDensity}
+          scopeText={payload.scopeText}
+          titleScale={payload.titleScale}
+          photoAreaPct={payload.photoAreaPct}
+          scopeTextScale={payload.scopeTextScale}
+          preview
+        />
+      </SlidePreviewFrame>
+    );
+  }
+  if (layoutVariant === "comparisonCollage") {
+    return (
+      <SlidePreviewFrame
+        designW={SECTION_DESIGN_W}
+        designH={SECTION_DESIGN_H}
+        sectionClassName="mt-8"
+      >
+        <SectionTemplateComparisonCollage
+          title={payload.title}
+          beforeImage={payload.beforeImages[0] ?? null}
+          afterImage={payload.afterImages[0] ?? null}
+          referenceImages={comparisonReferenceImages}
           scopeText={payload.scopeText}
           titleScale={payload.titleScale}
           photoAreaPct={payload.photoAreaPct}
@@ -268,6 +372,7 @@ export function SectionPageEditor({
   existingPhotosForRoom,
   room = null,
   media = [],
+  libraryPhotos: libraryPhotosProp,
 }: SectionPageEditorProps) {
   const sections = config.pages?.sections;
   const sectionConfig = getSectionConfig(
@@ -287,14 +392,57 @@ export function SectionPageEditor({
   const featuredConceptMediaId = sectionConfig.featuredConceptMediaId ?? null;
   const beforeSelectedMediaIds = sectionConfig.beforeSelectedMediaIds ?? [];
   const afterSelectedMediaIds = sectionConfig.afterSelectedMediaIds ?? [];
+  const referencePhotoIds = sectionConfig.referencePhotoIds ?? [];
+
+  const isComparisonCollage = layoutVariant === "comparisonCollage";
+  const maxBefore = isComparisonCollage ? 1 : splitDensity;
+  const maxAfter = isComparisonCollage ? 1 : splitDensity;
+
+  const [libraryPhotosState, setLibraryPhotosState] = useState<LibraryMediaItem[]>([]);
+  useEffect(() => {
+    if (!isComparisonCollage) return;
+    if (libraryPhotosProp !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      const result = await listLibraryMediaAction({
+        includeUnapproved: true,
+        pageSize: 100,
+        sort: "newest",
+      });
+      if (!cancelled && !result.error) setLibraryPhotosState(result.items);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isComparisonCollage, libraryPhotosProp]);
+
+  const effectiveLibraryPhotos = libraryPhotosProp ?? libraryPhotosState;
+
+  const inferredSectionType = useMemo(
+    () => (isComparisonCollage ? inferSectionTypeFromTitle(sectionTitle) : null),
+    [isComparisonCollage, sectionTitle]
+  );
+
+  const { items: libraryPhotosForTemplate4Picker, filterLabel: libraryFilterLabel } = useMemo(
+    () => filterLibraryPhotosBySectionType(effectiveLibraryPhotos, inferredSectionType),
+    [effectiveLibraryPhotos, inferredSectionType]
+  );
 
   const beforeImages = useMemo(
-    () => resolveBeforeImages(existingPhotosForRoom, beforeSelectedMediaIds, splitDensity),
-    [existingPhotosForRoom, beforeSelectedMediaIds, splitDensity]
+    () => resolveBeforeImages(existingPhotosForRoom, beforeSelectedMediaIds, maxBefore),
+    [existingPhotosForRoom, beforeSelectedMediaIds, maxBefore]
   );
   const afterImages = useMemo(
-    () => resolveAfterImages(roomMedia, featuredConceptMediaId, afterSelectedMediaIds, splitDensity),
-    [roomMedia, featuredConceptMediaId, afterSelectedMediaIds, splitDensity]
+    () => resolveAfterImages(roomMedia, featuredConceptMediaId, afterSelectedMediaIds, maxAfter),
+    [roomMedia, featuredConceptMediaId, afterSelectedMediaIds, maxAfter]
+  );
+  const comparisonReferenceImages = useMemo(
+    () =>
+      referencePhotoIds
+        .map((id) => effectiveLibraryPhotos.find((p) => p.id === id))
+        .filter(Boolean)
+        .map((p) => ({ id: p!.id, url: p!.url, caption: null as string | null })),
+    [referencePhotoIds, effectiveLibraryPhotos]
   );
   const sectionPayload: SectionTemplatePayload = useMemo(
     () => ({
@@ -325,16 +473,22 @@ export function SectionPageEditor({
         ? { ...prevPages.sections }
         : {};
     const current = prevSections[sectionKey] ?? {};
+    const nextLayoutVariant = partial.layoutVariant ?? current.layoutVariant ?? "split";
     const nextDensity = partial.splitDensity ?? splitDensity;
-    const nextBefore = (partial.beforeSelectedMediaIds ?? beforeSelectedMediaIds).slice(0, nextDensity);
-    const nextAfter = (partial.afterSelectedMediaIds ?? afterSelectedMediaIds).slice(0, nextDensity);
+    const isComparisonCollage = nextLayoutVariant === "comparisonCollage";
+    const maxBefore = isComparisonCollage ? 1 : nextDensity;
+    const maxAfter = isComparisonCollage ? 1 : nextDensity;
+    const nextBefore = (partial.beforeSelectedMediaIds ?? beforeSelectedMediaIds).slice(0, maxBefore);
+    const nextAfter = (partial.afterSelectedMediaIds ?? afterSelectedMediaIds).slice(0, maxAfter);
+    const nextReference = (partial.referencePhotoIds ?? referencePhotoIds).slice(0, 3);
     const next: SectionPageConfig = {
       include: partial.include !== undefined ? partial.include !== false : current.include !== false,
-      layoutVariant: partial.layoutVariant ?? current.layoutVariant ?? "split",
+      layoutVariant: nextLayoutVariant,
       splitDensity: nextDensity,
       featuredConceptMediaId: partial.featuredConceptMediaId !== undefined ? partial.featuredConceptMediaId : (current.featuredConceptMediaId ?? null),
       beforeSelectedMediaIds: nextBefore,
       afterSelectedMediaIds: nextAfter,
+      referencePhotoIds: nextReference,
       titleScale: partial.titleScale ?? titleScale,
       photoAreaPct: partial.photoAreaPct ?? photoAreaPct,
       scopeAreaPct: partial.scopeAreaPct ?? scopeAreaPct,
@@ -476,7 +630,7 @@ export function SectionPageEditor({
                       </p>
                     </div>
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-900 text-[11px] font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900">
-                      {tpl.id === "split" ? "1" : tpl.id === "heroAfter" ? "2" : "3"}
+                      {tpl.id === "split" ? "1" : tpl.id === "heroAfter" ? "2" : tpl.id === "storyboard" ? "3" : "4"}
                     </span>
                   </div>
                   <div className="relative mt-1 aspect-video w-full overflow-hidden rounded-lg border border-dashed border-zinc-300 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900">
@@ -492,6 +646,18 @@ export function SectionPageEditor({
                       <div className="absolute inset-0 flex flex-col p-1">
                         <div className="h-2/5 rounded bg-zinc-300 dark:bg-zinc-700" />
                         <div className="mt-0.5 flex-1 rounded bg-zinc-200 dark:bg-zinc-800" />
+                      </div>
+                    ) : tpl.id === "comparisonCollage" ? (
+                      <div className="absolute inset-0 flex gap-0.5 p-1">
+                        <div className="grid flex-1 grid-cols-2 gap-0.5">
+                          <div className="rounded bg-zinc-300 dark:bg-zinc-700" />
+                          <div className="rounded bg-zinc-300 dark:bg-zinc-700" />
+                        </div>
+                        <div className="flex w-2/5 flex-col gap-0.5">
+                          <div className="flex-1 rounded bg-zinc-200 dark:bg-zinc-800" />
+                          <div className="flex-1 rounded bg-zinc-200 dark:bg-zinc-800" />
+                          <div className="flex-1 rounded bg-zinc-200 dark:bg-zinc-800" />
+                        </div>
                       </div>
                     ) : (
                       <div className="absolute inset-0 grid grid-cols-3 gap-0.5 p-1">
@@ -532,7 +698,107 @@ export function SectionPageEditor({
         <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
           Template Settings
         </h3>
-        {layoutVariant === "split" ? (
+        {layoutVariant === "comparisonCollage" ? (
+          <div className="space-y-6">
+            <MediaThumbnailPicker
+              label="Before photo (Existing photos for this room)"
+              items={existingPhotosForRoom}
+              selectedIds={beforeSelectedMediaIds}
+              onChange={(ids) => updateSection({ beforeSelectedMediaIds: ids })}
+              emptyMessage="No existing photos for this room. Add photos in the Media tab."
+              maxCount={1}
+            />
+            <MediaThumbnailPicker
+              label="Render photo (Renderings for this room)"
+              items={roomMedia}
+              selectedIds={afterSelectedMediaIds}
+              onChange={(ids) => updateSection({ afterSelectedMediaIds: ids })}
+              emptyMessage="No renderings for this room. Add renderings in the Media tab."
+              maxCount={1}
+            />
+            <div>
+              <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+                {libraryFilterLabel}
+              </p>
+              <MediaThumbnailPicker
+                label="Completed Project Photos (from Photo Library)"
+                items={libraryPhotosForTemplate4Picker.map((p) => ({ id: p.id, url: p.url }))}
+                selectedIds={referencePhotoIds}
+                onChange={(ids) => updateSection({ referencePhotoIds: ids })}
+                emptyMessage="Loading library… or add photos in Settings → Photo Library."
+                maxCount={3}
+              />
+            </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/30">
+              <h4 className="mb-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200">Layout Controls</h4>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Title scale</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.85}
+                      max={1.25}
+                      step={0.01}
+                      value={titleScale}
+                      onChange={(e) => updateSection({ titleScale: parseFloat(e.target.value) || 1 })}
+                      className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
+                    />
+                    <span className="min-w-[3rem] shrink-0 text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {titleScale.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Photo area %</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={40}
+                      max={72}
+                      step={1}
+                      value={photoAreaPct}
+                      onChange={(e) => {
+                        const photo = Math.min(72, Math.max(40, parseInt(e.target.value, 10) || 58));
+                        updateSection({ photoAreaPct: photo });
+                      }}
+                      className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
+                    />
+                    <span className="min-w-[3rem] shrink-0 text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {photoAreaPct}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Scope text size</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.85}
+                      max={1.25}
+                      step={0.01}
+                      value={scopeTextScale}
+                      onChange={(e) =>
+                        updateSection({
+                          scopeTextScale: Math.min(1.25, Math.max(0.85, parseFloat(e.target.value) || 1)),
+                        })
+                      }
+                      className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
+                    />
+                    <span className="min-w-[3rem] shrink-0 text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {scopeTextScale.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <SectionLivePreview
+              payload={sectionPayload}
+              layoutVariant={layoutVariant}
+              comparisonReferenceImages={comparisonReferenceImages}
+            />
+          </div>
+        ) : layoutVariant === "split" ? (
           <div className="space-y-6">
             <div>
               <span className={labelClass}>Layout density</span>
@@ -576,78 +842,71 @@ export function SectionPageEditor({
               emptyMessage="No renderings for this room. Add renderings in the Media tab."
               maxCount={splitDensity}
             />
-            {/* Live Preview + Layout Controls: 2-column so preview and sliders visible together */}
-            <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-              <div className="min-w-0">
-                <SectionLivePreview payload={sectionPayload} layoutVariant={layoutVariant} />
-              </div>
-              <div className="w-48 shrink-0 space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800/30">
-                <h4 className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">Layout Controls</h4>
-                <div className="space-y-3">
-                  <div>
-                    <label className={labelClass}>Title scale</label>
-                    <div className="mt-1 flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={0.85}
-                        max={1.25}
-                        step={0.01}
-                        value={titleScale}
-                        onChange={(e) => updateSection({ titleScale: parseFloat(e.target.value) || 1 })}
-                        className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
-                      />
-                      <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
-                        {titleScale.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelClass}>Photo area % (remaining space after title + scope)</label>
-                    <div className="mt-1 flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={40}
-                        max={72}
-                        step={1}
-                        value={photoAreaPct}
-                        onChange={(e) => {
-                          const photo = Math.min(72, Math.max(40, parseInt(e.target.value, 10) || 58));
-                          updateSection({ photoAreaPct: photo });
-                        }}
-                        className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
-                      />
-                      <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
-                        {photoAreaPct}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelClass}>Scope text size</label>
-                    <div className="mt-1 flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={0.85}
-                        max={1.25}
-                        step={0.01}
-                        value={scopeTextScale}
-                        onChange={(e) =>
-                          updateSection({
-                            scopeTextScale: Math.min(1.25, Math.max(0.85, parseFloat(e.target.value) || 1)),
-                          })
-                        }
-                        className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
-                      />
-                      <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
-                        {scopeTextScale.toFixed(2)}
-                      </span>
-                    </div>
+            {/* Layout Controls: horizontal bar above Live Preview */}
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/30">
+              <h4 className="mb-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200">Layout Controls</h4>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Title scale</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.85}
+                      max={1.25}
+                      step={0.01}
+                      value={titleScale}
+                      onChange={(e) => updateSection({ titleScale: parseFloat(e.target.value) || 1 })}
+                      className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
+                    />
+                    <span className="min-w-[3rem] shrink-0 text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {titleScale.toFixed(2)}
+                    </span>
                   </div>
                 </div>
-                <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                  Scope height auto-sizes; photo area fills remaining space.
-                </p>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Photo area %</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={40}
+                      max={72}
+                      step={1}
+                      value={photoAreaPct}
+                      onChange={(e) => {
+                        const photo = Math.min(72, Math.max(40, parseInt(e.target.value, 10) || 58));
+                        updateSection({ photoAreaPct: photo });
+                      }}
+                      className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
+                    />
+                    <span className="min-w-[3rem] shrink-0 text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {photoAreaPct}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Scope text size</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.85}
+                      max={1.25}
+                      step={0.01}
+                      value={scopeTextScale}
+                      onChange={(e) =>
+                        updateSection({
+                          scopeTextScale: Math.min(1.25, Math.max(0.85, parseFloat(e.target.value) || 1)),
+                        })
+                      }
+                      className="h-2 w-full cursor-pointer accent-zinc-900 dark:accent-zinc-300"
+                    />
+                    <span className="min-w-[3rem] shrink-0 text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {scopeTextScale.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
+            <SectionLivePreview payload={sectionPayload} layoutVariant={layoutVariant} />
           </div>
         ) : (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400">
@@ -656,7 +915,7 @@ export function SectionPageEditor({
         )}
       </section>
 
-      {layoutVariant !== "split" && (
+      {layoutVariant !== "split" && layoutVariant !== "comparisonCollage" && (
         <SectionLivePreview payload={sectionPayload} layoutVariant={layoutVariant} />
       )}
     </div>

@@ -164,6 +164,9 @@ export function roomSlugFromName(name: string): string {
     || "room";
 }
 
+/** Reserved key in pages.sections for Additional Sections page config (must not be treated as a room id). */
+const ADDITIONAL_SECTIONS_KEY = "additionalSections";
+
 export function buildProposalSections(
   proposalId: string,
   snapshot: SnapshotData,
@@ -174,10 +177,7 @@ export function buildProposalSections(
     { href: `${base}/cover`, label: "Cover", type: "page" },
     { href: `${base}/objective`, label: "Objective", type: "page" },
     { href: `${base}/difference`, label: "Why Us", type: "page" },
-    { href: `${base}/scope`, label: "Scope", type: "page" },
   ];
-
-  const usedSlugs = new Set<string>();
 
   const pages =
     publicLayoutConfig &&
@@ -198,6 +198,7 @@ export function buildProposalSections(
       ? (sectionsConfig as Record<string, SectionPageConfig>)
       : null;
 
+  // One section page per included room (include !== false), in room order. No generic Scope page.
   for (const room of snapshot.rooms) {
     const sectionCfg = sectionsMap?.[room.id];
     const includeSection =
@@ -205,23 +206,28 @@ export function buildProposalSections(
         ? sectionCfg.include !== false
         : (roomsConfig as Record<string, { published?: boolean }>)[room.id]?.published !== false;
     if (!includeSection) continue;
-    const useSectionPage = sectionsMap && room.id in sectionsMap;
-    if (useSectionPage) {
-      sections.push({
-        href: `${base}/section:${room.id}`,
-        label: room.name,
-        type: "room",
-      });
-    } else {
-      const baseSlug = roomSlugFromName(room.name);
-      const slug = usedSlugs.has(baseSlug) ? room.id : baseSlug;
-      usedSlugs.add(slug);
-      sections.push({
-        href: `${base}/scope/${slug}`,
-        label: room.name,
-        type: "room",
-      });
-    }
+    sections.push({
+      href: `${base}/section/${room.id}`,
+      label: room.name,
+      type: "room",
+    });
+  }
+
+  // Additional Sections page when included (rooms with include === false appear here).
+  const additionalCfg =
+    sectionsMap && ADDITIONAL_SECTIONS_KEY in sectionsMap
+      ? (sectionsMap as Record<string, { include?: boolean }>)[ADDITIONAL_SECTIONS_KEY]
+      : undefined;
+  const rollupPublished =
+    (additionalCfg?.include ??
+      (pages as PresentationConfigSaved["pages"] | undefined)?.rollup?.published ??
+      true) !== false;
+  if (rollupPublished) {
+    sections.push({
+      href: `${base}/additional-sections`,
+      label: "Additional Sections",
+      type: "page",
+    });
   }
 
   sections.push(

@@ -259,8 +259,8 @@ export type PresentationSettings = {
 export type SectionPageConfig = {
   /** Include this section as its own page in the proposal (default: true). */
   include?: boolean;
-  /** Layout variant for the section page: split = Before/After, heroAfter, storyboard. */
-  layoutVariant?: "split" | "heroAfter" | "storyboard";
+  /** Layout variant for the section page: split = Before/After, heroAfter, storyboard, comparisonCollage = Template 4. */
+  layoutVariant?: "split" | "heroAfter" | "storyboard" | "comparisonCollage";
   /** Template 1 layout density: 1 = 1-up (large), 2 = 2-up (medium), 3 = 3-up (small). Default 2. */
   splitDensity?: 1 | 2 | 3;
   /** Featured After Image (shows first in After column). Null = use selected order. */
@@ -269,6 +269,8 @@ export type SectionPageConfig = {
   beforeSelectedMediaIds?: string[];
   /** After renderings media IDs for Template 1; max length = splitDensity. */
   afterSelectedMediaIds?: string[];
+  /** Template 4: completed-project/reference photo library IDs; max 3. */
+  referencePhotoIds?: string[];
   /** @deprecated Use beforeSelectedMediaIds. Kept for backward compat. */
   beforeMediaIds?: string[];
   /** @deprecated Use afterSelectedMediaIds. Kept for backward compat. */
