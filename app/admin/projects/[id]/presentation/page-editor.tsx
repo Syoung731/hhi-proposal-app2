@@ -9,7 +9,16 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import type { ObjectivePageConfig, PresentationConfigSaved, PublicLayoutConfig } from "@/app/lib/layout-config";
+import type { ObjectivePageConfig, PresentationConfigSaved, PublicLayoutConfig, WhyUsPageConfig } from "@/app/lib/layout-config";
+import {
+  GRID_CARDS_DEFAULT_CARD_BG,
+  GRID_CARDS_DEFAULT_CARD_BORDER,
+  STACKED_DEFAULT_CARD_BG,
+  STACKED_DEFAULT_UNDERLINE_COLOR,
+  COLUMNS_DEFAULT_UNDERLINE_COLOR,
+  COLUMNS_DEFAULT_ICON_COLOR,
+  COLUMNS_DEFAULT_TEXT_COLOR,
+} from "@/app/lib/layout-config";
 import { getLayoutConfig, getTemplateCBarColor, getTemplateCColumns, getTemplateBDividerColor, getTemplateBUnderlineColor, TEMPLATE_C_DESCRIPTION_MAX_LENGTH, TEMPLATE_C_TITLE_MAX_LENGTH } from "@/app/lib/layout-config";
 import type { PresentationPageId } from "./types";
 import { ReorderableList } from "@/components/ui/reorderable-list";
@@ -25,6 +34,7 @@ import {
   suggestTemplateBFitStatementAction,
   suggestTemplateCColumnsAction,
   suggestTemplateCColumnAction,
+  rewriteWhyUsToFitAction,
 } from "./actions";
 import { simpleStringHash } from "@/app/lib/string-hash";
 import { CoverRenderer } from "@/components/public/cover";
@@ -32,14 +42,30 @@ import { ObjectiveRenderer, type ObjectiveMediaItem } from "@/components/public/
 import { ObjectiveTemplateB } from "@/app/components/presentation/objective/objective-template-b";
 import { ObjectiveTemplateC } from "@/app/components/presentation/objective/objective-template-c";
 import { TemplateCIconPicker } from "./template-c-icon-picker";
+import { WhyUsContentEditor } from "./why-us/WhyUsContentEditor";
+import { WhyUsRenderer } from "@/components/presentation/why-us/WhyUsRenderer";
+import { getCompanyWhyUsDefaultsForProjectAction } from "@/app/admin/settings/presentation/value-pillars/actions";
+import { SectionPageEditor } from "./section-page-editor";
+import { AdditionalSectionsEditor } from "./additional-sections-editor";
 
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 const selectClass =
   "w-full max-w-sm rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100";
+const inputClass =
+  "w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10";
+const textareaClass =
+  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100";
 
-type MediaOption = { id: string; url: string; kind: string; type?: string; roomId?: string | null };
-type RoomOption = { id: string; name: string };
+type MediaOption = { id: string; url: string; kind: string; type?: string; roomId?: string | null; sortOrder?: number };
+type RoomOption = {
+  id: string;
+  name: string;
+  scopeNarrative?: string;
+  lengthIn?: number | null;
+  widthIn?: number | null;
+  ceilingHeightIn?: number | null;
+};
 
 /** Optional cover content for live preview (project title, subtitle, coverHeroImageId). */
 export type CoverContentOption = {
@@ -74,6 +100,33 @@ type PageEditorProps = {
   /** Brand accent color. Template C bar defaults to this when barColor is unset; not persisted unless user sets bar color. */
   brandingAccentColor?: string | null;
 };
+
+/** True when Why Us has no meaningful content: no title and no pillar with headline/body/iconKey. */
+function isWhyUsEmpty(config: WhyUsPageConfig | undefined): boolean {
+  const title = (config?.title ?? "").trim();
+  if (title !== "") return false;
+  const pillars = config?.pillars;
+  if (!pillars || !Array.isArray(pillars) || pillars.length === 0) return true;
+  const hasAnyContent = pillars.some(
+    (pillar) =>
+      (pillar?.headline ?? "").trim() !== "" ||
+      (pillar?.body ?? "").trim() !== "" ||
+      (pillar?.iconKey ?? "") !== ""
+  );
+  return !hasAnyContent;
+}
+
+const DEFAULT_VISIBLE_PILLARS: readonly boolean[] = [true, true, true, false];
+
+function getWhyUsVisiblePillars(raw: boolean[] | undefined | null): boolean[] {
+  const base = [...DEFAULT_VISIBLE_PILLARS];
+  if (Array.isArray(raw)) {
+    raw.slice(0, 4).forEach((v, i) => {
+      if (typeof v === "boolean") base[i] = v;
+    });
+  }
+  return base;
+}
 
 const COVER_VARIANTS = [
   { id: "heroOverlay" as const, label: "Hero Overlay" },
@@ -232,6 +285,8 @@ function CoverLivePreview({
 
 const OBJECTIVE_DESIGN_W = 1200;
 const OBJECTIVE_DESIGN_H = 675;
+const WHY_US_DESIGN_W = 1200;
+const WHY_US_DESIGN_H = 675;
 
 type ObjectiveTemplateId = "A" | "B" | "C";
 
@@ -338,6 +393,118 @@ function ObjectiveLivePreview({
                 preview
               />
             )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type WhyUsLivePreviewProps = {
+  config: WhyUsPageConfig | undefined;
+  /** Effective layout variant from merged layout config. */
+  variant: PublicLayoutConfig["pages"]["whyUs"]["variant"];
+  /** Brand icons (for resolving icon URLs). */
+  brandIcons?: { id: string; imageUrl: string; name?: string }[];
+  /** Called when gridCards body overflow is detected or cleared (for warning banner). */
+  onOverflowChange?: (overflow: boolean) => void;
+};
+
+function WhyUsLivePreview({
+  config,
+  variant,
+  brandIcons = [],
+  onOverflowChange,
+}: WhyUsLivePreviewProps) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.5);
+  /** 0 = 17px, 1 = 15px, 2 = 13px. Hard fallback so text is never cut off. */
+  const [overflowStep, setOverflowStep] = useState(0);
+  const iconIdToUrl = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const icon of brandIcons) {
+      if (icon.id && icon.imageUrl) m.set(icon.id, icon.imageUrl);
+    }
+    return m;
+  }, [brandIcons]);
+
+  useLayoutEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    const updateScale = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (w > 0 && h > 0) {
+        const s = Math.min(w / WHY_US_DESIGN_W, h / WHY_US_DESIGN_H, 1);
+        setScale(s);
+      }
+    };
+    const ro = new ResizeObserver(updateScale);
+    ro.observe(el);
+    updateScale();
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setOverflowStep(0);
+  }, [config?.pillars, variant]);
+
+  useLayoutEffect(() => {
+    if (variant !== "gridCards") {
+      onOverflowChange?.(false);
+      return;
+    }
+    const frame = frameRef.current;
+    if (!frame) return;
+    const bodies = frame.querySelectorAll<HTMLElement>("[data-why-us-card-body]");
+    let overflow = false;
+    bodies.forEach((el) => {
+      if (el.scrollHeight > el.clientHeight) overflow = true;
+    });
+    onOverflowChange?.(overflow);
+    if (overflow) setOverflowStep((s) => Math.min(s + 1, 2));
+  }, [config?.pillars, variant, overflowStep, onOverflowChange]);
+
+  const gridCardsBodyFontSizeOverride =
+    overflowStep === 0 ? undefined : 17 - overflowStep * 2;
+
+  const mergedConfig = useMemo<WhyUsPageConfig>(
+    () => ({
+      ...(config ?? {}),
+      variant,
+    }),
+    [config, variant]
+  );
+
+  return (
+    <section className="mt-8">
+      <h3 className={labelClass}>Live Preview</h3>
+      <div
+        className="relative mt-2 w-full max-w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100/50 dark:border-zinc-700 dark:bg-zinc-900/50"
+        style={{
+          aspectRatio: "16 / 9",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          ref={frameRef}
+          className="absolute inset-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+        >
+          <div
+            className="absolute left-1/2 top-1/2 origin-center"
+            style={{
+              width: WHY_US_DESIGN_W,
+              height: WHY_US_DESIGN_H,
+              transform: `translate(-50%, -50%) scale(${scale})`,
+            }}
+          >
+            <WhyUsRenderer
+              config={mergedConfig}
+              iconUrls={iconIdToUrl}
+              gridCardsBodyFontSizeOverride={gridCardsBodyFontSizeOverride}
+            />
           </div>
         </div>
       </div>
@@ -2175,6 +2342,9 @@ export function PageEditor({
   brandingAccentColor = null,
 }: PageEditorProps) {
   const p = config.pages ?? {};
+  const [applyingWhyUsDefaults, setApplyingWhyUsDefaults] = useState(false);
+  const [whyUsOverflow, setWhyUsOverflow] = useState(false);
+  const [rewritingWhyUsToFit, setRewritingWhyUsToFit] = useState(false);
   const update = (partial: Partial<PresentationConfigSaved>) => {
     onConfigChange({ ...config, ...partial });
   };
@@ -2190,10 +2360,36 @@ export function PageEditor({
     );
   }
 
-  const mergedCoverConfig = useMemo(
-    () => getLayoutConfig(config).pages.cover,
+  const mergedLayout = useMemo(
+    () => getLayoutConfig(config),
     [config]
   );
+  const mergedCoverConfig = mergedLayout.pages.cover;
+
+  const whyUsDefaultsLoadedForConfigRef = useRef<PresentationConfigSaved | null>(null);
+  useEffect(() => {
+    if (pageId !== "whyUs") return;
+    const whyUsConfig = p.whyUs;
+    if (!isWhyUsEmpty(whyUsConfig)) return;
+    if (whyUsDefaultsLoadedForConfigRef.current === config) return;
+    whyUsDefaultsLoadedForConfigRef.current = config;
+    void getCompanyWhyUsDefaultsForProjectAction().then((result) => {
+      if ("error" in result && result.error) return;
+      if ("title" in result && result.pillars) {
+        updatePages({
+          whyUs: {
+            ...(p.whyUs ?? {}),
+            title: result.title,
+            pillars: result.pillars.map((pillar) => ({
+              iconKey: pillar.iconKey,
+              headline: pillar.headline,
+              body: pillar.body,
+            })),
+          },
+        });
+      }
+    });
+  }, [pageId, config, p.whyUs]);
 
   if (pageId === "cover") {
     const currentVariant = (p.cover?.variant ?? "heroOverlay") as "heroOverlay" | "splitCover" | "titlePlate";
@@ -2601,301 +2797,1334 @@ export function PageEditor({
   }
 
   if (pageId === "whyUs") {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-          Why Us Page
-        </h2>
-        <div>
-          <label htmlFor="whyUs-variant" className={labelClass}>
-            Layout variant
-          </label>
-          <select
-            id="whyUs-variant"
-            className={selectClass}
-            value={p.whyUs?.variant ?? "gridCards"}
-            onChange={(e) =>
-              updatePages({
-                whyUs: {
-                  variant: e.target.value as "gridCards" | "iconRows",
-                },
-              })
-            }
-          >
-            <option value="gridCards">Grid cards</option>
-            <option value="iconRows">Icon rows</option>
-          </select>
-        </div>
-      </div>
-    );
-  }
+    const whyUsVariant = mergedLayout.pages.whyUs.variant;
+    const currentVariant = p.whyUs?.variant ?? "gridCards";
+    type WhyUsVariantOption = "gridCards" | "stacked" | "columns" | "simple";
+    const setWhyUsVariant = (v: WhyUsVariantOption) =>
+      updatePages({
+        whyUs: { ...(p.whyUs ?? {}), variant: v },
+      });
 
-  if (pageId === "transitions") {
+    const applyCompanyDefaults = async () => {
+      setApplyingWhyUsDefaults(true);
+      const result = await getCompanyWhyUsDefaultsForProjectAction();
+      setApplyingWhyUsDefaults(false);
+      if ("error" in result && result.error) {
+        alert(result.error);
+        return;
+      }
+      if ("title" in result && result.pillars) {
+        updatePages({
+          whyUs: {
+            ...(p.whyUs ?? {}),
+            title: result.title,
+            pillars: result.pillars.map((pillar) => ({
+              iconKey: pillar.iconKey,
+              headline: pillar.headline,
+              body: pillar.body,
+            })),
+          },
+        });
+      }
+    };
+
+    const whyUsTemplates: {
+      id: WhyUsVariantOption;
+      title: string;
+      subtitle: string;
+    }[] = [
+      { id: "gridCards", title: "Grid Cards", subtitle: "2×2 grid of pillar cards" },
+      { id: "stacked", title: "Stacked Rows", subtitle: "Vertical list of rows" },
+      { id: "columns", title: "Three Columns", subtitle: "Three-column layout" },
+      {
+        id: "simple",
+        title: "Hero Value Statements",
+        subtitle: "Centered slide with 2–4 value statements",
+      },
+    ];
+
     return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-          Transitions
-        </h2>
-        <div>
-          <label htmlFor="transitions-mode" className={labelClass}>
-            Page transition
-          </label>
-          <select
-            id="transitions-mode"
-            className={selectClass}
-            value={config.transitions?.mode ?? "fade"}
-            onChange={(e) =>
-              update({
-                transitions: {
-                  mode: e.target.value as "none" | "fade" | "slide",
-                },
-              })
-            }
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            Why Us Page
+          </h2>
+          <button
+            type="button"
+            onClick={applyCompanyDefaults}
+            disabled={applyingWhyUsDefaults}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
           >
-            <option value="none">None</option>
-            <option value="fade">Fade</option>
-            <option value="slide">Slide</option>
-          </select>
+            {applyingWhyUsDefaults ? "Applying…" : "Reset to Company Defaults"}
+          </button>
         </div>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Defaults are loaded from Settings → Value Pillars when this page is empty.
+        </p>
+
+        <WhyUsContentEditor
+          config={p.whyUs}
+          onChange={(next) => updatePages({ whyUs: next })}
+          brandIcons={brandIcons}
+        />
+
+        {/* Shared typography + icon sizing for all Why Us templates */}
+        <section className="space-y-3 rounded-xl border border-zinc-200 bg-white/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Text & icon sizes
+          </h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            These sliders adjust shared headline, body, and icon sizing across all Why Us templates.
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
+            {/* Headline size */}
+            <div>
+              <label className={labelClass}>Headline size</label>
+              <div className="mt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={20}
+                    max={44}
+                    step={1}
+                    className="h-2 w-full cursor-pointer accent-zinc-900"
+                    value={(() => {
+                      const raw = p.whyUs?.style?.headlineSizePx;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 34;
+                      return Math.min(44, Math.max(20, n));
+                    })()}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10);
+                      const clamped = Number.isNaN(value)
+                        ? 34
+                        : Math.min(44, Math.max(20, value));
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          style: {
+                            ...(p.whyUs?.style ?? {}),
+                            headlineSizePx: clamped,
+                          },
+                        },
+                      });
+                    }}
+                  />
+                  <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                    {(() => {
+                      const raw = p.whyUs?.style?.headlineSizePx;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 34;
+                      const clamped = Math.min(44, Math.max(20, n));
+                      return `${clamped}px`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Body size */}
+            <div>
+              <label className={labelClass}>Body size</label>
+              <div className="mt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={14}
+                    max={30}
+                    step={1}
+                    className="h-2 w-full cursor-pointer accent-zinc-900"
+                    value={(() => {
+                      const raw = p.whyUs?.style?.bodySizePx;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 20;
+                      return Math.min(30, Math.max(14, n));
+                    })()}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10);
+                      const clamped = Number.isNaN(value)
+                        ? 20
+                        : Math.min(30, Math.max(14, value));
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          style: {
+                            ...(p.whyUs?.style ?? {}),
+                            bodySizePx: clamped,
+                          },
+                        },
+                      });
+                    }}
+                  />
+                  <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                    {(() => {
+                      const raw = p.whyUs?.style?.bodySizePx;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 20;
+                      const clamped = Math.min(30, Math.max(14, n));
+                      return `${clamped}px`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Icon scale */}
+            <div>
+              <label className={labelClass}>Icon scale</label>
+              <div className="mt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0.8}
+                    max={2.5}
+                    step={0.05}
+                    className="h-2 w-full cursor-pointer accent-zinc-900"
+                    value={(() => {
+                      const raw = p.whyUs?.style?.iconScale;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 1.0;
+                      const clamped = Math.min(2.5, Math.max(0.8, n));
+                      return clamped;
+                    })()}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value);
+                      const clamped = Number.isNaN(value)
+                        ? 1.0
+                        : Math.min(2.5, Math.max(0.8, value));
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          style: {
+                            ...(p.whyUs?.style ?? {}),
+                            iconScale: clamped,
+                          },
+                        },
+                      });
+                    }}
+                  />
+                  <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                    {(() => {
+                      const raw = p.whyUs?.style?.iconScale;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 1.0;
+                      const clamped = Math.min(2.5, Math.max(0.8, n));
+                      return `${clamped.toFixed(2)}×`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Hero headline scale (Hero Value Statements only) */}
+            <div>
+              <label className={labelClass}>Hero headline scale</label>
+              <div className="mt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={1.2}
+                    max={2.4}
+                    step={0.05}
+                    className="h-2 w-full cursor-pointer accent-zinc-900"
+                    value={(() => {
+                      const raw = p.whyUs?.style?.heroHeadlineScale;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 1.6;
+                      const clamped = Math.min(2.4, Math.max(1.2, n));
+                      return clamped;
+                    })()}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value);
+                      const clamped = Number.isNaN(value)
+                        ? 1.6
+                        : Math.min(2.4, Math.max(1.2, value));
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          style: {
+                            ...(p.whyUs?.style ?? {}),
+                            heroHeadlineScale: clamped,
+                          },
+                        },
+                      });
+                    }}
+                  />
+                  <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                    {(() => {
+                      const raw = p.whyUs?.style?.heroHeadlineScale;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 1.6;
+                      const clamped = Math.min(2.4, Math.max(1.2, n));
+                      return `${clamped.toFixed(2)}×`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Hero Value Statements spacing */}
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className={labelClass}>Statement spacing</label>
+              <div className="mt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={24}
+                    max={60}
+                    step={1}
+                    className="h-2 w-full cursor-pointer accent-zinc-900"
+                    value={(() => {
+                      const raw = p.whyUs?.style?.heroStatementSpacingPx;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 36;
+                      const clamped = Math.min(60, Math.max(24, n));
+                      return clamped;
+                    })()}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10);
+                      const clamped = Number.isNaN(value)
+                        ? 36
+                        : Math.min(60, Math.max(24, value));
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          style: {
+                            ...(p.whyUs?.style ?? {}),
+                            heroStatementSpacingPx: clamped,
+                          },
+                        },
+                      });
+                    }}
+                  />
+                  <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                    {(() => {
+                      const raw = p.whyUs?.style?.heroStatementSpacingPx;
+                      const n =
+                        typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                          ? raw
+                          : 36;
+                      const clamped = Math.min(60, Math.max(24, n));
+                      return `${clamped}px`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Choose your Why Us template.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {whyUsTemplates.map((tpl) => {
+              const selected = currentVariant === tpl.id;
+              return (
+                <div
+                  key={tpl.id}
+                  className={`relative flex h-full flex-col rounded-xl border-2 p-3 text-left transition-colors ${
+                    selected
+                      ? "border-emerald-500 ring-2 ring-emerald-300 dark:border-emerald-400"
+                      : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
+                  } cursor-pointer`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setWhyUsVariant(tpl.id)}
+                    className="flex flex-1 flex-col text-left"
+                    aria-pressed={selected}
+                  >
+                    <div className="mb-2">
+                      <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {tpl.title}
+                      </p>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {tpl.subtitle}
+                      </p>
+                    </div>
+                    <div className="relative mt-1 aspect-video w-full overflow-hidden rounded-lg border border-dashed border-zinc-300 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900">
+                      {tpl.id === "gridCards" ? (
+                        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-1 p-1.5">
+                          {[1, 2, 3, 4].map((i) => (
+                            <div
+                              key={i}
+                              className="rounded border border-zinc-300 bg-white/80 dark:border-zinc-600 dark:bg-zinc-800"
+                            >
+                              <div className="h-1.5 w-2/3 rounded bg-zinc-200 dark:bg-zinc-600" />
+                              <div className="mt-0.5 h-1 w-full rounded bg-zinc-200 dark:bg-zinc-700" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : tpl.id === "stacked" ? (
+                        <div className="absolute inset-0 flex flex-col gap-1 p-1.5">
+                          {[1, 2, 3, 4].map((i) => (
+                            <div
+                              key={i}
+                              className="flex flex-1 items-center gap-2 rounded border border-zinc-300 bg-white/80 px-1 dark:border-zinc-600 dark:bg-zinc-800"
+                            >
+                              <div className="h-2 w-2 shrink-0 rounded bg-zinc-300 dark:bg-zinc-600" />
+                              <div className="h-1 flex-1 rounded bg-zinc-200 dark:bg-zinc-700" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : tpl.id === "columns" ? (
+                        <div className="absolute inset-0 flex gap-1 p-1.5">
+                          {[1, 2, 3].map((i) => (
+                            <div
+                              key={i}
+                              className="flex flex-1 flex-col rounded border border-zinc-300 bg-white/80 p-1 dark:border-zinc-600 dark:bg-zinc-800"
+                            >
+                              <div className="mx-auto h-2 w-2 rounded bg-zinc-300 dark:bg-zinc-600" />
+                              <div className="mt-0.5 h-1 w-full rounded bg-zinc-200 dark:bg-zinc-700" />
+                              <div className="mt-0.5 h-0.5 w-4/5 rounded bg-zinc-200/80 dark:bg-zinc-700/80" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : tpl.id === "simple" ? (
+                        <div className="absolute inset-0 flex flex-col justify-center px-3 py-2">
+                          <div className="mb-1 h-2 w-1/2 rounded-full bg-zinc-300 dark:bg-zinc-600" />
+                          <div className="mb-2 h-0.5 w-2/3 rounded-full bg-orange-400/90 dark:bg-orange-500" />
+                          <div className="flex flex-1 items-stretch gap-2">
+                            <div className="relative flex w-4 flex-col items-center">
+                              <div className="absolute inset-y-1 left-1/2 w-px -translate-x-1/2 rounded-full bg-orange-400/80 dark:bg-orange-500/80" />
+                              {[0, 1, 2, 3].map((i) => (
+                                <div
+                                  key={i}
+                                  className="relative flex flex-1 items-center justify-center"
+                                >
+                                  <div className="h-1.5 w-1.5 rounded-full bg-orange-500 shadow-sm dark:bg-orange-400" />
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex-1 space-y-1.5 pt-0.5">
+                              {[1, 2, 3, 4].map((i) => (
+                                <div key={i} className="flex items-start gap-1.5">
+                                  <div className="mt-[1px] h-2 w-2 rounded bg-zinc-300 dark:bg-zinc-600" />
+                                  <div className="space-y-0.5">
+                                    <div className="h-1.5 w-2/3 rounded bg-zinc-200 dark:bg-zinc-700" />
+                                    <div className="h-1 w-3/4 rounded bg-zinc-200/80 dark:bg-zinc-800/70" />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="absolute inset-0 flex flex-col gap-0.5 p-1.5">
+                          {[1, 2, 3, 4].map((i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-1.5 border-b border-zinc-200 py-0.5 dark:border-zinc-700"
+                            >
+                              <div className="h-1.5 w-1.5 shrink-0 rounded bg-zinc-300 dark:bg-zinc-600" />
+                              <div className="h-1 w-3/4 rounded bg-zinc-200 dark:bg-zinc-700" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {whyUsVariant === "gridCards" && (
+          <section className="space-y-3 rounded-xl border border-zinc-200 bg-white/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Grid Cards Style
+            </h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className={labelClass}>Card background color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.gridCardsStyle?.cardBg?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.gridCardsStyle.cardBg
+                        : GRID_CARDS_DEFAULT_CARD_BG
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          gridCardsStyle: {
+                            ...(p.whyUs?.gridCardsStyle ?? {}),
+                            cardBg: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.gridCardsStyle?.cardBg ?? GRID_CARDS_DEFAULT_CARD_BG}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          gridCardsStyle: {
+                            ...(p.whyUs?.gridCardsStyle ?? {}),
+                            cardBg: v || GRID_CARDS_DEFAULT_CARD_BG,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={GRID_CARDS_DEFAULT_CARD_BG}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Card border color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.gridCardsStyle?.cardBorder?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.gridCardsStyle.cardBorder
+                        : GRID_CARDS_DEFAULT_CARD_BORDER
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          gridCardsStyle: {
+                            ...(p.whyUs?.gridCardsStyle ?? {}),
+                            cardBorder: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.gridCardsStyle?.cardBorder ?? GRID_CARDS_DEFAULT_CARD_BORDER}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          gridCardsStyle: {
+                            ...(p.whyUs?.gridCardsStyle ?? {}),
+                            cardBorder: v || GRID_CARDS_DEFAULT_CARD_BORDER,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={GRID_CARDS_DEFAULT_CARD_BORDER}
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {whyUsVariant === "stacked" && (
+          <section className="space-y-3 rounded-xl border border-zinc-200 bg-white/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Stacked Rows Style
+            </h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className={labelClass}>Row background color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.stackedStyle?.cardBg?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.stackedStyle.cardBg
+                        : STACKED_DEFAULT_CARD_BG
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          stackedStyle: {
+                            ...(p.whyUs?.stackedStyle ?? {}),
+                            cardBg: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.stackedStyle?.cardBg ?? STACKED_DEFAULT_CARD_BG}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          stackedStyle: {
+                            ...(p.whyUs?.stackedStyle ?? {}),
+                            cardBg: v || STACKED_DEFAULT_CARD_BG,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={STACKED_DEFAULT_CARD_BG}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Underline color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.stackedStyle?.underlineColor?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.stackedStyle.underlineColor
+                        : STACKED_DEFAULT_UNDERLINE_COLOR
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          stackedStyle: {
+                            ...(p.whyUs?.stackedStyle ?? {}),
+                            underlineColor: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.stackedStyle?.underlineColor ?? STACKED_DEFAULT_UNDERLINE_COLOR}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          stackedStyle: {
+                            ...(p.whyUs?.stackedStyle ?? {}),
+                            underlineColor: v || STACKED_DEFAULT_UNDERLINE_COLOR,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={STACKED_DEFAULT_UNDERLINE_COLOR}
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {whyUsVariant === "columns" && (
+          <section className="space-y-4 rounded-xl border border-zinc-200 bg-white/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Three Columns Style
+            </h3>
+
+            {/* Row 1: colors (2-column grid on desktop) */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className={labelClass}>Title underline color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.columnsStyle?.underlineColor?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.columnsStyle.underlineColor
+                        : COLUMNS_DEFAULT_UNDERLINE_COLOR
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          columnsStyle: {
+                            ...(p.whyUs?.columnsStyle ?? {}),
+                            underlineColor: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.columnsStyle?.underlineColor ?? COLUMNS_DEFAULT_UNDERLINE_COLOR}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          columnsStyle: {
+                            ...(p.whyUs?.columnsStyle ?? {}),
+                            underlineColor: v || COLUMNS_DEFAULT_UNDERLINE_COLOR,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={COLUMNS_DEFAULT_UNDERLINE_COLOR}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Text color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.columnsStyle?.textColor?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.columnsStyle.textColor
+                        : COLUMNS_DEFAULT_TEXT_COLOR
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          columnsStyle: {
+                            ...(p.whyUs?.columnsStyle ?? {}),
+                            textColor: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.columnsStyle?.textColor ?? COLUMNS_DEFAULT_TEXT_COLOR}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          columnsStyle: {
+                            ...(p.whyUs?.columnsStyle ?? {}),
+                            textColor: v || COLUMNS_DEFAULT_TEXT_COLOR,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={COLUMNS_DEFAULT_TEXT_COLOR}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                Visible pillars
+              </p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Choose which pillars show in the Three Columns layout. First three are visible by default.
+              </p>
+              <div className="mt-1 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {getWhyUsVisiblePillars(p.whyUs?.visiblePillars).map((checked, index) => {
+                  const label =
+                    p.whyUs?.pillars?.[index]?.headline?.trim() ||
+                    `Pillar ${index + 1}`;
+                  return (
+                    <label
+                      key={index}
+                      className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-200"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = getWhyUsVisiblePillars(p.whyUs?.visiblePillars);
+                          next[index] = e.target.checked;
+                          updatePages({
+                            whyUs: {
+                              ...(p.whyUs ?? {}),
+                              visiblePillars: next,
+                            },
+                          });
+                        }}
+                      />
+                      <span className="truncate">{label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {whyUsVariant === "simple" && (
+          <section className="space-y-4 rounded-xl border border-zinc-200 bg-white/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Hero Value Statements Style
+            </h3>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className={labelClass}>Underline color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.stackedStyle?.underlineColor?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.stackedStyle.underlineColor
+                        : STACKED_DEFAULT_UNDERLINE_COLOR
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          stackedStyle: {
+                            ...(p.whyUs?.stackedStyle ?? {}),
+                            underlineColor: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={
+                      p.whyUs?.stackedStyle?.underlineColor ?? STACKED_DEFAULT_UNDERLINE_COLOR
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          stackedStyle: {
+                            ...(p.whyUs?.stackedStyle ?? {}),
+                            underlineColor: v || STACKED_DEFAULT_UNDERLINE_COLOR,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={STACKED_DEFAULT_UNDERLINE_COLOR}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Text color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.columnsStyle?.textColor?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.columnsStyle.textColor
+                        : COLUMNS_DEFAULT_TEXT_COLOR
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          columnsStyle: {
+                            ...(p.whyUs?.columnsStyle ?? {}),
+                            textColor: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={p.whyUs?.columnsStyle?.textColor ?? COLUMNS_DEFAULT_TEXT_COLOR}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          columnsStyle: {
+                            ...(p.whyUs?.columnsStyle ?? {}),
+                            textColor: v || COLUMNS_DEFAULT_TEXT_COLOR,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={COLUMNS_DEFAULT_TEXT_COLOR}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Dot color</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-9 w-14 cursor-pointer rounded border border-zinc-300 dark:border-zinc-600"
+                    value={
+                      p.whyUs?.simpleStyle?.dotColor?.trim()?.match(/^#[0-9A-Fa-f]{6}$/)
+                        ? p.whyUs.simpleStyle.dotColor
+                        : p.whyUs?.stackedStyle?.underlineColor ??
+                          STACKED_DEFAULT_UNDERLINE_COLOR
+                    }
+                    onChange={(e) =>
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          simpleStyle: {
+                            ...(p.whyUs?.simpleStyle ?? {}),
+                            dotColor: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={
+                      p.whyUs?.simpleStyle?.dotColor ??
+                      p.whyUs?.stackedStyle?.underlineColor ??
+                      STACKED_DEFAULT_UNDERLINE_COLOR
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      updatePages({
+                        whyUs: {
+                          ...(p.whyUs ?? {}),
+                          simpleStyle: {
+                            ...(p.whyUs?.simpleStyle ?? {}),
+                            dotColor:
+                              v ||
+                              (p.whyUs?.stackedStyle?.underlineColor ??
+                                STACKED_DEFAULT_UNDERLINE_COLOR),
+                          },
+                        },
+                      });
+                    }}
+                    placeholder={
+                      p.whyUs?.stackedStyle?.underlineColor ?? STACKED_DEFAULT_UNDERLINE_COLOR
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className={labelClass}>Headline size (px)</label>
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={24}
+                      max={44}
+                      step={1}
+                      className="h-2 w-full cursor-pointer accent-zinc-900"
+                      value={(() => {
+                        const raw = p.whyUs?.style?.simpleHeadlineSizePx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 32;
+                        return Math.min(44, Math.max(24, n));
+                      })()}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        const clamped = Number.isNaN(value)
+                          ? 32
+                          : Math.min(44, Math.max(24, value));
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            style: {
+                              ...(p.whyUs?.style ?? {}),
+                              simpleHeadlineSizePx: clamped,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {(() => {
+                        const raw = p.whyUs?.style?.simpleHeadlineSizePx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 32;
+                        const clamped = Math.min(44, Math.max(24, n));
+                        return `${clamped}px`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Body size (px)</label>
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={16}
+                      max={28}
+                      step={1}
+                      className="h-2 w-full cursor-pointer accent-zinc-900"
+                      value={(() => {
+                        const raw = p.whyUs?.style?.simpleBodySizePx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 20;
+                        return Math.min(28, Math.max(16, n));
+                      })()}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        const clamped = Number.isNaN(value)
+                          ? 20
+                          : Math.min(28, Math.max(16, value));
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            style: {
+                              ...(p.whyUs?.style ?? {}),
+                              simpleBodySizePx: clamped,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {(() => {
+                        const raw = p.whyUs?.style?.simpleBodySizePx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 20;
+                        const clamped = Math.min(28, Math.max(16, n));
+                        return `${clamped}px`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Dot size (px)</label>
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={8}
+                      max={18}
+                      step={1}
+                      className="h-2 w-full cursor-pointer accent-zinc-900"
+                      value={(() => {
+                        const raw = p.whyUs?.style?.simpleDotSizePx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 12;
+                        return Math.min(18, Math.max(8, n));
+                      })()}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        const clamped = Number.isNaN(value)
+                          ? 12
+                          : Math.min(18, Math.max(8, value));
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            style: {
+                              ...(p.whyUs?.style ?? {}),
+                              simpleDotSizePx: clamped,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {(() => {
+                        const raw = p.whyUs?.style?.simpleDotSizePx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 12;
+                        const clamped = Math.min(18, Math.max(8, n));
+                        return `${clamped}px`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className={labelClass}>Row gap (px)</label>
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={12}
+                      max={40}
+                      step={1}
+                      className="h-2 w-full cursor-pointer accent-zinc-900"
+                      value={(() => {
+                        const raw = p.whyUs?.style?.simpleRowGapPx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 24;
+                        return Math.min(40, Math.max(12, n));
+                      })()}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        const clamped = Number.isNaN(value)
+                          ? 24
+                          : Math.min(40, Math.max(12, value));
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            style: {
+                              ...(p.whyUs?.style ?? {}),
+                              simpleRowGapPx: clamped,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {(() => {
+                        const raw = p.whyUs?.style?.simpleRowGapPx;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 24;
+                        const clamped = Math.min(40, Math.max(12, n));
+                        return `${clamped}px`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Icon scale</label>
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.8}
+                      max={2.0}
+                      step={0.05}
+                      className="h-2 w-full cursor-pointer accent-zinc-900"
+                      value={(() => {
+                        const raw = p.whyUs?.simpleStyle?.iconScale;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 1.0;
+                        const clamped = Math.min(2.0, Math.max(0.8, n));
+                        return clamped;
+                      })()}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value);
+                        const clamped = Number.isNaN(value)
+                          ? 1.0
+                          : Math.min(2.0, Math.max(0.8, value));
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            simpleStyle: {
+                              ...(p.whyUs?.simpleStyle ?? {}),
+                              iconScale: clamped,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span className="min-w-[3rem] text-right text-xs text-zinc-600 dark:text-zinc-300">
+                      {(() => {
+                        const raw = p.whyUs?.simpleStyle?.iconScale;
+                        const n =
+                          typeof raw === "number" && Number.isFinite(raw) && !Number.isNaN(raw)
+                            ? raw
+                            : 1.0;
+                        const clamped = Math.min(2.0, Math.max(0.8, n));
+                        return `${clamped.toFixed(2)}×`;
+                      })()}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    Base icon: 72px
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className={labelClass}>Options</label>
+                </div>
+                <div className="space-y-1 text-xs text-zinc-700 dark:text-zinc-200">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      checked={p.whyUs?.style?.simpleShowIcons ?? true}
+                      onChange={(e) => {
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            style: {
+                              ...(p.whyUs?.style ?? {}),
+                              simpleShowIcons: e.target.checked,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span>Show icons</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      checked={p.whyUs?.style?.simpleCenterTitle ?? false}
+                      onChange={(e) => {
+                        updatePages({
+                          whyUs: {
+                            ...(p.whyUs ?? {}),
+                            style: {
+                              ...(p.whyUs?.style ?? {}),
+                              simpleCenterTitle: e.target.checked,
+                            },
+                          },
+                        });
+                      }}
+                    />
+                    <span>Center title</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className={labelClass}>Footer note (optional)</label>
+              <input
+                type="text"
+                className={inputClass}
+                value={p.whyUs?.simpleFooterText ?? ""}
+                onChange={(e) => {
+                  updatePages({
+                    whyUs: {
+                      ...(p.whyUs ?? {}),
+                      simpleFooterText: e.target.value,
+                    },
+                  });
+                }}
+                placeholder="Short footer line shown under the timeline"
+              />
+            </div>
+
+          </section>
+        )}
+
+        {whyUsVariant === "gridCards" && whyUsOverflow && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/50">
+            <span className="text-amber-800 dark:text-amber-200">
+              Some text does not fit this template. Click &quot;Rewrite to Fit&quot;.
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                const pillars = p.whyUs?.pillars ?? [];
+                if (pillars.length === 0) return;
+                setRewritingWhyUsToFit(true);
+                const result = await rewriteWhyUsToFitAction({ pillars });
+                setRewritingWhyUsToFit(false);
+                if ("error" in result && result.error) {
+                  alert(result.error);
+                  return;
+                }
+                if ("pillars" in result)
+                  updatePages({
+                    whyUs: { ...(p.whyUs ?? {}), pillars: result.pillars },
+                  });
+              }}
+              disabled={rewritingWhyUsToFit}
+              className="rounded-lg border border-amber-600 bg-amber-100 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-500 dark:bg-amber-900/60 dark:text-amber-100 dark:hover:bg-amber-800"
+            >
+              {rewritingWhyUsToFit ? "Rewriting…" : "Rewrite to Fit (Grid Cards)"}
+            </button>
+          </div>
+        )}
+
+        <WhyUsLivePreview
+          config={p.whyUs}
+          variant={whyUsVariant}
+          brandIcons={brandIcons}
+          onOverflowChange={setWhyUsOverflow}
+        />
       </div>
     );
   }
 
   if (pageId === "rollup") {
-    const rollupMode = p.rollup?.mode ?? "auto";
-    const rollupRooms = rooms.filter((r) => rollupRoomIds.includes(r.id));
-    const eligibleRooms = rooms.filter((r) => eligibleRollupRoomIds.includes(r.id));
-    const manualRoomIds = p.rollup?.roomIds ?? [];
-
-    const setRollupMode = (mode: "auto" | "manual") => {
-      updatePages({
-        rollup: {
-          ...p.rollup,
-          mode,
-          roomIds: mode === "manual" ? eligibleRollupRoomIds : [],
-        },
-      });
-    };
-    const setManualRoomIds = (ids: string[]) => {
-      updatePages({ rollup: { ...p.rollup, mode: "manual", roomIds: ids } });
-    };
-    const toggleManualRoom = (roomId: string, included: boolean) => {
-      if (included) setManualRoomIds(manualRoomIds.filter((id) => id !== roomId));
-      else setManualRoomIds([...manualRoomIds, roomId]);
-    };
-
-    const includedItems = manualRoomIds.map((id) => ({ id }));
-    const notIncludedRooms = eligibleRooms.filter(
-      (r) => !manualRoomIds.includes(r.id)
+    const conceptCountByRoom = new Map<string, number>(
+      Object.entries(conceptMediaByRoom).map(([rid, arr]) => [rid, arr.length])
     );
-
     return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-          Additional Sections
-        </h2>
-        <div>
-          <span className={labelClass}>Selection</span>
-          <div className="mt-1 flex rounded-lg border border-zinc-300 dark:border-zinc-600 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setRollupMode("auto")}
-              className={`flex-1 px-3 py-2 text-sm font-medium ${
-                rollupMode === "auto"
-                  ? "bg-zinc-200 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-100"
-                  : "bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-              }`}
-            >
-              Auto
-            </button>
-            <button
-              type="button"
-              onClick={() => setRollupMode("manual")}
-              className={`flex-1 px-3 py-2 text-sm font-medium ${
-                rollupMode === "manual"
-                  ? "bg-zinc-200 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-100"
-                  : "bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-              }`}
-            >
-              Manual
-            </button>
-          </div>
-        </div>
-        {rollupMode === "auto" ? (
-          <>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Sections without concept pages or disabled concept pages will be grouped here.
-            </p>
-            <div>
-              <p className={labelClass}>Sections included (read-only)</p>
-              <ul className="list-inside list-disc text-sm text-zinc-600 dark:text-zinc-400">
-                {rollupRooms.length === 0
-                  ? "No sections in rollup."
-                  : rollupRooms.map((r) => (
-                      <li key={r.id}>{r.name}</li>
-                    ))}
-              </ul>
-            </div>
-          </>
-        ) : (
-          <div>
-            <p className={labelClass}>Choose and order sections for Additional Sections</p>
-            {includedItems.length > 0 && (
-              <ReorderableList
-                items={includedItems}
-                onReorder={(newItems) =>
-                  setManualRoomIds(newItems.map((item) => item.id))
-                }
-                renderItem={(item) => {
-                  const room = rooms.find((r) => r.id === item.id);
-                  return (
-                    <label className="flex cursor-pointer items-center gap-2 min-w-0">
-                      <input
-                        type="checkbox"
-                        checked
-                        onChange={() => toggleManualRoom(item.id, true)}
-                        className="rounded border-zinc-300 dark:border-zinc-600"
-                      />
-                      <span className="truncate text-sm text-zinc-800 dark:text-zinc-200">
-                        {room?.name ?? item.id}
-                      </span>
-                    </label>
-                  );
-                }}
-                className="mt-1"
-              />
-            )}
-            {notIncludedRooms.length > 0 && (
-              <div className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-2">
-                <p className="mb-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                  Add sections
-                </p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {notIncludedRooms.map((room) => (
-                    <label
-                      key={room.id}
-                      className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={false}
-                        onChange={() => toggleManualRoom(room.id, false)}
-                        className="rounded border-zinc-300 dark:border-zinc-600"
-                      />
-                      {room.name}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            {eligibleRooms.length === 0 && (
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                No sections eligible for rollup.
-              </p>
-            )}
-          </div>
-        )}
-        <div>
-          <label htmlFor="rollup-variant" className={labelClass}>
-            Layout variant
-          </label>
-          <select
-            id="rollup-variant"
-            className={selectClass}
-            value={p.rollup?.variant ?? "simpleList"}
-            onChange={(e) =>
-              updatePages({
-                rollup: { ...p.rollup, variant: e.target.value as "simpleList" },
-              })
-            }
-          >
-            <option value="simpleList">Simple list</option>
-          </select>
-        </div>
-      </div>
+      <AdditionalSectionsEditor
+        config={config}
+        onConfigChange={onConfigChange}
+        remainingScopeRoomIds={eligibleRollupRoomIds}
+        rooms={rooms}
+        conceptCountByRoom={conceptCountByRoom}
+      />
     );
   }
 
   if (pageId.startsWith("room:")) {
     const roomId = pageId.slice(5);
     const room = rooms.find((r) => r.id === roomId);
-    const roomConfig = p.rooms?.[roomId] ?? { enabled: true, variant: "beforeAfter" };
-    const concepts = conceptMediaByRoom[roomId] ?? [];
+    // Same logic as Media tab "Existing Photos": type === EXISTING && roomId match (key = roomId).
+    const existingPhotosForRoom = media
+      .filter((m) => m.type === "EXISTING" && m.roomId === roomId)
+      .map((m) => ({ id: m.id, url: m.url }));
+    const roomMedia = (conceptMediaByRoom[roomId] ?? []).map((c) => ({
+      id: c.id,
+      url: c.url,
+      label: `Concept — ${c.id.slice(0, 8)}`,
+    }));
     return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-          {room?.name ?? "Section"}
-        </h2>
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="room-enabled"
-            checked={roomConfig.enabled !== false}
-            onChange={(e) =>
-              updatePages({
-                rooms: {
-                  ...p.rooms,
-                  [roomId]: { ...roomConfig, enabled: e.target.checked },
-                },
-              })
-            }
-          />
-          <label htmlFor="room-enabled" className="text-sm font-medium">
-            Include in proposal (show as own page)
-          </label>
-        </div>
-        <div>
-          <label htmlFor="room-variant" className={labelClass}>
-            Layout variant
-          </label>
-          <select
-            id="room-variant"
-            className={selectClass}
-            value={roomConfig.variant ?? "beforeAfter"}
-            onChange={(e) =>
-              updatePages({
-                rooms: {
-                  ...p.rooms,
-                  [roomId]: { ...roomConfig, variant: e.target.value },
-                },
-              })
-            }
-          >
-            <option value="beforeAfter">Before / After</option>
-            <option value="gallery">Gallery</option>
-          </select>
-        </div>
-        {concepts.length > 0 && (
-          <div>
-            <label htmlFor="room-featured" className={labelClass}>
-              Featured concept image
-            </label>
-            <select
-              id="room-featured"
-              className={selectClass}
-              value={roomConfig.featuredMediaId ?? ""}
-              onChange={(e) =>
-                updatePages({
-                  rooms: {
-                    ...p.rooms,
-                    [roomId]: {
-                      ...roomConfig,
-                      featuredMediaId: e.target.value || null,
-                    },
-                  },
-                })
-              }
-            >
-              <option value="">Default (selected render)</option>
-              {concepts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  Concept — {c.id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
+      <SectionPageEditor
+        sectionKey={roomId}
+        sectionTitle={room?.name ?? "Section"}
+        config={config}
+        onConfigChange={onConfigChange}
+        roomMedia={roomMedia}
+        existingPhotosForRoom={existingPhotosForRoom}
+        room={room ?? null}
+        media={media}
+      />
     );
   }
 

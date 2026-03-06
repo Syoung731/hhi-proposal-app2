@@ -16,7 +16,11 @@ export default async function PublicProposalLayout({
 
   if (!data) notFound();
 
-  const sections = buildProposalSections(data.proposalId, data.snapshot);
+  const sections = buildProposalSections(
+    data.proposalId,
+    data.snapshot,
+    data.publicLayoutConfig
+  );
   const layoutConfig = getLayoutConfig(data.publicLayoutConfig);
   const presentationSettings = (data.publicLayoutConfig as PresentationConfigSaved | null)?.settings ?? null;
 

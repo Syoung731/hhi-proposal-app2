@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useState } from "react";
 import { CompanyProfileTab } from "./company-profile-tab";
 import { BrandingTab } from "./branding-tab";
 import { ProposalDefaultsTab } from "./proposal-defaults-tab";
@@ -13,14 +12,15 @@ import { EmployeesTab } from "./employees-tab";
 
 const DEFAULT_TAB = "company-profile";
 
-const TABS: { slug: string; label: string; href?: string }[] = [
+export const SETTINGS_TABS: { slug: string; label: string }[] = [
   { slug: "company-profile", label: "Company Profile" },
   { slug: "branding", label: "Branding" },
   { slug: "proposal-defaults", label: "Proposal Defaults" },
   { slug: "pricing-profiles", label: "Pricing Profiles" },
   { slug: "section-types", label: "Section Types" },
   { slug: "style-presets", label: "Style Presets" },
-  { slug: "photo-library", label: "Photo Library", href: "/admin/settings/photo-library" },
+  { slug: "photo-library", label: "Photo Library" },
+  { slug: "value-pillars", label: "Value Pillars" },
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
 ];
@@ -135,6 +135,10 @@ type Props = {
   iconLibraryContext?: IconLibraryContext;
   openIconLibrary?: boolean;
   openBackgroundLibrary?: boolean;
+  /** When true, render only the content card (no sidebar); used when layout provides the nav. */
+  embedInLayout?: boolean;
+  /** Current tab when using path-based routing (required when embedInLayout). */
+  activeTab?: string;
 };
 
 export function SettingsTabs({
@@ -149,86 +153,16 @@ export function SettingsTabs({
   iconLibraryContext,
   openIconLibrary: initialOpenIconLibrary = false,
   openBackgroundLibrary: initialOpenBackgroundLibrary = false,
+  embedInLayout = false,
+  activeTab,
 }: Props) {
-  const [currentTab, setCurrentTab] = useState<string>(DEFAULT_TAB);
   const [iconLibraryOpen, setIconLibraryOpen] = useState(initialOpenIconLibrary);
   const [backgroundLibraryOpen, setBackgroundLibraryOpen] = useState(initialOpenBackgroundLibrary);
-  const currentLabel = TABS.find((t) => t.slug === currentTab)?.label ?? currentTab;
+  const currentTab = (embedInLayout && activeTab) ? activeTab : DEFAULT_TAB;
+  const currentLabel = SETTINGS_TABS.find((t) => t.slug === currentTab)?.label ?? currentTab;
 
-  useEffect(() => {
-    const validSlugs = new Set(TABS.map((t) => t.slug));
-
-    const applyHash = () => {
-      if (typeof window === "undefined") return;
-      const raw = window.location.hash;
-      if (!raw) {
-        setCurrentTab(DEFAULT_TAB);
-        return;
-      }
-      const hash = raw.replace(/^#/, "");
-      if (validSlugs.has(hash)) {
-        setCurrentTab(hash);
-      } else {
-        setCurrentTab(DEFAULT_TAB);
-      }
-    };
-
-    applyHash();
-
-    const handleHashChange = () => {
-      applyHash();
-    };
-
-    window.addEventListener("hashchange", handleHashChange);
-    return () => {
-      window.removeEventListener("hashchange", handleHashChange);
-    };
-  }, []);
-
-  return (
-    <div className="flex gap-8">
-      <aside className="w-64 shrink-0">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <p className="mb-2 px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-            Company Setup
-          </p>
-          <nav className="space-y-0.5">
-            {TABS.map(({ slug, label, href }) => {
-              const isLink = href != null;
-              const isActive = !isLink && currentTab === slug;
-              const linkClass =
-                "block w-full rounded-lg px-3 py-3 text-left text-sm transition-colors " +
-                (isActive
-                  ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                  : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100");
-              if (href) {
-                return (
-                  <Link key={slug} href={href} className={linkClass}>
-                    {label}
-                  </Link>
-                );
-              }
-              return (
-                <button
-                  key={slug}
-                  type="button"
-                  onClick={() => {
-                    setCurrentTab(slug);
-                    if (typeof window !== "undefined") {
-                      window.history.replaceState(null, "", `#${slug}`);
-                    }
-                  }}
-                  className={linkClass}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      </aside>
-      <div className="min-w-0 w-full flex-1">
-        <div className="min-h-[320px] w-full rounded-xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
+  const contentCard = (
+    <div className="min-h-[320px] w-full rounded-xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
           <header className="mb-6 border-b border-zinc-200 pb-6 dark:border-zinc-800">
             <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
               Company Setup
@@ -253,7 +187,7 @@ export function SettingsTabs({
               if (typeof window !== "undefined") {
                 const u = new URL(window.location.href);
                 u.searchParams.delete("openIconLibrary");
-                window.history.replaceState(null, "", u.pathname + (u.hash || "#branding"));
+                window.history.replaceState(null, "", u.pathname);
               }
             }}
               backgroundLibraryOpen={backgroundLibraryOpen}
@@ -263,7 +197,7 @@ export function SettingsTabs({
                 if (typeof window !== "undefined") {
                   const u = new URL(window.location.href);
                   u.searchParams.delete("openBackgroundLibrary");
-                  window.history.replaceState(null, "", u.pathname + (u.hash || "#branding"));
+                  window.history.replaceState(null, "", u.pathname);
                 }
               }}
             />
@@ -297,7 +231,7 @@ export function SettingsTabs({
             <IntegrationsTab settings={settings} />
           )}
         </div>
-      </div>
-    </div>
   );
+
+  return contentCard;
 }

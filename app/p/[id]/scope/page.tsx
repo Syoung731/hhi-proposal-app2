@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getPublicProposalSnapshot, roomSlugFromName } from "@/app/lib/public-proposal";
+import type { PresentationConfigSaved, PublicLayoutConfigSaved } from "@/app/lib/layout-config";
 import { isBadPlaceholderUrl } from "@/app/lib/media";
 
 export default async function ScopePage({
@@ -12,8 +13,36 @@ export default async function ScopePage({
   const data = await getPublicProposalSnapshot(id);
   if (!data) notFound();
 
-  const { snapshot } = data;
-  const { rooms, media } = snapshot;
+  const { snapshot, publicLayoutConfig } = data;
+  const { media } = snapshot;
+
+  const pages =
+    publicLayoutConfig &&
+    "pages" in (publicLayoutConfig as PublicLayoutConfigSaved | PresentationConfigSaved) &&
+    (publicLayoutConfig as PresentationConfigSaved).pages &&
+    typeof (publicLayoutConfig as PresentationConfigSaved).pages === "object" &&
+    !Array.isArray((publicLayoutConfig as PresentationConfigSaved).pages)
+      ? (publicLayoutConfig as PresentationConfigSaved).pages
+      : undefined;
+  const roomsConfig =
+    (pages as PresentationConfigSaved["pages"] | undefined)?.rooms ?? {};
+  const sectionsConfig =
+    (pages as PresentationConfigSaved["pages"] | undefined)?.sections;
+  const sectionsMap =
+    sectionsConfig &&
+    typeof sectionsConfig === "object" &&
+    !Array.isArray(sectionsConfig)
+      ? (sectionsConfig as Record<string, { include?: boolean }>)
+      : null;
+
+  const rooms = snapshot.rooms.filter((room) => {
+    const sectionCfg = sectionsMap && room.id in sectionsMap ? sectionsMap[room.id] : undefined;
+    if (sectionCfg !== undefined) {
+      return sectionCfg.include !== false;
+    }
+    const cfg = (roomsConfig as Record<string, { published?: boolean }>)[room.id];
+    return cfg?.published !== false;
+  });
   const mediaByRoom = new Map<string, typeof media>();
   for (const m of media) {
     if (m.roomId) {

@@ -360,6 +360,44 @@ model CompanySettings {
   updatedAt               DateTime @updatedAt
 }
 
+// Singleton company for value pillars / why-us defaults (single-tenant).
+model Company {
+  id              String          @id @default(cuid())
+  name            String          @default("Default Company")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  valuePillars    ValuePillar[]
+  whyUsDefaults   WhyUsDefaults?
+}
+
+model ValuePillar {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title       String    // pillar title (e.g. "No Change Order Guarantee")
+  body        String    @default("") // pillar body copy
+  brandIconId String?
+  brandIcon   BrandIcon? @relation(fields: [brandIconId], references: [id], onDelete: SetNull)
+
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId, sortOrder])
+}
+
+model WhyUsDefaults {
+  id         String   @id @default(cuid())
+  companyId  String   @unique
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title      String   @default("Why Us")
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 model BrandIcon {
   id        String           @id @default(cuid())
   slug      String           @unique
@@ -377,6 +415,7 @@ model BrandIcon {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
   backgrounds BrandBackground[]
+  valuePillars ValuePillar[]
 
   @@index([name])
 }

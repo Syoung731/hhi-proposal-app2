@@ -6,6 +6,7 @@ import type {
   PublicLayoutConfigSaved,
   PresentationConfigSaved,
   ProposalSection,
+  SectionPageConfig,
 } from "@/app/lib/layout-config";
 
 /**
@@ -165,7 +166,8 @@ export function roomSlugFromName(name: string): string {
 
 export function buildProposalSections(
   proposalId: string,
-  snapshot: SnapshotData
+  snapshot: SnapshotData,
+  publicLayoutConfig?: PublicLayoutConfigSaved | PresentationConfigSaved | null
 ): ProposalSection[] {
   const base = `/p/${proposalId}`;
   const sections: ProposalSection[] = [
@@ -176,15 +178,50 @@ export function buildProposalSections(
   ];
 
   const usedSlugs = new Set<string>();
+
+  const pages =
+    publicLayoutConfig &&
+    "pages" in publicLayoutConfig &&
+    publicLayoutConfig.pages &&
+    typeof publicLayoutConfig.pages === "object" &&
+    !Array.isArray(publicLayoutConfig.pages)
+      ? publicLayoutConfig.pages
+      : undefined;
+  const roomsConfig =
+    (pages as PresentationConfigSaved["pages"] | undefined)?.rooms ?? {};
+  const sectionsConfig =
+    (pages as PresentationConfigSaved["pages"] | undefined)?.sections;
+  const sectionsMap =
+    sectionsConfig &&
+    typeof sectionsConfig === "object" &&
+    !Array.isArray(sectionsConfig)
+      ? (sectionsConfig as Record<string, SectionPageConfig>)
+      : null;
+
   for (const room of snapshot.rooms) {
-    const baseSlug = roomSlugFromName(room.name);
-    const slug = usedSlugs.has(baseSlug) ? room.id : baseSlug;
-    usedSlugs.add(slug);
-    sections.push({
-      href: `${base}/scope/${slug}`,
-      label: room.name,
-      type: "room",
-    });
+    const sectionCfg = sectionsMap?.[room.id];
+    const includeSection =
+      sectionCfg !== undefined
+        ? sectionCfg.include !== false
+        : (roomsConfig as Record<string, { published?: boolean }>)[room.id]?.published !== false;
+    if (!includeSection) continue;
+    const useSectionPage = sectionsMap && room.id in sectionsMap;
+    if (useSectionPage) {
+      sections.push({
+        href: `${base}/section:${room.id}`,
+        label: room.name,
+        type: "room",
+      });
+    } else {
+      const baseSlug = roomSlugFromName(room.name);
+      const slug = usedSlugs.has(baseSlug) ? room.id : baseSlug;
+      usedSlugs.add(slug);
+      sections.push({
+        href: `${base}/scope/${slug}`,
+        label: room.name,
+        type: "room",
+      });
+    }
   }
 
   sections.push(

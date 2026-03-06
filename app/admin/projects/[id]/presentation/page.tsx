@@ -38,7 +38,14 @@ export default async function PresentationSetupPage({
     roomId: m.roomId,
     parentMediaId: m.parentMediaId,
   }));
-  const serializableRooms = project.rooms.map((r) => ({ id: r.id, name: r.name }));
+  const serializableRooms = project.rooms.map((r) => ({
+    id: r.id,
+    name: r.name,
+    scopeNarrative: r.scopeNarrative ?? "",
+    lengthIn: r.lengthIn ?? null,
+    widthIn: r.widthIn ?? null,
+    ceilingHeightIn: r.ceilingHeightIn ?? null,
+  }));
 
   return (
     <div>

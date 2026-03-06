@@ -16,6 +16,8 @@ import {
   suggestTemplateCSingleColumn,
   type TemplateCColumnSuggestion,
 } from "@/app/lib/ai/template-c-columns";
+import { rewriteWhyUsPillarsToFit } from "@/app/lib/ai/why-us-fit";
+import type { WhyUsPillar } from "@/app/lib/layout-config";
 
 export type PresentationMediaSnapshotItem = {
   id: string;
@@ -451,4 +453,28 @@ export async function listObjectiveSuggestedPhotosAction(input: {
   const items = scored.slice(0, limit).map((s) => s.item);
   const topIds = items.slice(0, 3).map((m) => m.id);
   return { items, topIds };
+}
+
+// --- Why Us Grid Cards: rewrite to fit --------------------------------------
+
+export async function rewriteWhyUsToFitAction(input: {
+  pillars: WhyUsPillar[];
+}): Promise<{ pillars: WhyUsPillar[] } | { error: string }> {
+  await requireAdmin();
+  const pillars = input.pillars ?? [];
+  if (pillars.length === 0) {
+    return { error: "No pillars to rewrite." };
+  }
+  try {
+    const rewritten = await rewriteWhyUsPillarsToFit(pillars);
+    const merged: WhyUsPillar[] = pillars.slice(0, 4).map((p, i) => ({
+      ...p,
+      headline: rewritten[i]?.headline ?? p.headline ?? "",
+      body: rewritten[i]?.body ?? p.body ?? "",
+    }));
+    return { pillars: merged };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to rewrite to fit.";
+    return { error: message };
+  }
 }

@@ -10,9 +10,9 @@ import { PageList } from "./page-list";
 import { PageEditor } from "./page-editor";
 import { SettingsTab } from "./settings-tab";
 import { SaveBar } from "./save-bar";
-import type { PresentationConfigSaved } from "@/app/lib/layout-config";
+import type { PresentationConfigSaved, SectionPageConfig } from "@/app/lib/layout-config";
 import type { PageListItem, PresentationPageId } from "./types";
-import { normalizePresentationConfig } from "./types";
+import { ADDITIONAL_SECTIONS_KEY, normalizePresentationConfig } from "./types";
 
 type MediaItem = {
   id: string;
@@ -22,7 +22,14 @@ type MediaItem = {
   roomId?: string | null;
   parentMediaId?: string | null;
 };
-type RoomItem = { id: string; name: string };
+type RoomItem = {
+  id: string;
+  name: string;
+  scopeNarrative?: string;
+  lengthIn?: number | null;
+  widthIn?: number | null;
+  ceilingHeightIn?: number | null;
+};
 
 export type CoverContentOption = {
   title: string;
@@ -70,19 +77,29 @@ function getConceptMediaByRoom(media: MediaItem[]): Record<string, { id: string;
   return byRoom;
 }
 
-/** Rollup = rooms that do NOT have a concept page, OR have a concept page with includeInProposal (enabled) === false. Order = rooms order. */
+/**
+ * Additional Sections rollup = rooms where section is unchecked (or legacy: not published).
+ * Source of truth: pages.sections[roomId].include === false; legacy: roomsConfig.published === false when no section config.
+ * Order = rooms order.
+ */
 function computeRollupRoomIds(
   rooms: RoomItem[],
-  roomsWithConcepts: string[],
+  _roomsWithConcepts: string[],
   config: PresentationConfigSaved
 ): string[] {
   const p = config.pages ?? {};
   const roomsConfig = p.rooms ?? {};
+  const sections =
+    p.sections && typeof p.sections === "object" && !Array.isArray(p.sections)
+      ? (p.sections as Record<string, { include?: boolean }>)
+      : null;
   return rooms.filter((r) => {
-    const hasConceptPage = roomsWithConcepts.includes(r.id);
-    if (!hasConceptPage) return true;
+    const sectionCfg = sections && r.id in sections ? sections[r.id] : undefined;
     const roomCfg = roomsConfig[r.id];
-    return roomCfg?.enabled === false;
+    if (sectionCfg !== undefined) {
+      return sectionCfg.include === false;
+    }
+    return (roomCfg as { published?: boolean } | undefined)?.published === false;
   }).map((r) => r.id);
 }
 
@@ -107,6 +124,16 @@ export function PresentationTab({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sectionsExpanded, setSectionsExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const raw = window.localStorage.getItem("presentationSectionsExpanded");
+      if (!raw) return true;
+      return raw === "true";
+    } catch {
+      return true;
+    }
+  });
 
   const handleRefreshConcepts = useCallback(async () => {
     setRefreshing(true);
@@ -144,30 +171,56 @@ export function PresentationTab({
       { id: "cover", label: "Cover Page", kind: "cover" },
       { id: "objective", label: "Objective Page", kind: "objective" },
       { id: "whyUs", label: "Why Us Page", kind: "whyUs" },
-      { id: "transitions", label: "Transitions", kind: "transitions" },
     ];
     if (hasAnyConceptRooms) {
+      const sections = config.pages?.sections;
+      const sectionsObj =
+        sections && typeof sections === "object" && !Array.isArray(sections) ? sections : null;
       for (const room of rooms) {
-        if (roomsWithConcepts.includes(room.id)) {
-          const count = conceptCountByRoom.get(room.id) ?? 0;
-          items.push({
-            id: `room:${room.id}` as PresentationPageId,
-            label: room.name,
-            kind: "room",
-            roomId: room.id,
-            badge: count > 0 ? count : undefined,
-          });
-        }
+        if (!roomsWithConcepts.includes(room.id)) continue;
+        const count = conceptCountByRoom.get(room.id) ?? 0;
+        const roomCfg = config.pages?.rooms?.[room.id];
+        const sectionCfg = sectionsObj ? (sectionsObj[room.id] as SectionPageConfig | undefined) : undefined;
+        const published =
+          sectionCfg !== undefined
+            ? sectionCfg.include !== false
+            : (roomCfg?.published !== false);
+        items.push({
+          id: `room:${room.id}` as PresentationPageId,
+          label: room.name,
+          kind: "room",
+          roomId: room.id,
+          badge: count > 0 ? count : undefined,
+          published,
+        });
       }
     }
+    const additionalCfg =
+      config.pages?.sections &&
+      typeof config.pages.sections === "object" &&
+      ADDITIONAL_SECTIONS_KEY in config.pages.sections
+        ? (config.pages.sections as Record<string, { include?: boolean }>)[ADDITIONAL_SECTIONS_KEY]
+        : undefined;
+    const rollupPublished =
+      (additionalCfg?.include ?? config.pages?.rollup?.published ?? true) !== false;
     items.push({
       id: "rollup",
       label: "Additional Sections",
       kind: "rollup",
       badge: rollupRoomIds.length,
+      published: rollupPublished,
     });
     return items;
-  }, [rooms, roomsWithConcepts, rollupRoomIds.length, conceptCountByRoom, hasAnyConceptRooms]);
+  }, [
+    rooms,
+    roomsWithConcepts,
+    rollupRoomIds.length,
+    conceptCountByRoom,
+    hasAnyConceptRooms,
+    config.pages?.rooms,
+    config.pages?.sections,
+    config.pages?.rollup?.published,
+  ]);
 
   useEffect(() => {
     if (selectedPageId && !pageListItems.some((i) => i.id === selectedPageId)) {
@@ -175,11 +228,70 @@ export function PresentationTab({
     }
   }, [selectedPageId, pageListItems]);
 
+  // Sync selected page with URL hash for deep-linking.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const applyHash = () => {
+      const raw = window.location.hash || "";
+      const hash = raw.startsWith("#") ? raw.slice(1) : raw;
+      if (!hash) return;
+      let next: PresentationPageId | null = null;
+      if (hash === "cover") next = "cover";
+      else if (hash === "objective") next = "objective";
+      else if (hash === "why-us") next = "whyUs";
+      else if (hash === "additional-sections") next = "rollup";
+      else if (hash.startsWith("section:")) {
+        const roomId = hash.slice("section:".length);
+        if (roomId && roomsWithConcepts.includes(roomId)) {
+          next = `room:${roomId}` as PresentationPageId;
+        }
+      }
+      if (next && pageListItems.some((i) => i.id === next)) {
+        setSelectedPageId(next);
+      }
+    };
+    applyHash();
+    const onHashChange = () => {
+      applyHash();
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [roomsWithConcepts, pageListItems]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!selectedPageId) return;
+    let hash = "";
+    if (selectedPageId === "cover") hash = "cover";
+    else if (selectedPageId === "objective") hash = "objective";
+    else if (selectedPageId === "whyUs") hash = "why-us";
+    else if (selectedPageId === "rollup") hash = "additional-sections";
+    else if (selectedPageId.startsWith("room:")) {
+      const roomId = selectedPageId.slice(5);
+      hash = `section:${roomId}`;
+    }
+    const url = new URL(window.location.href);
+    url.hash = hash ? `#${hash}` : "";
+    window.history.replaceState(null, "", url.toString());
+  }, [selectedPageId]);
+
   const selectedPageLabel = useMemo(() => {
     if (!selectedPageId) return "Editor";
     const item = pageListItems.find((i) => i.id === selectedPageId);
     return item?.label ?? "Editor";
   }, [selectedPageId, pageListItems]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        "presentationSectionsExpanded",
+        sectionsExpanded ? "true" : "false"
+      );
+    } catch {
+      // ignore
+    }
+  }, [sectionsExpanded]);
 
   const handleSave = useCallback(async () => {
     setStatus("saving");
@@ -194,25 +306,45 @@ export function PresentationTab({
             return [...new Set(manual)].filter((id) => eligibleSet.has(id));
           })()
         : computedRollup;
-    const roomsToPersist: Record<string, { enabled?: boolean; variant?: string; featuredMediaId?: string | null }> = {};
+    const sectionsToPersist = config.pages?.sections;
+    const additionalInclude =
+      sectionsToPersist &&
+      typeof sectionsToPersist === "object" &&
+      ADDITIONAL_SECTIONS_KEY in sectionsToPersist
+        ? (sectionsToPersist as Record<string, { include?: boolean }>)[ADDITIONAL_SECTIONS_KEY]?.include !== false
+        : config.pages?.rollup?.published !== false;
+    const roomsToPersist: Record<
+      string,
+      { enabled?: boolean; variant?: string; featuredMediaId?: string | null; published?: boolean }
+    > = {};
     for (const roomId of roomsWithConcepts) {
-      const roomCfg = config.pages?.rooms?.[roomId] ?? { enabled: true, variant: "beforeAfter" };
+      const sectionCfg =
+        sectionsToPersist && typeof sectionsToPersist === "object" && roomId in sectionsToPersist
+          ? (sectionsToPersist as Record<string, SectionPageConfig>)[roomId]
+          : undefined;
+      const roomCfg = config.pages?.rooms?.[roomId];
+      const enabled = sectionCfg?.include !== false ?? roomCfg?.enabled !== false;
+      const variant = sectionCfg?.layoutVariant ?? roomCfg?.variant ?? "split";
+      const featuredMediaId = sectionCfg?.featuredConceptMediaId ?? roomCfg?.featuredMediaId ?? null;
       roomsToPersist[roomId] = {
-        enabled: roomCfg.enabled,
-        variant: roomCfg.variant,
-        featuredMediaId: roomCfg.featuredMediaId ?? null,
+        enabled,
+        variant,
+        featuredMediaId,
+        published: sectionCfg !== undefined ? sectionCfg.include !== false : (roomCfg?.published ?? true),
       };
     }
     const configToSave: PresentationConfigSaved = {
       ...config,
       pages: {
         ...config.pages,
+        sections: sectionsToPersist,
         rooms: roomsToPersist,
         rollup: {
           ...config.pages?.rollup,
           mode: rollupMode,
           variant: config.pages?.rollup?.variant ?? "simpleList",
           roomIds: rollupRoomIdsToSave,
+          published: additionalInclude,
         },
       },
     };
@@ -254,6 +386,120 @@ export function PresentationTab({
             items={pageListItems}
             selectedId={selectedPageId}
             onSelect={setSelectedPageId}
+            sectionsExpanded={sectionsExpanded}
+            onToggleSectionsExpanded={() => setSectionsExpanded((prev) => !prev)}
+            onToggleRoomPublished={(roomId, published) => {
+              setConfig((prev) => {
+                const prevPages = prev.pages ?? {};
+                const prevRooms = (prevPages.rooms ?? {}) as Record<
+                  string,
+                  { enabled?: boolean; variant?: string; featuredMediaId?: string | null; published?: boolean }
+                >;
+                const prevSections =
+                  prevPages.sections && typeof prevPages.sections === "object" && !Array.isArray(prevPages.sections)
+                    ? { ...prevPages.sections }
+                    : {};
+                const currentRoom = prevRooms[roomId] ?? {
+                  enabled: true,
+                  variant: "split",
+                  published: true,
+                };
+                const currentSection = (prevSections as Record<string, SectionPageConfig>)[roomId];
+                const nextSection: SectionPageConfig = {
+                  include: published,
+                  layoutVariant: currentSection?.layoutVariant ?? "split",
+                  featuredConceptMediaId: currentSection?.featuredConceptMediaId ?? null,
+                };
+                return {
+                  ...prev,
+                  pages: {
+                    ...prevPages,
+                    rooms: {
+                      ...prevRooms,
+                      [roomId]: { ...currentRoom, enabled: published, published },
+                    },
+                    sections: { ...prevSections, [roomId]: nextSection },
+                  },
+                };
+              });
+            }}
+            onToggleAdditionalSectionsPublished={(published) => {
+              setConfig((prev) => {
+                const prevPages = prev.pages ?? {};
+                const prevSections =
+                  prevPages.sections && typeof prevPages.sections === "object" && !Array.isArray(prevPages.sections)
+                    ? { ...prevPages.sections }
+                    : {};
+                return {
+                  ...prev,
+                  pages: {
+                    ...prevPages,
+                    sections: {
+                      ...prevSections,
+                      [ADDITIONAL_SECTIONS_KEY]: { include: published },
+                    },
+                    rollup: {
+                      ...(prevPages?.rollup ?? {
+                        mode: "auto",
+                        variant: "simpleList",
+                        roomIds: [],
+                      }),
+                      published,
+                    },
+                  },
+                };
+              });
+            }}
+            onToggleAllSectionsPublished={(published) => {
+              setConfig((prev) => {
+                const prevPages = prev.pages ?? {};
+                const prevRooms = (prevPages.rooms ?? {}) as Record<
+                  string,
+                  {
+                    enabled?: boolean;
+                    variant?: string;
+                    featuredMediaId?: string | null;
+                    published?: boolean;
+                  }
+                >;
+                const prevSections =
+                  prevPages.sections && typeof prevPages.sections === "object" && !Array.isArray(prevPages.sections)
+                    ? { ...prevPages.sections }
+                    : {};
+                const nextRooms = { ...prevRooms };
+                const nextSections = { ...prevSections } as Record<string, SectionPageConfig | { include?: boolean }>;
+                for (const roomId of roomsWithConcepts) {
+                  const currentRoom = prevRooms[roomId] ?? {
+                    enabled: true,
+                    variant: "split",
+                    published: true,
+                  };
+                  nextRooms[roomId] = { ...currentRoom, enabled: published, published };
+                  const currentSection = (prevSections as Record<string, SectionPageConfig>)[roomId];
+                  nextSections[roomId] = {
+                    include: published,
+                    layoutVariant: currentSection?.layoutVariant ?? "split",
+                    featuredConceptMediaId: currentSection?.featuredConceptMediaId ?? null,
+                  };
+                }
+                return {
+                  ...prev,
+                  pages: {
+                    ...prevPages,
+                    rooms: nextRooms,
+                    sections: nextSections,
+                    rollup: {
+                      ...(prevPages.rollup ?? {
+                        mode: "auto",
+                        variant: "simpleList",
+                        roomIds: [],
+                      }),
+                      published,
+                    },
+                  },
+                };
+              });
+            }}
           />
         </aside>
         <div className="flex min-h-0 flex-1 flex-col">
@@ -270,6 +516,7 @@ export function PresentationTab({
                 url: m.url,
                 kind: m.kind,
                 type: m.type,
+                roomId: m.roomId,
               }))}
               rooms={rooms}
               roomsWithConcepts={roomsWithConcepts}
