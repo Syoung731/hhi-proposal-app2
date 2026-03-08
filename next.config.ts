@@ -10,7 +10,11 @@ const nextConfig: NextConfig = {
     },
   },
   // Keep in sync with ALLOWED_IMAGE_HOSTS in app/lib/media.ts
+  // Guard: "webpsave_buffer: no property named `smart_deblock`" is emitted by libvips when WebP
+  // is used. Next.js only allows formats: "image/avif" | "image/webp". Using avif-only avoids
+  // the WebP path; if the warning persists, it is from another image path (e.g. sharp elsewhere).
   images: {
+    formats: ["image/avif"],
     remotePatterns: [
       {
         protocol: "https",

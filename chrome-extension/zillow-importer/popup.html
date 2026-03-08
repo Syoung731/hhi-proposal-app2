@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zillow Import</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup">
+    <h1 class="title">Zillow Import</h1>
+
+    <label class="label" for="app-url">App URL</label>
+    <input type="text" id="app-url" class="input" placeholder="http://localhost:3000" />
+
+    <label class="label" for="pair-code">Pair Code</label>
+    <input type="text" id="pair-code" class="input" placeholder="e.g. ABC12XYZ" maxlength="12" />
+
+    <div class="actions">
+      <button type="button" id="pair-btn" class="btn btn-primary">Pair</button>
+      <button type="button" id="clear-btn" class="btn btn-secondary" style="display: none;">Clear Pairing</button>
+    </div>
+
+    <div id="status" class="status" aria-live="polite"></div>
+
+    <label class="label debug-toggle">
+      <input type="checkbox" id="debug-logging" />
+      <span>Debug logging</span>
+    </label>
+
+    <h2 class="section-title">Listing Photos</h2>
+    <div id="photos-container" class="photos-container">
+      <div id="capture-gallery-row" class="control-row">
+        <button type="button" id="capture-gallery-btn" class="btn btn-primary">Capture Gallery</button>
+      </div>
+      <p id="capture-progress" class="photos-helper hidden" aria-live="polite"></p>
+      <p id="photos-status" class="photos-status">Open Zillow's full photo gallery, then click Capture Gallery.</p>
+      <div class="control-row popup-actions">
+        <button type="button" id="open-picker-btn" class="btn btn-secondary">Open Photo Picker</button>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

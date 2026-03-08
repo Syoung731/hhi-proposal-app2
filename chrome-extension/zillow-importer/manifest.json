@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Zillow Import",
+  "version": "0.3.0",
+  "description": "Pair with the proposal app to import listing photos from Zillow.",
+  "icons": {
+    "16": "icons/icon.png",
+    "48": "icons/icon.png",
+    "128": "icons/icon.png"
+  },
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://localhost:3000/*",
+    "https://www.zillow.com/*",
+    "https://zillow.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:3000/*",
+      "https://localhost:3000/*"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Zillow Import",
+    "default_icon": "icons/icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.zillow.com/*",
+        "https://zillow.com/*"
+      ],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:3000/*",
+        "https://localhost:3000/*"
+      ],
+      "js": ["appPageContentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { redeemExtensionPairCode } from "@/app/lib/extension-pair-code";
+import {
+  createConnectionSession,
+  getCurrentConnectionStatus,
+  markConnectionFailed,
+} from "@/app/lib/zillow-browser-connection";
 import { getPresignedUploadUrl, uploadBuffer } from "@/app/lib/s3";
 import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
@@ -48,6 +54,7 @@ export async function createMediaAction(formData: FormData): Promise<{ error?: s
   const caption = (formData.get("caption") as string)?.trim() || null;
   const tagsStr = (formData.get("tags") as string)?.trim();
   const tags = tagsStr ? tagsStr.split(/[\s,]+/).filter(Boolean) : [];
+  // For Zillow imports (Phase 4): include tag "zillow" so media appears on the Imported from Zillow page.
   let roomId = (formData.get("roomId") as string) || null;
   if (!projectId || !fileKey || !url) {
     return { error: "Missing projectId, fileKey, or url" };
@@ -180,6 +187,52 @@ export async function updateMediaCaptionAction(
   return {};
 }
 
+const ADDITIONAL_SECTIONS_KEY = "additionalSections";
+
+/**
+ * Remove a media id from presentation config (beforeSelectedMediaIds, afterSelectedMediaIds, featuredConceptMediaId)
+ * so no broken references remain when media is removed from a section or deleted.
+ * - If onlyRoomId is set, only that section is updated (e.g. when unassigning from one room).
+ * - If onlyRoomId is not set, all sections are updated (e.g. when deleting media).
+ */
+async function removeMediaIdFromPresentationConfig(
+  projectId: string,
+  mediaId: string,
+  options?: { onlyRoomId?: string }
+): Promise<void> {
+  const proposal = await prisma.proposal.findUnique({
+    where: { projectId },
+    select: { id: true, publicLayoutConfig: true },
+  });
+  if (!proposal?.publicLayoutConfig || typeof proposal.publicLayoutConfig !== "object") return;
+  const config = proposal.publicLayoutConfig as {
+    pages?: { sections?: Record<string, { beforeSelectedMediaIds?: string[]; afterSelectedMediaIds?: string[]; featuredConceptMediaId?: string | null }> };
+  };
+  const sections = config.pages?.sections;
+  if (!sections || typeof sections !== "object") return;
+  let changed = false;
+  const nextSections = { ...sections };
+  for (const key of Object.keys(nextSections)) {
+    if (key === ADDITIONAL_SECTIONS_KEY) continue;
+    if (options?.onlyRoomId != null && key !== options.onlyRoomId) continue;
+    const section = nextSections[key];
+    if (!section || typeof section !== "object") continue;
+    const before = Array.isArray(section.beforeSelectedMediaIds) ? section.beforeSelectedMediaIds.filter((id) => id !== mediaId) : [];
+    const after = Array.isArray(section.afterSelectedMediaIds) ? section.afterSelectedMediaIds.filter((id) => id !== mediaId) : [];
+    const featured = section.featuredConceptMediaId === mediaId ? null : section.featuredConceptMediaId;
+    if (before.length !== (section.beforeSelectedMediaIds?.length ?? 0) || after.length !== (section.afterSelectedMediaIds?.length ?? 0) || featured !== section.featuredConceptMediaId) {
+      nextSections[key] = { ...section, beforeSelectedMediaIds: before, afterSelectedMediaIds: after, featuredConceptMediaId: featured };
+      changed = true;
+    }
+  }
+  if (changed) {
+    await prisma.proposal.update({
+      where: { projectId },
+      data: { publicLayoutConfig: { ...config, pages: { ...config.pages, sections: nextSections } } as object },
+    });
+  }
+}
+
 /**
  * Assign a room to media (e.g. from Unassigned section), or move to Front Page.
  * When roomId is set, placement becomes SECTION. When roomId is null, pass placement "FRONT_PAGE" to move to Front Page (so item leaves Unassigned).
@@ -209,6 +262,10 @@ export async function updateMediaRoomAction(
     where: { id: mediaId },
     data: { roomId, placement: placementValue },
   });
+  // When unassigning from a room, clear this media from that section's presentation config so no broken refs remain.
+  if (roomId == null && media.roomId) {
+    await removeMediaIdFromPresentationConfig(projectId, mediaId, { onlyRoomId: media.roomId });
+  }
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
@@ -232,6 +289,8 @@ export async function deleteMediaAction(projectId: string, mediaId: string): Pro
       },
     });
   }
+  // Remove this media from all section presentation configs (beforeSelectedMediaIds, etc.) so no broken refs remain.
+  await removeMediaIdFromPresentationConfig(projectId, mediaId);
   await prisma.media.delete({ where: { id: mediaId } });
   if (media.type === MediaType.HERO) {
     await prisma.project.update({
@@ -345,8 +404,14 @@ export async function startHeroRenderAction(
     })
     .then((r) => r._max.sortOrder ?? -1);
 
+  const presetToInstruction = (p: HeroPresetKey): string => {
+    if (p === "remove_watermark") {
+      return "Remove all visible text, watermarking, branding, logos, timestamps, and lettering from the image, including faint or semi-transparent overlays such as 'REsides 2025' or similar listing-site text. Cleanly reconstruct the background underneath so it looks natural and untouched. Do not change the architecture, landscaping, lighting, colors, or composition except where necessary to remove the text overlays.";
+    }
+    return p.replace(/_/g, " ");
+  };
   const baseInstruction = [
-    ...presets.map((p) => p.replace(/_/g, " ")),
+    ...presets.map(presetToInstruction),
     instructions?.trim() ?? "",
   ]
     .filter(Boolean)
@@ -385,6 +450,14 @@ export async function startHeroRenderAction(
       where: { id: created.id },
       data: { renderStatus: RenderStatus.RENDERING, renderError: null },
     });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[Front Page AI] sourceMediaId:", sourceMediaId);
+      console.log("[Front Page AI] selected options:", presets);
+      console.log("[Front Page AI] custom instruction:", instructions?.trim() ?? "(none)");
+      console.log("[Front Page AI] removeTextWatermark:", presets.includes("remove_watermark"));
+      console.log("[Front Page AI] final instruction:", finalInstruction);
+    }
 
     const { bytes, mimeType } = await generateRenderEdit({
       imageUrl: effectiveUrl,
@@ -512,17 +585,81 @@ function getEffectiveStylePromptForProject(project: {
   return project.stylePreset.prompt.trim() || null;
 }
 
+/** Phrases that indicate non-visual / construction language; exclude these from the render prompt. */
+const NON_VISUAL_PATTERNS = [
+  /\bremain\b/i,
+  /\bexisting to remain\b/i,
+  /\bno change\b/i,
+  /\bas needed\b/i,
+  /\bdue to construction\b/i,
+  /\bconstruction impacts?\b/i,
+  /\bdemolition\b/i,
+  /\bwaterproofing\b/i,
+  /\bsubstrate\b/i,
+  /\brough-?in\b/i,
+  /\bper code\b/i,
+  /\bto be performed\b/i,
+  /\ball other .* (?:to )?remain\b/i,
+  /\bcomponents? to remain\b/i,
+  /\bpaint to be performed\b/i,
+  /\blight fixtures\), with paint\b/i,
+  /\b(?:as )?required\b/i,
+  /\b(?:as )?specified\b/i,
+];
+
+/**
+ * Filter checklist items to prompt-safe visual actions only. Excludes construction/remain language
+ * that would not be useful (or could mislead) the image model.
+ */
+function filterChecklistToPromptSafeVisualActions(bullets: string[]): string[] {
+  return bullets.filter((b) => {
+    const t = b.trim();
+    if (t.length < 4) return false;
+    const lower = t.toLowerCase();
+    const isNonVisual = NON_VISUAL_PATTERNS.some((re) => re.test(lower));
+    return !isNonVisual;
+  });
+}
+
+/**
+ * Sanitize room name for rendering: strip parenthetical metadata (e.g. "(hall Bath With Shower)")
+ * so Gemini does not infer unseen fixtures from the label.
+ */
+function sanitizeRoomNameForRender(roomName: string): string {
+  if (!roomName?.trim()) return "";
+  let s = roomName.trim();
+  s = s.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+  s = s.replace(/\s*[-–—]\s*.*$/g, " ").trim();
+  return s.replace(/\s+/g, " ").trim() || roomName.trim();
+}
+
+/** Which prompt sections to include when building the Gemini render prompt. Omitted or true = include; false = exclude. */
+export type RenderPromptIncludes = {
+  includeRoomName?: boolean;
+  includeScope?: boolean;
+  includeTranscript?: boolean;
+  includeStylePreset?: boolean;
+};
+
+/** Options for Render New: use checklist of specific remodel actions (checked bullets only). */
+export type RenderOptions = {
+  /** Only these remodel-action bullets are included in the scope sent to Gemini; unchecked are excluded. */
+  checkedBullets: string[];
+};
+
 /**
  * Start room rendering for the given media (exactly one EXISTING photo).
  * Creates a pending RENDERING Media row with versioning metadata, then generates image via Gemini,
  * uploads to R2, updates the row with url/fileKey/status, and revalidates.
  * On failure, keeps the Media row with renderStatus=FAILED and renderError populated.
  * Style: only project.stylePresetId is used; if set, project.stylePreset.prompt is applied; otherwise no style guidance.
+ * When renderOptions.checkedBullets is provided, only those bullets are used as scope; room name and style preset are always included.
  */
 export async function startRoomRenderAction(
   projectId: string,
   roomId: string,
-  sourceMediaId: string
+  sourceMediaId: string,
+  renderOptions?: RenderOptions | null
 ): Promise<
   | { ok: true; createdMediaId: string; fileKey: string }
   | { error: string }
@@ -572,6 +709,34 @@ export async function startRoomRenderAction(
   const effectivePreset = project.stylePreset;
   const promptVersion = 1;
 
+  // REQUIRED: When renderOptions.checkedBullets is provided (Media tab "Render New"), use ONLY those items for remodel instructions. Do NOT add full room scope or project transcript.
+  const hasChecklistPayload =
+    renderOptions != null &&
+    typeof renderOptions === "object" &&
+    Array.isArray(renderOptions.checkedBullets);
+  const checkedBullets = hasChecklistPayload
+    ? (renderOptions.checkedBullets as string[]).filter((b) => typeof b === "string" && b.trim().length > 0)
+    : [];
+  const promptSafeBullets = hasChecklistPayload ? filterChecklistToPromptSafeVisualActions(checkedBullets) : [];
+  const roomNameForPrompt = sanitizeRoomNameForRender(room.name);
+  const scopeNarrativeForPrompt = hasChecklistPayload
+    ? promptSafeBullets.join(". ")
+    : (room.scopeNarrative ?? "");
+  const transcriptTextForPrompt = hasChecklistPayload ? undefined : (project.transcriptText ?? undefined);
+  const stylePresetPromptForPrompt = stylePresetPrompt;
+
+  // DEBUG: verify only prompt-safe checked items and sanitized room name reach Gemini
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[startRoomRenderAction] render payload:", {
+      hasChecklistPayload,
+      originalCheckedBullets: hasChecklistPayload ? checkedBullets : "(not using checklist)",
+      filteredPromptSafeBullets: hasChecklistPayload ? promptSafeBullets : "(n/a)",
+      sanitizedRoomName: roomNameForPrompt,
+      scopeNarrativeForPrompt: scopeNarrativeForPrompt.slice(0, 200) + (scopeNarrativeForPrompt.length > 200 ? "…" : ""),
+      transcriptIncluded: transcriptTextForPrompt != null && transcriptTextForPrompt.length > 0,
+    });
+  }
+
   const maxOrder = await prisma.media
     .aggregate({
       where: { projectId, roomId, type: MediaType.RENDERING },
@@ -610,10 +775,10 @@ export async function startRoomRenderAction(
 
     const { bytes, mimeType } = await generateRoomRendering({
       imageUrl: sourceMedia.url,
-      roomName: room.name,
-      scopeNarrative: room.scopeNarrative ?? "",
-      transcriptText: project.transcriptText ?? undefined,
-      stylePresetPrompt: stylePresetPrompt || undefined,
+      roomName: roomNameForPrompt,
+      scopeNarrative: scopeNarrativeForPrompt,
+      transcriptText: transcriptTextForPrompt,
+      stylePresetPrompt: stylePresetPromptForPrompt || undefined,
       promptVersion,
     });
 
@@ -632,6 +797,7 @@ export async function startRoomRenderAction(
         tags,
         renderStatus: RenderStatus.DONE,
         renderError: null,
+        roomId, // ensure room assignment on completion (e.g. if it was cleared by room delete)
       },
     });
 
@@ -645,6 +811,7 @@ export async function startRoomRenderAction(
       data: {
         renderStatus: RenderStatus.FAILED,
         renderError: reason.slice(0, 500),
+        roomId, // ensure room assignment even on failure so it does not appear as unassigned
       },
     }).catch(() => {});
     revalidatePath(`/admin/projects/${projectId}`);
@@ -915,6 +1082,7 @@ export async function startRenderUpdateAction(
         tags,
         renderStatus: RenderStatus.DONE,
         renderError: null,
+        roomId, // ensure room assignment on completion (e.g. if it was cleared by room delete)
       },
     });
 
@@ -928,6 +1096,7 @@ export async function startRenderUpdateAction(
       data: {
         renderStatus: RenderStatus.FAILED,
         renderError: reason.slice(0, 500),
+        roomId, // ensure room assignment even on failure so it does not appear as unassigned
       },
     }).catch(() => {});
     revalidatePath(`/admin/projects/${projectId}`);
@@ -986,4 +1155,131 @@ export async function getCompareRenderChangesAction(
     const message = e instanceof Error ? e.message : String(e);
     return { error: message };
   }
+}
+
+/** 8-char uppercase code: A-Z and 2-9 (excludes 0,1,I,L,O for readability). */
+function generatePairCode(): string {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let code = "";
+  const bytes = new Uint8Array(8);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 8; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  for (let i = 0; i < 8; i++) {
+    code += chars[bytes[i]! % chars.length];
+  }
+  return code;
+}
+
+/**
+ * Create a short-lived pair code for the Zillow Import Chrome extension.
+ * Admin only. Code expires in 15 minutes.
+ */
+export async function createExtensionPairCodeAction(
+  projectId: string
+): Promise<{ code: string; expiresAt: Date } | { error: string }> {
+  await requireAdmin();
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return { error: "Project not found" };
+
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  let code = generatePairCode();
+  let attempts = 0;
+  const maxAttempts = 5;
+  while (attempts < maxAttempts) {
+    const existing = await prisma.extensionPairCode.findUnique({ where: { code } });
+    if (!existing) break;
+    code = generatePairCode();
+    attempts++;
+  }
+  if (attempts >= maxAttempts) {
+    return { error: "Failed to generate unique code" };
+  }
+
+  await prisma.extensionPairCode.create({
+    data: { code, projectId, expiresAt },
+  });
+  return { code, expiresAt };
+}
+
+/**
+ * Redeem a pair code (e.g. from Chrome extension). No admin required.
+ * Delegates to shared redeemExtensionPairCode for use by API route and action.
+ */
+export async function redeemExtensionPairCodeAction(
+  code: string
+): Promise<{ projectId: string } | { error: string }> {
+  return redeemExtensionPairCode(code);
+}
+
+/** Feature flag: enable direct browser-extension handshake (env: ENABLE_DIRECT_ZILLOW_HANDSHAKE). */
+function isDirectZillowHandshakeEnabled(): boolean {
+  const v = process.env.ENABLE_DIRECT_ZILLOW_HANDSHAKE;
+  return v === "true" || v === "1";
+}
+
+/**
+ * Start a direct browser connection session for the Zillow Import extension.
+ * Returns sessionId, nonce, and expiresAt. Extension uses nonce to call verify endpoint.
+ * If direct handshake is disabled via env, returns error so UI can fall back to manual pair code.
+ */
+export async function startDirectConnectionAction(
+  projectId: string
+): Promise<
+  | { sessionId: string; nonce: string; expiresAt: Date }
+  | { error: string }
+> {
+  if (!isDirectZillowHandshakeEnabled()) {
+    return { error: "Direct handshake not enabled" };
+  }
+  const identity = await requireAdmin();
+  const userId = identity.userId;
+  if (!userId) return { error: "Unauthorized" };
+
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return { error: "Project not found" };
+
+  const result = await createConnectionSession(userId, projectId);
+  if ("error" in result) return { error: result.error };
+  return {
+    sessionId: result.sessionId,
+    nonce: result.nonce,
+    expiresAt: result.expiresAt,
+  };
+}
+
+/**
+ * Get current status of a direct connection session (for polling).
+ */
+export async function getConnectionStatusAction(
+  sessionId: string
+): Promise<
+  | { status: string; projectId: string | null; verifiedAt: Date | null; handshakeMethod: string | null }
+  | { error: string }
+> {
+  const identity = await requireAdmin();
+  const userId = identity.userId;
+  if (!userId) return { error: "Unauthorized" };
+
+  const result = await getCurrentConnectionStatus(sessionId, userId);
+  if ("error" in result) return { error: result.error };
+  return {
+    status: result.status,
+    projectId: result.projectId,
+    verifiedAt: result.verifiedAt,
+    handshakeMethod: result.handshakeMethod,
+  };
+}
+
+/**
+ * Mark a connection session as failed (e.g. user closed modal or timeout).
+ */
+export async function markConnectionFailedAction(
+  sessionId: string
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  await markConnectionFailed(sessionId);
+  return { ok: true };
 }

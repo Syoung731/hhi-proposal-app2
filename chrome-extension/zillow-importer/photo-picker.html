@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zillow Import — Photo Picker</title>
+  <link rel="stylesheet" href="photo-picker.css" />
+</head>
+<body>
+  <div class="picker">
+    <header class="picker-header">
+      <h1 class="picker-title">Zillow Import — Photo Picker</h1>
+    </header>
+
+    <div id="picker-meta" class="picker-meta hidden">
+      <p id="picker-source" class="picker-meta-line"></p>
+      <p id="picker-zillow-says" class="picker-meta-line hidden"></p>
+      <p id="picker-loaded-items" class="picker-meta-line hidden"></p>
+      <p id="picker-captured" class="picker-meta-line"></p>
+      <p id="picker-auto-scroll" class="picker-meta-line hidden"></p>
+      <p id="picker-selected" class="picker-meta-line"></p>
+    </div>
+    <p id="picker-helper" class="picker-helper hidden"></p>
+
+    <div id="picker-controls" class="picker-controls hidden">
+      <div class="picker-control-row">
+        <button type="button" id="select-all-btn" class="btn btn-secondary">Select All</button>
+        <button type="button" id="clear-all-btn" class="btn btn-secondary">Clear All</button>
+        <span id="import-selected-wrap" class="import-selected-wrap">
+          <button type="button" id="import-selected-btn" class="btn btn-primary" disabled>
+            Import Selected (<span id="import-selected-count">0</span>)
+          </button>
+        </span>
+        <span id="picker-import-status" class="picker-import-status hidden"></span>
+      </div>
+      <p id="picker-pair-error" class="picker-pair-error hidden">Pair this extension to a project first.</p>
+      <p id="picker-import-result" class="picker-import-result hidden"></p>
+    </div>
+
+    <div id="picker-main" class="picker-main hidden">
+      <div id="preview-section" class="preview-section">
+        <div class="preview-box">
+          <img id="preview-img" class="preview-img" alt="Preview" />
+        </div>
+      </div>
+      <div id="thumbs-section" class="thumbs-section">
+        <div id="image-grid" class="image-grid" role="list"></div>
+      </div>
+    </div>
+
+    <div id="picker-empty" class="picker-empty">
+      <p>No photos loaded. Use the extension popup to capture a Zillow gallery, then open this page.</p>
+    </div>
+  </div>
+  <script src="photo-picker.js"></script>
+</body>
+</html>

@@ -4128,6 +4128,7 @@ export function PageEditor({
         room={room ?? null}
         media={media}
         libraryPhotos={libraryPhotos}
+        projectId={projectId}
       />
     );
   }

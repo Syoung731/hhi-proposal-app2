@@ -59,10 +59,59 @@ model Project {
   rooms               Room[]
   timelinePhases      TimelinePhase[]
   proposal            Proposal?
+  extensionPairCodes       ExtensionPairCode[]
+  zillowBrowserConnections ZillowBrowserConnection[]
 
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])
+}
+
+model ExtensionPairCode {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  projectId       String
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  usedAt          DateTime?
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([expiresAt])
+}
+
+enum ZillowConnectionStatus {
+  PENDING
+  CONNECTED
+  FAILED
+  EXPIRED
+}
+
+enum ZillowHandshakeMethod {
+  DIRECT
+  MANUAL
+}
+
+model ZillowBrowserConnection {
+  id                String                   @id @default(cuid())
+  userId            String                   // Clerk user id (authenticated user who started the session)
+  projectId         String?
+  status            ZillowConnectionStatus   @default(PENDING)
+  nonce             String                   @unique
+  createdAt         DateTime                 @default(now())
+  expiresAt         DateTime
+  verifiedAt        DateTime?
+  browserMetadata   Json?                    // { userAgent?, browserFamily?, version?, platform? }
+  extensionMetadata Json?                  // { extensionId?, extensionVersion? }
+  handshakeMethod   ZillowHandshakeMethod   @default(DIRECT)
+  project           Project?                 @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([nonce])
+  @@index([userId])
+  @@index([projectId])
+  @@index([expiresAt])
+  @@index([status])
 }
 
 model Proposal {
@@ -146,6 +195,8 @@ model Media {
   kind            MediaKind
   url             String
   fileKey         String
+  /** Original source URL (e.g. Zillow image URL) for duplicate detection. */
+  sourceUrl       String?
   width           Int?
   height          Int?
   caption         String?

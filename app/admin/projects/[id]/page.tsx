@@ -52,6 +52,7 @@ export default async function AdminProjectPage({
   const { id } = await params;
   const sp = await searchParams;
   const tab = (typeof sp[TAB] === "string" ? sp[TAB] : undefined) || "overview";
+  const roomIdFromUrl = typeof sp.roomId === "string" ? sp.roomId : undefined;
 
   if (tab === "investment") {
     await ensureInvestmentLineItemsForBuckets(id);
@@ -88,6 +89,7 @@ export default async function AdminProjectPage({
         currentTab={tab}
         roomTypeLowPct={roomTypeLowPct}
         roomTypeHighPct={roomTypeHighPct}
+        initialMediaRoomId={roomIdFromUrl}
       />
     </div>
   );

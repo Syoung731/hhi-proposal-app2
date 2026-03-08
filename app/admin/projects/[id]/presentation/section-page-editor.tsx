@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import type { SectionPageConfig } from "@/app/lib/layout-config";
 import type { PresentationConfigSaved } from "@/app/lib/layout-config";
 import { getSectionConfig } from "./types";
@@ -10,7 +11,13 @@ import { SectionTemplateComparisonCollage } from "@/components/public/section/Se
 import { SlidePreviewFrame } from "./slide-preview-frame";
 import { listLibraryMediaAction } from "@/app/admin/settings/photo-library/actions";
 import type { LibraryMediaItem } from "@/app/admin/settings/photo-library/types";
-import { SECTIONS } from "@/app/lib/sections";
+import {
+  getDefaultBeforeSelectionForRoom,
+  getDefaultAfterSelectionForRoom,
+  getDefaultReferenceSelectionForRoomType,
+  inferSectionTypeFromTitle,
+  filterLibraryPhotosBySectionType,
+} from "@/app/lib/presentation-section-defaults";
 
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
@@ -114,80 +121,6 @@ function resolveAfterImages(
   return finalList.slice(0, n).map((m) => ({ id: m.id, url: m.url, caption: null }));
 }
 
-/**
- * Infer a Photo Library section/room type from the section title (e.g. "Guest Bathroom" → "Bathroom").
- * Used for Template 4 to filter Completed Project Photos by relevance.
- */
-function inferSectionTypeFromTitle(sectionTitle: string): string | null {
-  const t = sectionTitle.trim().toLowerCase();
-  if (!t) return null;
-  // 1) Exact match (case-insensitive)
-  const exact = SECTIONS.find((s) => s.toLowerCase() === t);
-  if (exact) return exact;
-  // 2) Section name contained in title (e.g. "Bathroom" in "Guest Bathroom"); prefer longest match
-  const byLength = [...SECTIONS].sort((a, b) => b.length - a.length);
-  const contained = byLength.find((s) => t.includes(s.toLowerCase()));
-  if (contained) return contained;
-  // 3) Title word matches section (e.g. "bath" → Bathroom, "laundry" → Laundry)
-  const keywords: { word: string; section: string }[] = [
-    { word: "bath", section: "Bathroom" },
-    { word: "laundry", section: "Laundry" },
-    { word: "kitchen", section: "Kitchen" },
-    { word: "deck", section: "Deck" },
-    { word: "porch", section: "Screened Porch" },
-    { word: "living", section: "Living Room" },
-    { word: "bedroom", section: "Bedroom" },
-    { word: "dining", section: "Dining Room" },
-    { word: "office", section: "Office" },
-    { word: "garage", section: "Garage" },
-    { word: "closet", section: "Closet" },
-    { word: "hall", section: "Entry/Hall" },
-    { word: "hallway", section: "Hallway" },
-    { word: "entry", section: "Entry/Hall" },
-    { word: "landscap", section: "Landscaping" },
-    { word: "pool", section: "Pool" },
-    { word: "driveway", section: "Driveway" },
-    { word: "stair", section: "Stairway" },
-    { word: "bar", section: "Wet / Dry Bar" },
-    { word: "pantry", section: "Pantry" },
-    { word: "den", section: "Den" },
-    { word: "family room", section: "Family Room" },
-    { word: "breakfast", section: "Breakfast Nook" },
-    { word: "carolina", section: "Carolina Room" },
-  ];
-  for (const { word, section } of keywords) {
-    if (t.includes(word)) return section;
-  }
-  return null;
-}
-
-/**
- * Filter and sort library photos for Template 4: matching room type first, then fallback to all.
- */
-function filterLibraryPhotosBySectionType(
-  photos: LibraryMediaItem[],
-  sectionType: string | null
-): { items: LibraryMediaItem[]; filterLabel: string } {
-  if (!sectionType) {
-    return { items: photos, filterLabel: "Showing all library photos" };
-  }
-  const typeLower = sectionType.toLowerCase();
-  const matching = photos.filter(
-    (p) =>
-      (Array.isArray(p.roomTypeIds) && p.roomTypeIds.some((id) => id.toLowerCase() === typeLower)) ||
-      (Array.isArray(p.tags) && p.tags.some((tag) => tag.toLowerCase().includes(typeLower)))
-  );
-  if (matching.length === 0) {
-    return { items: photos, filterLabel: "Showing all library photos" };
-  }
-  const selectedIds = new Set(matching.map((m) => m.id));
-  const rest = photos.filter((p) => !selectedIds.has(p.id));
-  return {
-    items: [...matching, ...rest],
-    filterLabel: `Showing photos matching: ${sectionType}`,
-  };
-}
-
 type SectionPageEditorProps = {
   sectionKey: string;
   sectionTitle: string;
@@ -203,6 +136,8 @@ type SectionPageEditorProps = {
   media?: MediaItem[];
   /** Template 4: completed-project/reference photos from Photo Library. When not provided and variant is comparisonCollage, editor fetches via listLibraryMediaAction. */
   libraryPhotos?: LibraryMediaItem[];
+  /** Project ID for "Manage Media" link to Media tab. */
+  projectId?: string;
 };
 
 /** Thumbnail picker: click toggles selection, max = maxCount, "Selected x / max", order badges, Clear. */
@@ -214,6 +149,7 @@ function MediaThumbnailPicker({
   emptyMessage,
   maxCount,
   trimMessage,
+  manageLink,
 }: {
   items: { id: string; url: string }[];
   selectedIds: string[];
@@ -222,6 +158,8 @@ function MediaThumbnailPicker({
   emptyMessage: string;
   maxCount: number;
   trimMessage?: string;
+  /** Optional "Manage Media" or "Manage Photo Library" link shown next to the label. */
+  manageLink?: { href: string; label: string };
 }) {
   const toggle = (id: string) => {
     const idx = selectedIds.indexOf(id);
@@ -236,8 +174,18 @@ function MediaThumbnailPicker({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <label className={labelClass}>{label}</label>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className={labelClass}>{label}</label>
+          {manageLink && (
+            <Link
+              href={manageLink.href}
+              className="text-xs font-medium text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+            >
+              {manageLink.label}
+            </Link>
+          )}
+        </div>
         {items.length > 0 && (
           <span className="text-xs text-zinc-500 dark:text-zinc-400">
             Selected {selectedIds.length} / {maxCount}
@@ -373,7 +321,9 @@ export function SectionPageEditor({
   room = null,
   media = [],
   libraryPhotos: libraryPhotosProp,
+  projectId,
 }: SectionPageEditorProps) {
+  const roomId = sectionKey;
   const sections = config.pages?.sections;
   const sectionConfig = getSectionConfig(
     sections && typeof sections === "object" && !Array.isArray(sections)
@@ -423,10 +373,80 @@ export function SectionPageEditor({
     [isComparisonCollage, sectionTitle]
   );
 
-  const { items: libraryPhotosForTemplate4Picker, filterLabel: libraryFilterLabel } = useMemo(
+  const { items: libraryPhotosForTemplate4Picker, suggestedForLabel } = useMemo(
     () => filterLibraryPhotosBySectionType(effectiveLibraryPhotos, inferredSectionType),
     [effectiveLibraryPhotos, inferredSectionType]
   );
+
+  const autoFilledOnceRef = useRef(false);
+  useEffect(() => {
+    if (autoFilledOnceRef.current) return;
+    const needsBefore =
+      (beforeSelectedMediaIds?.length ?? 0) === 0 && existingPhotosForRoom.length > 0;
+    const needsAfter =
+      (afterSelectedMediaIds?.length ?? 0) === 0 && roomMedia.length > 0;
+    const needsReference =
+      isComparisonCollage &&
+      (referencePhotoIds?.length ?? 0) === 0 &&
+      effectiveLibraryPhotos.length > 0;
+    if (!needsBefore && !needsAfter && !needsReference) return;
+    autoFilledOnceRef.current = true;
+    const nextBefore = needsBefore
+      ? getDefaultBeforeSelectionForRoom(existingPhotosForRoom, maxBefore)
+      : (beforeSelectedMediaIds ?? []);
+    const nextAfter = needsAfter
+      ? getDefaultAfterSelectionForRoom(roomMedia, featuredConceptMediaId, maxAfter)
+      : (afterSelectedMediaIds ?? []);
+    const nextReference = needsReference
+      ? getDefaultReferenceSelectionForRoomType(
+          effectiveLibraryPhotos,
+          inferredSectionType,
+          3
+        )
+      : (referencePhotoIds ?? []);
+    if (
+      nextBefore.length > 0 ||
+      nextAfter.length > 0 ||
+      nextReference.length > 0
+    ) {
+      const prevPages = config.pages ?? {};
+      const prevSections =
+        prevPages.sections &&
+        typeof prevPages.sections === "object" &&
+        !Array.isArray(prevPages.sections)
+          ? { ...prevPages.sections }
+          : {};
+      const current = prevSections[sectionKey] ?? {};
+      const nextSections = {
+        ...prevSections,
+        [sectionKey]: {
+          ...current,
+          beforeSelectedMediaIds: nextBefore.slice(0, maxBefore),
+          afterSelectedMediaIds: nextAfter.slice(0, maxAfter),
+          referencePhotoIds: nextReference.slice(0, 3),
+        },
+      };
+      onConfigChange({
+        ...config,
+        pages: { ...prevPages, sections: nextSections },
+      });
+    }
+  }, [
+    config,
+    sectionKey,
+    onConfigChange,
+    beforeSelectedMediaIds,
+    afterSelectedMediaIds,
+    referencePhotoIds,
+    existingPhotosForRoom,
+    roomMedia,
+    featuredConceptMediaId,
+    isComparisonCollage,
+    effectiveLibraryPhotos,
+    inferredSectionType,
+    maxBefore,
+    maxAfter,
+  ]);
 
   const beforeImages = useMemo(
     () => resolveBeforeImages(existingPhotosForRoom, beforeSelectedMediaIds, maxBefore),
@@ -701,32 +721,45 @@ export function SectionPageEditor({
         {layoutVariant === "comparisonCollage" ? (
           <div className="space-y-6">
             <MediaThumbnailPicker
-              label="Before photo (Existing photos for this room)"
+              label="Before Photos"
               items={existingPhotosForRoom}
               selectedIds={beforeSelectedMediaIds}
               onChange={(ids) => updateSection({ beforeSelectedMediaIds: ids })}
               emptyMessage="No existing photos for this room. Add photos in the Media tab."
               maxCount={1}
+              manageLink={
+                projectId
+                  ? { href: `/admin/projects/${projectId}?tab=media&roomId=${roomId}`, label: "Manage Media" }
+                  : undefined
+              }
             />
             <MediaThumbnailPicker
-              label="Render photo (Renderings for this room)"
+              label="Render Photos"
               items={roomMedia}
               selectedIds={afterSelectedMediaIds}
               onChange={(ids) => updateSection({ afterSelectedMediaIds: ids })}
               emptyMessage="No renderings for this room. Add renderings in the Media tab."
               maxCount={1}
+              manageLink={
+                projectId
+                  ? { href: `/admin/projects/${projectId}?tab=media&roomId=${roomId}`, label: "Manage Media" }
+                  : undefined
+              }
             />
             <div>
-              <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
-                {libraryFilterLabel}
-              </p>
+              {suggestedForLabel && (
+                <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Suggested for: {suggestedForLabel}
+                </p>
+              )}
               <MediaThumbnailPicker
-                label="Completed Project Photos (from Photo Library)"
+                label="Completed Project Photos"
                 items={libraryPhotosForTemplate4Picker.map((p) => ({ id: p.id, url: p.url }))}
                 selectedIds={referencePhotoIds}
                 onChange={(ids) => updateSection({ referencePhotoIds: ids })}
                 emptyMessage="Loading library… or add photos in Settings → Photo Library."
                 maxCount={3}
+                manageLink={{ href: "/admin/settings/photo-library", label: "Manage Photo Library" }}
               />
             </div>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/30">
@@ -827,20 +860,30 @@ export function SectionPageEditor({
               )}
             </div>
             <MediaThumbnailPicker
-              label="Before photos (Existing photos for this room)"
+              label="Before Photos"
               items={existingPhotosForRoom}
               selectedIds={beforeSelectedMediaIds}
               onChange={(ids) => updateSection({ beforeSelectedMediaIds: ids })}
               emptyMessage="No existing photos for this room. Add photos in the Media tab."
               maxCount={splitDensity}
+              manageLink={
+                projectId
+                  ? { href: `/admin/projects/${projectId}?tab=media&roomId=${roomId}`, label: "Manage Media" }
+                  : undefined
+              }
             />
             <MediaThumbnailPicker
-              label="After renderings (Renderings for this room)"
+              label="Render Photos"
               items={roomMedia}
               selectedIds={afterSelectedMediaIds}
               onChange={(ids) => updateSection({ afterSelectedMediaIds: ids })}
               emptyMessage="No renderings for this room. Add renderings in the Media tab."
               maxCount={splitDensity}
+              manageLink={
+                projectId
+                  ? { href: `/admin/projects/${projectId}?tab=media&roomId=${roomId}`, label: "Manage Media" }
+                  : undefined
+              }
             />
             {/* Layout Controls: horizontal bar above Live Preview */}
             <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/30">

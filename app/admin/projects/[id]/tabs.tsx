@@ -9,6 +9,27 @@ import { TimelineTab } from "./timeline/timeline-tab";
 import { InvestmentTab } from "./investment/investment-tab";
 import { PublishTab } from "./publish/publish-tab";
 
+/** Build full address string from project Overview fields for Zillow search. */
+function buildProjectAddress(project: {
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}): string | null {
+  const parts = [
+    project.addressLine1?.trim(),
+    project.addressLine2?.trim(),
+    project.city?.trim(),
+    [project.state?.trim(), project.zip?.trim()].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .map((s) => (s ?? "").trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts.join(", ");
+}
+
 const TABS: { slug: string; label: string; hrefOnly?: boolean }[] = [
   { slug: "overview", label: "Overview" },
   { slug: "rooms", label: "Sections" },
@@ -29,6 +50,7 @@ export function ProjectTabs({
   currentTab,
   roomTypeLowPct,
   roomTypeHighPct,
+  initialMediaRoomId,
   children,
 }: {
   project: ProjectForTabs;
@@ -37,6 +59,8 @@ export function ProjectTabs({
   currentTab: string;
   roomTypeLowPct?: number;
   roomTypeHighPct?: number;
+  /** When opening Media tab via URL ?tab=media&roomId=..., preselect this room. */
+  initialMediaRoomId?: string;
   children?: React.ReactNode;
 }) {
   const base = `/admin/projects/${project.id}`;
@@ -135,9 +159,17 @@ export function ProjectTabs({
           <MediaTab
             projectId={project.id}
             media={project.media}
-            rooms={project.rooms}
+            rooms={project.rooms.map((r) => ({
+              id: r.id,
+              name: r.name,
+              sortOrder: r.sortOrder,
+              selectedRenderMediaId: r.selectedRenderMediaId,
+              scopeNarrative: r.scopeNarrative,
+            }))}
             projectStylePreset={project.stylePreset}
             coverHeroImageId={project.coverHeroImageId}
+            initialRoomId={initialMediaRoomId}
+            projectAddress={buildProjectAddress(project)}
           />
         )}
         {currentTab === "timeline" && (

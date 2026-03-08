@@ -57,15 +57,29 @@ export async function generateRoomRendering({
 
   const { data: imageBase64, mimeType: sourceMimeType } = await fetchImageAsBase64(imageUrl);
 
-  const contextParts: string[] = [
-    `Room: ${roomName}`,
-    `Scope / renovation description: ${scopeNarrative}`,
-  ];
-  if (transcriptText.trim()) {
+  const contextParts: string[] = [];
+  if (roomName.trim()) {
+    contextParts.push(`Room: ${roomName}`);
+  }
+  // Remodel actions: ONLY the provided scopeNarrative (from Media tab = checked checklist items only). Do not add any other scope or transcript here.
+  if (scopeNarrative.trim()) {
+    contextParts.push(`Scope / renovation description: ${scopeNarrative}`);
+  }
+  if (transcriptText != null && transcriptText.trim()) {
     contextParts.push(`Additional context from project transcript: ${transcriptText.trim()}`);
   }
   if (stylePresetPrompt.trim()) {
     contextParts.push(`Style preset:\n${stylePresetPrompt.trim()}\n\nApply these style instructions (materials, palette, vibe) to the rendering while keeping the same camera angle and producing a photorealistic remodeled concept. No text or watermarks.`);
+  }
+
+  // DEBUG: final remodel-action block (remove or gate behind env in production)
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[generateRoomRendering] final remodel/context in Gemini prompt:", {
+      roomName: roomName.trim() || "(none)",
+      scopeNarrative: scopeNarrative.trim() || "(none)",
+      transcriptIncluded: transcriptText != null && transcriptText.trim().length > 0,
+      contextPartsCount: contextParts.length,
+    });
   }
 
   const guardrails = [
@@ -75,7 +89,18 @@ export async function generateRoomRendering({
     "Photorealistic remodel concept; no surreal elements.",
     "No text, no watermark, no labels.",
     "Output exactly ONE image.",
+    "",
+    "CRITICAL – only modify what is visible:",
+    "Only modify elements that are clearly visible in the source image.",
+    "Do not add, reveal, invent, or move fixtures that are not visible in the source image.",
+    "Do not create a shower, tub, vanity, toilet, wall opening, or glass enclosure unless it is clearly visible in the source image AND explicitly listed in the render changes above.",
+    "If a requested change applies to an area not visible in the photo, ignore that change.",
+    "Preserve exact camera angle, framing, layout, and visible room boundaries.",
   ].join("\n");
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[generateRoomRendering] final negative guardrail block:", guardrails.slice(0, 400) + (guardrails.length > 400 ? "…" : ""));
+  }
 
   const textPrompt = `Create a realistic remodeled concept rendering based on this room photo and the following context.
 

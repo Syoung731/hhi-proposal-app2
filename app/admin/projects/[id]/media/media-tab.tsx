@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
@@ -12,11 +12,22 @@ import {
   setSelectedRenderAction,
   clearSelectedRenderAction,
   startRenderUpdateAction,
+  createExtensionPairCodeAction,
+  startDirectConnectionAction,
+  getConnectionStatusAction,
+  markConnectionFailedAction,
 } from "./actions";
 import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
 import { MediaType } from "@/app/generated/prisma";
 import { isBadPlaceholderUrl, isAllowedHostForNextImage } from "@/app/lib/media";
+import {
+  detectZillowConnectionReadiness,
+  sendBeginHandshake,
+  sendOpenZillowForAddress,
+  type ZillowConnectionReadinessState,
+  type DetectionResult,
+} from "@/app/lib/zillow-extension-detection";
 
 type MediaItem = {
   id: string;
@@ -43,6 +54,8 @@ type RoomItem = {
   name: string;
   sortOrder: number;
   selectedRenderMediaId?: string | null;
+  /** Room scope/renovation description; used to extract Render Changes bullets */
+  scopeNarrative?: string | null;
 };
 
 type Props = {
@@ -53,6 +66,10 @@ type Props = {
   projectStylePreset?: { id: string; name: string } | null;
   /** Selected hero media id (project.coverHeroImageId); hero thumbnail uses this or type HERO */
   coverHeroImageId?: string | null;
+  /** When opening via URL ?tab=media&roomId=..., preselect this room. */
+  initialRoomId?: string;
+  /** Project property address (Overview) for opening Zillow after direct handshake. */
+  projectAddress?: string | null;
 };
 
 export type UploadBatchResult = {
@@ -123,7 +140,266 @@ function isLegacyBlobUrl(url: string): boolean {
 }
 
 const POLL_INTERVAL_MS = 7000;
+/** Poll interval for direct connection status (Zillow extension handshake). */
+const DIRECT_CONNECTION_POLL_MS = 2000;
+/** Stop polling after this long when waiting for extension to verify. */
+const DIRECT_CONNECTION_TIMEOUT_MS = 3 * 60 * 1000;
 export const FRONT_PAGE_ID = "__front_page__";
+/** Pseudo-section id for the Zillow import staging page (not a real room). */
+export const ZILLOW_IMPORT_ID = "__zillow_import__";
+/** Pseudo-section id for generic unassigned photos (not Zillow-tagged). */
+export const UNASSIGNED_PHOTOS_ID = "__unassigned_photos__";
+/** Tag used to mark media imported from Zillow; Phase 4 import flow should set this. */
+export const ZILLOW_IMPORT_TAG = "zillow";
+
+/** When set (e.g. Chrome Web Store or Edge Add-ons URL), "Install Extension" opens this; otherwise dev: "Open Chrome Extensions" → chrome://extensions. Production TODO: set NEXT_PUBLIC_ZILLOW_EXTENSION_STORE_URL to store listing URL. */
+const ZILLOW_EXTENSION_STORE_URL = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ZILLOW_EXTENSION_STORE_URL ?? null : null;
+
+const RENDER_CHANGES_CHECKLIST_KEY = "hhi-render-changes-checklist";
+
+/** Per-room checklist: bullet text → checked. Persisted in localStorage. */
+export type RenderChangesChecklistState = {
+  bullets: string[];
+  checked: Record<string, boolean>;
+};
+
+function getStoredRenderChangesChecklist(projectId: string): Record<string, RenderChangesChecklistState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(`${RENDER_CHANGES_CHECKLIST_KEY}-${projectId}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, RenderChangesChecklistState>;
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function setStoredRenderChangesChecklist(projectId: string, byRoom: Record<string, RenderChangesChecklistState>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(`${RENDER_CHANGES_CHECKLIST_KEY}-${projectId}`, JSON.stringify(byRoom));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Extract raw scope fragments (bullets/phrases) from the CURRENT ROOM's scope only.
+ * Used as input for normalizeRemodelBullets. Do NOT pass full project transcript.
+ */
+function extractRemodelBullets(roomScopeOnly: string): string[] {
+  const raw = roomScopeOnly?.trim() ?? "";
+  if (!raw) return [];
+
+  const splitByDelimiters = (text: string): string[] => {
+    return text
+      .split(/\n+|;\s*|\s+and\s+|(?:\s+[-–—]\s+)/)
+      .map((s) => s.replace(/^[\s•*\-–—.]+\s*|\s*[\s•*\-–—.]+\s*$/g, "").trim())
+      .filter((s) => s.length > 0);
+  };
+
+  const phrases = splitByDelimiters(raw);
+  const rawFragments: string[] = [];
+  const seen = new Set<string>();
+
+  for (const p of phrases) {
+    const parts = p.split(/,(?=\s*(?:replace|install|add|remove|update|change|paint|refinish|upgrade|new))/i);
+    for (let part of parts) {
+      part = part.trim();
+      if (part.length < 2) continue;
+      const lower = part.toLowerCase();
+      const key = lower.slice(0, 80);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rawFragments.push(part.charAt(0).toLowerCase() + part.slice(1));
+    }
+  }
+
+  return rawFragments;
+}
+
+/** Non-visual / construction-only phrases to exclude from the checklist. */
+const NON_VISUAL_PATTERNS = [
+  /\bdemolition\b/i,
+  /\bremove\s*$/i, // "Remove" with no object
+  /\breconnect\s+plumbing\b/i,
+  /\bwaterproofing\b/i,
+  /\brough-?in\b/i,
+  /\binstallation\s+activities\b/i,
+  /\bper\s+code\b/i,
+  /\bas\s+required\b/i,
+  /\btouch-?up\s+(?:as\s+)?needed\b/i,
+  /\btouch-?up\s+due\s+to\s+demolition\b/i,
+  /\bto\s+be\s+performed\s+as\s+needed\b/i,
+  /\bcomponents?\s+to\s+remain\b/i,
+  /\ball\s+other\s+.*\s+remain\b/i,
+  /\bexisting\s+to\s+remain\b/i,
+  /\bno\s+change\b/i,
+  /\bconstruction\s+impacts?\b/i,
+  /\bdue\s+to\s+construction\b/i,
+  /\bsubstrate\b/i,
+  /\b(?:as\s+)?specified\b/i,
+];
+
+/** Incomplete fragments (single word or too short) that should be dropped unless we expand them. */
+const INCOMPLETE_FRAGMENTS = new Set([
+  "remove",
+  "backsplash",
+  "installation activities",
+  "installation",
+  "activities",
+  "flooring",
+  "plumbing",
+  "electrical",
+  "code",
+  "required",
+  "specified",
+  "touch-up",
+  "demolition",
+  "waterproofing",
+  "rough-in",
+]);
+
+/** Map fragment (lowercase) or short phrase to a clear visible action. */
+const FRAGMENT_TO_ACTION: Record<string, string> = {
+  backsplash: "Install tile backsplash",
+  "tile backsplash": "Install tile backsplash",
+  countertop: "Replace countertop",
+  "countertops": "Replace countertops",
+  vanity: "Replace vanity",
+  "vanity cabinet": "Replace vanity",
+  faucet: "Replace faucet",
+  "faucets": "Replace faucets",
+  sink: "Install sink",
+  "laundry sink": "Install laundry sink",
+  "kitchen sink": "Replace kitchen sink",
+  tub: "Replace tub",
+  shower: "Replace shower",
+  "walk-in shower": "Install walk-in shower",
+  "tiled shower": "Install tiled shower",
+  flooring: "Install new flooring",
+  "flooring in place": "Install new flooring",
+  "floor tile": "Install floor tile",
+  paint: "Paint walls",
+  "paint walls": "Paint walls",
+  "paint touch-up": "Paint touch-up as needed",
+  "wall paint": "Paint walls",
+  "light fixtures": "Update light fixtures",
+  "lighting": "Update lighting",
+  "cabinet": "Replace cabinets",
+  "cabinets": "Replace cabinets",
+  toilet: "Replace toilet",
+  "mirror": "Install mirror",
+  "hardware": "Replace hardware",
+};
+
+/**
+ * Normalize raw scope fragments into clear, short remodel actions suitable for checkboxes and the render prompt.
+ * - Drops non-visual construction phrases and incomplete fragments.
+ * - Converts references like "Backsplash" into "Install tile backsplash".
+ * - Keeps bullets short (3–6 words); removes duplicates.
+ */
+function normalizeRemodelBullets(rawBullets: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (let raw of rawBullets) {
+    raw = raw.trim();
+    if (!raw) continue;
+    const lower = raw.toLowerCase();
+
+    // Drop if matches non-visual construction language
+    if (NON_VISUAL_PATTERNS.some((re) => re.test(lower))) continue;
+
+    const words = lower.split(/\s+/).filter(Boolean);
+    // Drop standalone incomplete fragments that we don't have an expansion for (e.g. "Remove", "Installation activities")
+    const normalizedLower = lower.replace(/\s+/g, " ").trim();
+    const hasExpansion = FRAGMENT_TO_ACTION[normalizedLower] ?? FRAGMENT_TO_ACTION[words[0] ?? ""];
+    if (words.length <= 1 && INCOMPLETE_FRAGMENTS.has(lower) && !hasExpansion) continue;
+    if (words.length === 1 && raw.length < 8 && !hasExpansion) continue; // e.g. "Remove" without expansion
+
+    // Convert known fragment to clear action
+    let action: string | undefined =
+      FRAGMENT_TO_ACTION[normalizedLower] ??
+      FRAGMENT_TO_ACTION[words[0] ?? ""] ??
+      (words.length >= 2 ? FRAGMENT_TO_ACTION[words.slice(0, 2).join(" ")] : undefined);
+
+    if (!action) {
+      // Already looks like an action (starts with verb) or is a short phrase
+      const hasVerb = /^(replace|install|add|update|paint|refinish|upgrade|remove)\s+/i.test(raw);
+      if (hasVerb) {
+        action = raw
+          .replace(/\s+\([^)]*\)/g, "")
+          .replace(/\s+as\s+required\.?$/gi, "")
+          .replace(/\s+per\s+code\.?$/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      } else {
+        // Fragment references a visible item: prefix with Install or Replace
+        if (/\b(backsplash|tile|shower|sink|vanity|countertop|faucet|toilet|mirror|cabinet|flooring|paint)\b/i.test(raw)) {
+          action = raw.replace(/\s+\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+          if (!/^(install|replace|add|paint|update)\s+/i.test(action)) {
+            action = /backsplash|tile|shower|sink|vanity|countertop|faucet|toilet|mirror/i.test(action)
+              ? `Install ${action}`
+              : `Replace ${action}`;
+          }
+        } else {
+          action = raw.replace(/\s+\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+        }
+      }
+    }
+
+    if (!action || action.length < 5) continue;
+
+    // Trim to ~3–6 words for display and prompt
+    const actionWords = action.split(/\s+/).filter(Boolean);
+    const trimmed = actionWords.length > 6 ? actionWords.slice(0, 6).join(" ") : action;
+
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed.charAt(0).toUpperCase() + trimmed.slice(1));
+  }
+
+  return out;
+}
+
+/**
+ * Convert raw extracted bullet text into a short, user-friendly display label for the checklist UI.
+ * Raw text is preserved for state/key and for the render prompt; this is for readability only.
+ */
+function normalizeChecklistDisplayLabel(raw: string): string {
+  const t = raw.trim();
+  if (!t) return t;
+  const lower = t.toLowerCase();
+  // Remain / keep-unchanged phrasing → single clear label
+  if (/\ball other .* (?:to )?remain\b/i.test(lower) || /\bcomponents? to remain\b/i.test(lower)) {
+    return "Keep remaining visible elements unchanged";
+  }
+  if (/\b(?:existing )?(?:bathroom |room )?components? to remain\b/i.test(lower)) {
+    return "Keep remaining visible elements unchanged";
+  }
+  // "X), with paint to be performed as needed" or "light fixtures), with paint..."
+  if (/\), with paint .*$/i.test(t)) {
+    return "Paint as needed";
+  }
+  if (/light fixtures\).*$/i.test(t)) {
+    return "Update light fixtures";
+  }
+  // "constructing a new tiled shower with new waterproofing as required" → "Install new tiled shower"
+  let out = t
+    .replace(/^\s*constructing\s+(?:a\s+)?new\s+/i, "Install new ")
+    .replace(/\s+with\s+new\s+waterproofing\s+as\s+required\.?$/i, "")
+    .replace(/\s+as\s+required\.?$/gi, "")
+    .replace(/\s+due\s+to\s+construction\s+impacts\.?$/gi, "")
+    .replace(/\s+to\s+be\s+performed\s+as\s+needed\.?$/gi, "")
+    .replace(/\s+\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (out.length > 60) out = out.slice(0, 57) + "…";
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
 
 /** Resolve root id by walking parentMediaId; if parent missing, return self (orphan). */
 function resolveRootId(byId: Map<string, MediaItem>, item: MediaItem): string {
@@ -224,11 +500,24 @@ function latestDone(items: MediaItem[]): MediaItem | null {
   return done.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
 }
 
-export function MediaTab({ projectId, media, rooms, projectStylePreset = null, coverHeroImageId = null }: Props) {
+export function MediaTab({
+  projectId,
+  media,
+  rooms,
+  projectStylePreset = null,
+  coverHeroImageId = null,
+  initialRoomId,
+  projectAddress = null,
+}: Props) {
   const router = useRouter();
+  const roomIds = new Set(rooms.map((r) => r.id));
+  const validInitialRoomId =
+    initialRoomId && roomIds.has(initialRoomId) ? initialRoomId : null;
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(
+    validInitialRoomId ?? FRONT_PAGE_ID
+  );
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadBatchResult | null>(null);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(FRONT_PAGE_ID);
   const [activeSourceMediaId, setActiveSourceMediaId] = useState<string | null>(null);
   const [activeRenderMediaId, setActiveRenderMediaId] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -239,8 +528,147 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
   const [updateSubmitting, setUpdateSubmitting] = useState(false);
   /** Optimistic placeholder media for just-queued update renders (until server data arrives). */
   const [optimisticRenderMedia, setOptimisticRenderMedia] = useState<MediaItem[]>([]);
+  /** Per-room Render Changes checklist (extracted bullets + checked state). Persisted in localStorage. */
+  const [renderChangesChecklistByRoom, setRenderChangesChecklistByRoom] = useState<Record<string, RenderChangesChecklistState>>({});
+  /** Custom change for first render: when checked and has text, appended to render bullets. */
+  const [customChangeEnabled, setCustomChangeEnabled] = useState(false);
+  const [customChangeText, setCustomChangeText] = useState("");
+  /** Loading state for Existing Photos grid actions (Remove from Section / Delete). */
+  const [existingPhotoAction, setExistingPhotoAction] = useState<"idle" | "remove" | "delete">("idle");
+  /** Zillow Import pair code modal. */
+  const [zillowImportModalOpen, setZillowImportModalOpen] = useState(false);
+  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [pairCodeExpiresAt, setPairCodeExpiresAt] = useState<Date | null>(null);
+  const [pairCodeLoading, setPairCodeLoading] = useState(false);
+  const [pairCodeError, setPairCodeError] = useState<string | null>(null);
+  /** Direct browser connection (nonce handshake). */
+  const [directSessionId, setDirectSessionId] = useState<string | null>(null);
+  const [directNonce, setDirectNonce] = useState<string | null>(null);
+  const [directStatus, setDirectStatus] = useState<"idle" | "connecting" | "connected" | "failed" | "expired">("idle");
+  const [directError, setDirectError] = useState<string | null>(null);
+  const [showManualFallback, setShowManualFallback] = useState(false);
+  /** Zillow Import: compatibility and extension detection before connection. */
+  const [zillowDetectionStatus, setZillowDetectionStatus] = useState<"idle" | "detecting" | "done">("idle");
+  const [zillowReadinessState, setZillowReadinessState] = useState<ZillowConnectionReadinessState | null>(null);
+  const [zillowDetectionMessage, setZillowDetectionMessage] = useState<string | null>(null);
+  const [zillowDetectionDetail, setZillowDetectionDetail] = useState<DetectionResult | null>(null);
+  /** Bulk selection on Unassigned Photos page (generic, non-Zillow). */
+  const [selectedGenericUnassignedIds, setSelectedGenericUnassignedIds] = useState<Set<string>>(new Set());
+  const [genericUnassignedAssignRoomId, setGenericUnassignedAssignRoomId] = useState("");
+  const [genericUnassignedAssigning, setGenericUnassignedAssigning] = useState(false);
+  /** Bulk selection on Imported from Zillow page. */
+  const [selectedZillowIds, setSelectedZillowIds] = useState<Set<string>>(new Set());
+  const [zillowAssignRoomId, setZillowAssignRoomId] = useState("");
+  const [zillowAssigning, setZillowAssigning] = useState(false);
 
-  const roomIds = new Set(rooms.map((r) => r.id));
+  /** Ref: have we already tried to start direct connection this modal open (avoid double-run). */
+  const directStartAttemptedRef = useRef(false);
+  /** Ref: have we already started detection this modal open (avoid double-run and effect cleanup cancelling the promise). */
+  const zillowDetectionStartedRef = useRef(false);
+  /** Ref: have we already sent openZillowForAddress this connection success (avoid opening multiple tabs). */
+  const openedZillowForAddressRef = useRef(false);
+
+  // When Zillow Import modal opens, run compatibility/extension detection once.
+  // Use a ref (not zillowDetectionStatus) in the guard so that when we set "detecting", this effect does not re-run and its cleanup does not set cancelled=true (which would prevent setZillowDetectionStatus("done") from ever running).
+  useEffect(() => {
+    if (!zillowImportModalOpen) return;
+    if (zillowDetectionStartedRef.current) return;
+    zillowDetectionStartedRef.current = true;
+    setZillowDetectionStatus("detecting");
+    let cancelled = false;
+    const debug = typeof window !== "undefined" && window.localStorage?.getItem("zillowImportDebug") === "true";
+    console.log("[Zillow detection] starting");
+    detectZillowConnectionReadiness({
+      pingTimeoutMs: 2500,
+      capabilitiesTimeoutMs: 2500,
+      debug: !!debug,
+    }).then((result) => {
+      if (cancelled) {
+        console.log("[Zillow detection] cancelled, skipping setState");
+        return;
+      }
+      setZillowReadinessState(result.state);
+      setZillowDetectionMessage(result.message ?? null);
+      setZillowDetectionDetail(result);
+      setZillowDetectionStatus("done");
+      console.log("[Zillow detection] setZillowDetectionStatus('done') executed", result.state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [zillowImportModalOpen]);
+
+  // When detection is done and state is supportedDirectHandshakeReady, start direct connection once (feature-flagged on server).
+  useEffect(() => {
+    if (!zillowImportModalOpen || zillowDetectionStatus !== "done" || zillowReadinessState !== "supportedDirectHandshakeReady") return;
+    if (directStartAttemptedRef.current) return;
+    directStartAttemptedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      console.log("[Zillow direct] starting direct handshake");
+      const result = await startDirectConnectionAction(projectId);
+      if (cancelled) return;
+      console.log("[Zillow direct] session creation result", "error" in result ? result : { sessionId: result.sessionId, hasNonce: !!result.nonce });
+      if ("error" in result) {
+        setShowManualFallback(true);
+        setDirectError(result.error);
+        return;
+      }
+      setDirectSessionId(result.sessionId);
+      setDirectNonce(result.nonce);
+      setDirectStatus("connecting");
+      console.log("[Zillow direct] handshake request sent to extension");
+      sendBeginHandshake(result.nonce, result.sessionId).then((handshakeResponse) => {
+        if (cancelled) return;
+        console.log("[Zillow direct] beginHandshake response from extension", handshakeResponse);
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [zillowImportModalOpen, zillowDetectionStatus, zillowReadinessState, projectId]);
+
+  // After direct handshake success, open Zillow in a new tab with project address (if available).
+  useEffect(() => {
+    if (directStatus !== "connected") return;
+    if (openedZillowForAddressRef.current) return;
+    const address = typeof projectAddress === "string" ? projectAddress.trim() : "";
+    if (!address) return;
+    openedZillowForAddressRef.current = true;
+    console.log("[Zillow direct] address found", address);
+    sendOpenZillowForAddress(address).then((res) => {
+      console.log("[Zillow direct] openZillowForAddress sent", res);
+    });
+  }, [directStatus, projectAddress]);
+
+  // Poll connection status while waiting for extension to verify.
+  useEffect(() => {
+    if (directStatus !== "connecting" || !directSessionId) return;
+    const startedAt = Date.now();
+    const intervalId = setInterval(async () => {
+      if (Date.now() - startedAt > DIRECT_CONNECTION_TIMEOUT_MS) {
+        setDirectStatus("failed");
+        setShowManualFallback(true);
+        return;
+      }
+      const result = await getConnectionStatusAction(directSessionId);
+      if ("error" in result) return;
+      if (result.status === "CONNECTED") {
+        setDirectStatus("connected");
+        return;
+      }
+      if (result.status === "FAILED" || result.status === "EXPIRED") {
+        setDirectStatus(result.status === "EXPIRED" ? "expired" : "failed");
+        setShowManualFallback(true);
+      }
+    }, DIRECT_CONNECTION_POLL_MS);
+    return () => clearInterval(intervalId);
+  }, [directStatus, directSessionId]);
+
+  /** Renderings (room or cover) must never appear in Unassigned Media. */
+  const isRendering = (m: MediaItem) =>
+    m.type === MediaType.RENDERING;
+
   const existingByRoom = (roomId: string) =>
     media
       .filter((m) => m.type === MediaType.EXISTING && m.roomId === roomId)
@@ -249,11 +677,27 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
     media
       .filter((m) => m.type === MediaType.RENDERING && m.roomId === roomId)
       .sort((a, b) => a.sortOrder - b.sortOrder);
+  /** Unassigned: non-HERO, non-rendering media with no room (or room not in project). */
   const unassigned = media.filter(
     (m) =>
       m.type !== MediaType.HERO &&
+      !isRendering(m) &&
       (m.placement === "UNASSIGNED" ||
         (m.placement == null && (m.roomId == null || !roomIds.has(m.roomId))))
+  );
+  /** Zillow-imported photos that are still unassigned; shown on the Imported from Zillow page. */
+  const zillowImportedUnassigned = unassigned.filter((m) =>
+    (m.tags ?? []).includes(ZILLOW_IMPORT_TAG)
+  );
+  /** Generic unassigned photos (not Zillow-tagged); shown on the Unassigned Photos page only. */
+  const genericUnassigned = unassigned.filter(
+    (m) => !(m.tags ?? []).includes(ZILLOW_IMPORT_TAG)
+  );
+  /** Renderings with no room (e.g. room deleted, or edge case); show in separate section. */
+  const orphanedRenderings = media.filter(
+    (m) =>
+      isRendering(m) &&
+      (m.roomId == null || !roomIds.has(m.roomId))
   );
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? null;
@@ -333,9 +777,20 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
 
   useEffect(() => {
     setActiveRoomId((prev) =>
-      prev && (prev === FRONT_PAGE_ID || roomIds.has(prev)) ? prev : rooms[0]?.id ?? null
+      prev &&
+      (prev === FRONT_PAGE_ID ||
+        prev === ZILLOW_IMPORT_ID ||
+        prev === UNASSIGNED_PHOTOS_ID ||
+        roomIds.has(prev))
+        ? prev
+        : rooms[0]?.id ?? null
     );
   }, [rooms, roomIds]);
+  // Hydrate Render Changes checklist from localStorage on mount / projectId change
+  useEffect(() => {
+    setRenderChangesChecklistByRoom(getStoredRenderChangesChecklist(projectId));
+  }, [projectId]);
+
   useEffect(() => {
     const firstBefore = existingForActive[0]?.id ?? null;
     const preferredSourceId =
@@ -360,11 +815,86 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
     });
   }, [activeRoomId, effectiveSourceMediaId, selectedRenderIdOnRoom, latestDoneInFiltered?.id]);
 
+  /** Refresh on return from extension (e.g. after Zillow import); throttled to avoid excessive refreshes. */
+  const lastFocusRefreshRef = useRef<number>(0);
+  const FOCUS_REFRESH_THROTTLE_MS = 2500;
+  useEffect(() => {
+    function doRefresh(reason: "focus" | "visibility") {
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshRef.current = now;
+      if (typeof console !== "undefined" && console.log) {
+        console.log("[Media tab] " + reason + " refresh");
+      }
+      router.refresh();
+    }
+    function onFocus() {
+      doRefresh("focus");
+    }
+    function onVisibilityChange() {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        doRefresh("visibility");
+      }
+    }
+    if (typeof window === "undefined") return;
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [router]);
+
+  /** Current room: extracted and normalized remodel bullets from this room's scope only (no project transcript). */
+  const activeRoomBullets: string[] =
+    activeRoomId && activeRoom
+      ? normalizeRemodelBullets(extractRemodelBullets(activeRoom.scopeNarrative ?? ""))
+      : [];
+
+  /** Current room: checked state per bullet (stored + defaults). New bullets default checked. */
+  const activeRoomBulletChecked = (bullet: string): boolean => {
+    if (!activeRoomId) return true;
+    const stored = renderChangesChecklistByRoom[activeRoomId];
+    if (stored?.checked && bullet in stored.checked) return stored.checked[bullet] === true;
+    return true;
+  };
+
+  function setActiveRoomBulletChecked(bullet: string, checked: boolean) {
+    if (!activeRoomId) return;
+    const stored = renderChangesChecklistByRoom[activeRoomId];
+    const nextChecked = { ...stored?.checked, [bullet]: checked };
+    const next: Record<string, RenderChangesChecklistState> = {
+      ...renderChangesChecklistByRoom,
+      [activeRoomId]: {
+        bullets: activeRoomBullets,
+        checked: nextChecked,
+      },
+    };
+    setRenderChangesChecklistByRoom(next);
+    setStoredRenderChangesChecklist(projectId, next);
+  }
+
+  /** Checked bullets only; used when calling Render New. */
+  const checkedBulletsForRender: string[] = activeRoomBullets.filter((b) => activeRoomBulletChecked(b));
+  /** Checklist + optional custom change; used as render payload. */
+  const finalBulletsForRender: string[] = [
+    ...checkedBulletsForRender,
+    ...(customChangeEnabled && customChangeText.trim() ? [customChangeText.trim()] : []),
+  ];
+
   async function handleRenderNew() {
     if (!activeRoomId || !effectiveSourceMediaId || rendering) return;
     setRendering(true);
     setRenderError(null);
-    const result = await startRoomRenderAction(projectId, activeRoomId, effectiveSourceMediaId);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[Media tab] Render New – bullets sent:", finalBulletsForRender);
+    }
+    const result = await startRoomRenderAction(
+      projectId,
+      activeRoomId,
+      effectiveSourceMediaId,
+      { checkedBullets: finalBulletsForRender }
+    );
     setRendering(false);
     if ("error" in result) {
       setRenderError(result.error);
@@ -523,11 +1053,86 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
           )}
         </div>
       )}
+      {/* Project-level Zillow Import — single entry point; imported photos land in Imported from Zillow */}
+      <section className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-800/30">
+        <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+          Zillow Import
+        </h2>
+        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+          Import photos from a Zillow listing at the project level. They will appear in <strong>Imported from Zillow</strong> in the Sections list; assign them to sections from there.
+        </p>
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              zillowDetectionStartedRef.current = false;
+              openedZillowForAddressRef.current = false;
+              setZillowImportModalOpen(true);
+              setPairCode(null);
+              setPairCodeExpiresAt(null);
+              setPairCodeError(null);
+              setZillowDetectionStatus("idle");
+              setZillowReadinessState(null);
+              setZillowDetectionMessage(null);
+              setZillowDetectionDetail(null);
+              setDirectSessionId(null);
+              setDirectNonce(null);
+              setDirectStatus("idle");
+              setDirectError(null);
+              setShowManualFallback(false);
+              directStartAttemptedRef.current = false;
+            }}
+            className="w-fit rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            Connect Browser
+          </button>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            Securely connects this browser to Zillow Import so listing photos and details can be brought into this project.
+          </span>
+        </div>
+        {/* Later: Import Selected status (Phase 4) */}
+        <div className="min-h-[1.5rem] text-sm text-zinc-500 dark:text-zinc-400" aria-hidden="true">
+          {/* Placeholder for "Import Selected" status */}
+        </div>
+      </section>
+
       {/* Media workspace: room list (left) + active room (right) */}
       <section className="flex gap-0 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
         <aside className="w-80 shrink-0 border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/50">
           <div className="p-2 font-medium text-zinc-700 dark:text-zinc-300">Sections</div>
           <div className="max-h-[60vh] overflow-y-auto p-2">
+            <button
+              type="button"
+              onClick={() => setActiveRoomId(ZILLOW_IMPORT_ID)}
+              className={`mb-1 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${
+                activeRoomId === ZILLOW_IMPORT_ID
+                  ? "border-zinc-400 bg-white dark:border-zinc-500 dark:bg-zinc-900"
+                  : "border-transparent hover:bg-zinc-200/80 dark:hover:bg-zinc-700/50"
+              }`}
+            >
+              <span className="truncate font-medium">Imported from Zillow</span>
+              {zillowImportedUnassigned.length > 0 && (
+                <span className="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-xs dark:bg-zinc-600">
+                  {zillowImportedUnassigned.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveRoomId(UNASSIGNED_PHOTOS_ID)}
+              className={`mb-1 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${
+                activeRoomId === UNASSIGNED_PHOTOS_ID
+                  ? "border-zinc-400 bg-white dark:border-zinc-500 dark:bg-zinc-900"
+                  : "border-transparent hover:bg-zinc-200/80 dark:hover:bg-zinc-700/50"
+              }`}
+            >
+              <span className="truncate font-medium">Unassigned Photos</span>
+              {genericUnassigned.length > 0 && (
+                <span className="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-xs dark:bg-zinc-600">
+                  {genericUnassigned.length}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setActiveRoomId(FRONT_PAGE_ID)}
@@ -577,7 +1182,283 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
           </div>
         </aside>
         <div className="min-w-0 flex-1 p-6">
-          {activeRoomId === FRONT_PAGE_ID ? (
+          {activeRoomId === ZILLOW_IMPORT_ID ? (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Imported from Zillow
+              </h2>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                These are photos imported from a Zillow listing. They are not yet assigned to a section. Select photos below and assign them to a section or move to Front Page Photos.
+              </p>
+              {zillowImportedUnassigned.length > 0 && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedZillowIds(new Set(zillowImportedUnassigned.map((m) => m.id)))
+                      }
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedZillowIds(new Set());
+                        setZillowAssignRoomId("");
+                      }}
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Clear selection
+                    </button>
+                    {selectedZillowIds.size > 0 && (
+                      <>
+                        <select
+                          value={zillowAssignRoomId}
+                          onChange={(e) => setZillowAssignRoomId(e.target.value)}
+                          className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                          aria-label="Assign to section"
+                        >
+                          <option value="">Assign to Section…</option>
+                          <option value={FRONT_PAGE_ID}>Front Page</option>
+                          {rooms.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!zillowAssignRoomId) return;
+                            setZillowAssigning(true);
+                            for (const mediaId of selectedZillowIds) {
+                              if (zillowAssignRoomId === FRONT_PAGE_ID) {
+                                await updateMediaRoomAction(projectId, mediaId, null, "FRONT_PAGE");
+                              } else {
+                                await updateMediaRoomAction(projectId, mediaId, zillowAssignRoomId);
+                              }
+                            }
+                            setZillowAssigning(false);
+                            setSelectedZillowIds(new Set());
+                            setZillowAssignRoomId("");
+                            router.refresh();
+                          }}
+                          disabled={!zillowAssignRoomId || zillowAssigning}
+                          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        >
+                          {zillowAssigning ? "Assigning…" : "Assign to Section"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Move ${selectedZillowIds.size} photo(s) to Front Page Photos?`)) return;
+                            setZillowAssigning(true);
+                            for (const mediaId of selectedZillowIds) {
+                              await updateMediaRoomAction(projectId, mediaId, null, "FRONT_PAGE");
+                            }
+                            setZillowAssigning(false);
+                            setSelectedZillowIds(new Set());
+                            router.refresh();
+                          }}
+                          disabled={zillowAssigning}
+                          className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          Move to Front Page
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Delete ${selectedZillowIds.size} selected photo(s)?`)) return;
+                            setZillowAssigning(true);
+                            for (const mediaId of selectedZillowIds) {
+                              await deleteMediaAction(projectId, mediaId);
+                            }
+                            setZillowAssigning(false);
+                            setSelectedZillowIds(new Set());
+                            router.refresh();
+                          }}
+                          disabled={zillowAssigning}
+                          className="rounded border border-red-200 px-2 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/30"
+                        >
+                          Delete
+                        </button>
+                        <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                          {selectedZillowIds.size} selected
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {zillowImportedUnassigned.map((m) => (
+                      <ZillowStagingThumbnail
+                        key={m.id}
+                        media={m}
+                        selected={selectedZillowIds.has(m.id)}
+                        onToggleSelect={() => {
+                          setSelectedZillowIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(m.id)) next.delete(m.id);
+                            else next.add(m.id);
+                            return next;
+                          });
+                        }}
+                        onDelete={async () => {
+                          if (!confirm("Delete this photo?")) return;
+                          await deleteMediaAction(projectId, m.id);
+                          router.refresh();
+                        }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+              {zillowImportedUnassigned.length === 0 && (
+                <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                  No Zillow-imported photos waiting to be assigned. Import photos using the Zillow Import block above, then they will appear here.
+                </p>
+              )}
+            </div>
+          ) : activeRoomId === UNASSIGNED_PHOTOS_ID ? (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Unassigned Photos
+              </h2>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                These are project photos not yet assigned to a section (excluding Zillow-imported photos, which appear under Imported from Zillow). Select photos below and assign them to a section or move to Front Page Photos.
+              </p>
+              {genericUnassigned.length > 0 && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedGenericUnassignedIds(new Set(genericUnassigned.map((m) => m.id)))
+                      }
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGenericUnassignedIds(new Set());
+                        setGenericUnassignedAssignRoomId("");
+                      }}
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Clear selection
+                    </button>
+                    {selectedGenericUnassignedIds.size > 0 && (
+                      <>
+                        <select
+                          value={genericUnassignedAssignRoomId}
+                          onChange={(e) => setGenericUnassignedAssignRoomId(e.target.value)}
+                          className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                          aria-label="Assign to section"
+                        >
+                          <option value="">Assign to Section…</option>
+                          <option value={FRONT_PAGE_ID}>Front Page</option>
+                          {rooms.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!genericUnassignedAssignRoomId) return;
+                            setGenericUnassignedAssigning(true);
+                            for (const mediaId of selectedGenericUnassignedIds) {
+                              if (genericUnassignedAssignRoomId === FRONT_PAGE_ID) {
+                                await updateMediaRoomAction(projectId, mediaId, null, "FRONT_PAGE");
+                              } else {
+                                await updateMediaRoomAction(projectId, mediaId, genericUnassignedAssignRoomId);
+                              }
+                            }
+                            setGenericUnassignedAssigning(false);
+                            setSelectedGenericUnassignedIds(new Set());
+                            setGenericUnassignedAssignRoomId("");
+                            router.refresh();
+                          }}
+                          disabled={!genericUnassignedAssignRoomId || genericUnassignedAssigning}
+                          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        >
+                          {genericUnassignedAssigning ? "Assigning…" : "Assign to Section"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Move ${selectedGenericUnassignedIds.size} photo(s) to Front Page Photos?`)) return;
+                            setGenericUnassignedAssigning(true);
+                            for (const mediaId of selectedGenericUnassignedIds) {
+                              await updateMediaRoomAction(projectId, mediaId, null, "FRONT_PAGE");
+                            }
+                            setGenericUnassignedAssigning(false);
+                            setSelectedGenericUnassignedIds(new Set());
+                            router.refresh();
+                          }}
+                          disabled={genericUnassignedAssigning}
+                          className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          Move to Front Page
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Delete ${selectedGenericUnassignedIds.size} selected photo(s)?`)) return;
+                            setGenericUnassignedAssigning(true);
+                            for (const mediaId of selectedGenericUnassignedIds) {
+                              await deleteMediaAction(projectId, mediaId);
+                            }
+                            setGenericUnassignedAssigning(false);
+                            setSelectedGenericUnassignedIds(new Set());
+                            router.refresh();
+                          }}
+                          disabled={genericUnassignedAssigning}
+                          className="rounded border border-red-200 px-2 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/30"
+                        >
+                          Delete
+                        </button>
+                        <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                          {selectedGenericUnassignedIds.size} selected
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {genericUnassigned.map((m) => (
+                      <ZillowStagingThumbnail
+                        key={m.id}
+                        media={m}
+                        selected={selectedGenericUnassignedIds.has(m.id)}
+                        onToggleSelect={() => {
+                          setSelectedGenericUnassignedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(m.id)) next.delete(m.id);
+                            else next.add(m.id);
+                            return next;
+                          });
+                        }}
+                        onDelete={async () => {
+                          if (!confirm("Delete this photo?")) return;
+                          await deleteMediaAction(projectId, m.id);
+                          router.refresh();
+                        }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+              {genericUnassigned.length === 0 && (
+                <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                  No unassigned photos. Photos you upload or import (other than from Zillow) are assigned to the section you choose. Zillow-imported photos appear under Imported from Zillow.
+                </p>
+              )}
+            </div>
+          ) : activeRoomId === FRONT_PAGE_ID ? (
             <FrontPageHeroEditor
               projectId={projectId}
               media={media}
@@ -715,39 +1596,98 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
                 <p className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
                   Existing Photos
                 </p>
-                <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
-                  Photos in this section (before/context). Select one to view or create rendered versions below.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {existingForActive.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setActiveSourceMediaId(m.id)}
-                      className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 ${
-                        m.id === effectiveSourceMediaId
-                          ? "border-zinc-900 dark:border-zinc-100"
-                          : "border-zinc-200 dark:border-zinc-600"
-                      }`}
-                    >
-                      {isLegacyBlobUrl(m.url) || !isAllowedHostForNextImage(m.url) ? (
-                        <img src={m.url} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <Image
-                          src={m.url}
-                          alt=""
-                          fill
-                          className="object-cover"
-                          sizes="56px"
-                          unoptimized={m.url.startsWith("blob:") || !m.url.startsWith("http")}
-                        />
-                      )}
-                    </button>
-                  ))}
-                  {existingForActive.length === 0 && (
-                    <p className="text-sm text-zinc-500">Upload an existing photo first.</p>
-                  )}
-                </div>
+                {existingForActive.length === 0 ? (
+                  <p className="text-sm text-zinc-500">Upload an existing photo first.</p>
+                ) : (
+                  <div className="flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-700">
+                    <div className="flex flex-wrap items-center gap-1.5 px-2 pt-2">
+                      {existingForActive.map((m) => {
+                        const isSelected = m.id === effectiveSourceMediaId;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setActiveSourceMediaId(m.id)}
+                            title="Select as source for concepts"
+                            className={`relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-lg border-2 transition-shadow focus:outline-none focus:ring-0 ${
+                              isSelected
+                                ? "ring-2 ring-blue-600 ring-offset-1 border-blue-500 dark:ring-offset-zinc-900"
+                                : "border-zinc-200 dark:border-zinc-600"
+                            }`}
+                          >
+                            {isLegacyBlobUrl(m.url) || !isAllowedHostForNextImage(m.url) ? (
+                              <img src={m.url} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              <Image
+                                src={m.url}
+                                alt=""
+                                fill
+                                className="object-cover"
+                                sizes="72px"
+                                unoptimized={m.url.startsWith("blob:") || !m.url.startsWith("http")}
+                              />
+                            )}
+                            {isSelected && (
+                              <span className="absolute top-0.5 left-0.5 rounded bg-blue-600 px-1 py-0.5 text-[10px] font-medium text-white">
+                                Selected
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {effectiveSourceMediaId && existingForActive.some((m) => m.id === effectiveSourceMediaId) && (
+                      <p className="mt-1 px-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        Selected: source photo for concepts
+                      </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-zinc-200 px-2 py-2 dark:border-zinc-700">
+                      <button
+                        type="button"
+                        disabled={
+                          existingPhotoAction !== "idle" ||
+                          !effectiveSourceMediaId ||
+                          !existingForActive.some((m) => m.id === effectiveSourceMediaId)
+                        }
+                        onClick={async () => {
+                          if (!effectiveSourceMediaId) return;
+                          setExistingPhotoAction("remove");
+                          try {
+                            await updateMediaRoomAction(projectId, effectiveSourceMediaId, null, "UNASSIGNED");
+                            router.refresh();
+                          } finally {
+                            setExistingPhotoAction("idle");
+                          }
+                        }}
+                        className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                      >
+                        {existingPhotoAction === "remove" ? "Removing…" : "Remove from Section"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          existingPhotoAction !== "idle" ||
+                          !effectiveSourceMediaId ||
+                          !existingForActive.some((m) => m.id === effectiveSourceMediaId)
+                        }
+                        onClick={async () => {
+                          if (!effectiveSourceMediaId) return;
+                          if (!confirm("Permanently delete this photo from the project? This cannot be undone.")) return;
+                          setExistingPhotoAction("delete");
+                          try {
+                            await deleteMediaAction(projectId, effectiveSourceMediaId);
+                            router.refresh();
+                          } finally {
+                            setExistingPhotoAction("idle");
+                          }
+                        }}
+                        className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/30"
+                      >
+                        {existingPhotoAction === "delete" ? "Deleting…" : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-6">
@@ -767,19 +1707,86 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
                     Select a before photo above to see or create concepts.
                   </p>
                 ) : conceptVersionsForSelectedBefore.length === 0 ? (
-                  <div className="flex flex-col items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50/50 py-6 dark:border-zinc-700 dark:bg-zinc-800/30">
-                    <p className="px-4 text-sm text-zinc-600 dark:text-zinc-400">
-                      No concepts yet for this photo
-                    </p>
-                    <button
-                      type="button"
-                      disabled={rendering || !effectiveSourceMediaId}
-                      onClick={handleRenderNew}
-                      className="ml-4 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                    >
-                      {rendering ? "Rendering…" : "Render New"}
-                    </button>
-                  </div>
+                  activeRoomId && activeRoomId !== FRONT_PAGE_ID ? (
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 py-4 px-4 dark:border-zinc-700 dark:bg-zinc-800/30">
+                      <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Render Controls</h3>
+                      <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        These changes will be applied to the new render generated from this photo.
+                      </p>
+                      {activeRoomBullets.length === 0 ? (
+                        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          No scope for this section. Add a renovation description in the Sections tab to see specific changes here.
+                        </p>
+                      ) : (
+                        <ul className="mt-2 space-y-1.5">
+                          {activeRoomBullets.map((bullet) => (
+                            <li key={bullet} className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                id={`render-bullet-${bullet.slice(0, 40).replace(/\s+/g, "-")}`}
+                                checked={activeRoomBulletChecked(bullet)}
+                                onChange={(e) => setActiveRoomBulletChecked(bullet, e.target.checked)}
+                                className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800"
+                              />
+                              <label
+                                htmlFor={`render-bullet-${bullet.slice(0, 40).replace(/\s+/g, "-")}`}
+                                className="text-sm text-zinc-700 dark:text-zinc-300"
+                              >
+                                {bullet}
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="mt-2 flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          id="render-custom-change-enabled"
+                          checked={customChangeEnabled}
+                          onChange={(e) => setCustomChangeEnabled(e.target.checked)}
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <label htmlFor="render-custom-change-enabled" className="text-sm text-zinc-700 dark:text-zinc-300">
+                            Custom change:
+                          </label>
+                          <input
+                            type="text"
+                            value={customChangeText}
+                            onChange={(e) => setCustomChangeText(e.target.value)}
+                            placeholder="e.g. Add under-cabinet lighting"
+                            className="mt-0.5 w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={rendering || !effectiveSourceMediaId}
+                          onClick={handleRenderNew}
+                          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                        >
+                          {rendering ? "Rendering…" : "Render New"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50/50 py-6 dark:border-zinc-700 dark:bg-zinc-800/30">
+                      <p className="px-4 text-sm text-zinc-600 dark:text-zinc-400">
+                        No concepts yet for this photo
+                      </p>
+                      <div className="ml-4 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={rendering || !effectiveSourceMediaId}
+                          onClick={handleRenderNew}
+                          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                        >
+                          {rendering ? "Rendering…" : "Render New"}
+                        </button>
+                      </div>
+                    </div>
+                  )
                 ) : (
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {conceptGroups.map((group) => {
@@ -1033,17 +2040,17 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
         </div>
       </section>
 
-      {/* Unassigned Media */}
-      {unassigned.length > 0 && (
-        <section className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+      {/* Orphaned Renderings — renderings with no room (e.g. room deleted) */}
+      {orphanedRenderings.length > 0 && (
+        <section className="rounded-lg border border-amber-200 p-4 dark:border-amber-800">
           <h2 className="mb-3 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            Unassigned Media
+            Orphaned Renderings
           </h2>
           <p className="mb-3 text-sm text-zinc-500">
-            Media not assigned to a section. You can assign it to a section or move it to Front Page Photos.
+            AI renderings that are not linked to any section (e.g. section was deleted). Assign to a section to restore them.
           </p>
           <div className="space-y-3">
-            {unassigned.map((m) => (
+            {orphanedRenderings.map((m) => (
               <UnassignedRow
                 key={m.id}
                 projectId={projectId}
@@ -1052,7 +2059,7 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
                 onAssign={() => router.refresh()}
                 onMoveToFrontPage={() => router.refresh()}
                 onDelete={async () => {
-                  if (!confirm("Delete this media?")) return;
+                  if (!confirm("Delete this rendering?")) return;
                   await deleteMediaAction(projectId, m.id);
                   router.refresh();
                 }}
@@ -1061,6 +2068,445 @@ export function MediaTab({ projectId, media, rooms, projectStylePreset = null, c
           </div>
         </section>
       )}
+
+      {/* Zillow Import modal: Connect Browser onboarding */}
+      {zillowImportModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="zillow-connect-title"
+        >
+          <div className="w-full max-w-md rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+            {/* Hidden element for extension content script */}
+            {directNonce != null && directSessionId != null && (
+              <div
+                id="zillow-connection-handshake"
+                data-nonce={directNonce}
+                data-session-id={directSessionId}
+                aria-hidden="true"
+                className="hidden"
+              />
+            )}
+
+            {/* Header */}
+            <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+              <h2 id="zillow-connect-title" className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Connect Browser
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Securely connect this browser to Zillow Import so listing photos and details can be brought into this project.
+              </p>
+            </div>
+
+            {/* Body: state-based message */}
+            <div className="min-h-[4rem] px-4 py-4">
+              {/* Checking browser… / Checking extension… */}
+              {(zillowDetectionStatus === "idle" || zillowDetectionStatus === "detecting") && (
+                <div className="flex items-center gap-3">
+                  <span className="h-6 w-6 shrink-0 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" aria-hidden />
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    {zillowDetectionStatus === "idle" ? "Checking browser…" : "Checking extension…"}
+                  </p>
+                </div>
+              )}
+
+              {/* Unsupported: Zillow Import works in desktop Chrome or Edge. */}
+              {zillowDetectionStatus === "done" && (zillowReadinessState === "unsupportedBrowser" || zillowReadinessState === "unsupportedMobile") && (
+                <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                  Zillow Import works in desktop Chrome or Edge.
+                </p>
+              )}
+
+              {/* No extension: setup instructions */}
+              {zillowDetectionStatus === "done" && zillowReadinessState === "supportedNoExtension" && !showManualFallback && (
+                <div className="space-y-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <p>
+                    You’ll need the Zillow Import browser extension to import photos and listing details from Zillow. This is a one-time setup.
+                  </p>
+                  <p>
+                    Load the extension from the <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-700">chrome-extension/zillow-importer</code> folder (Chrome → Extensions → Load unpacked). When you’re done, click Connect Browser again to retry.
+                  </p>
+                </div>
+              )}
+
+              {/* Direct handshake ready: Connecting browser… + spinner */}
+              {zillowDetectionStatus === "done" && zillowReadinessState === "supportedDirectHandshakeReady" && (
+                <>
+                  {directStatus === "idle" && !directNonce && (
+                    <div className="flex items-center gap-3">
+                      <span className="h-6 w-6 shrink-0 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" aria-hidden />
+                      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                        Connecting browser…
+                      </p>
+                    </div>
+                  )}
+                  {directStatus === "connecting" && (
+                    <div className="flex items-center gap-3">
+                      <span className="h-6 w-6 shrink-0 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" aria-hidden />
+                      <div>
+                        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                          Extension detected. Connecting your browser…
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          Open the Zillow Import extension and click Connect (or Pair) to finish.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {directStatus === "connected" && (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                        Browser connected. Zillow Import is ready.
+                      </p>
+                      {!projectAddress?.trim() && (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          No project address on Overview. Open Zillow manually to import listing photos.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {(showManualFallback || directStatus === "failed" || directStatus === "expired") && (
+                    <>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                        Connection failed. You can connect using a code instead.
+                      </p>
+                      {pairCodeError && (
+                        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{pairCodeError}</p>
+                      )}
+                      {pairCode ? (
+                        <>
+                          <div className="mt-3 flex items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+                            <span className="font-mono text-xl font-bold tracking-widest text-zinc-900 dark:text-zinc-100">
+                              {pairCode}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                            Expires {pairCodeExpiresAt ? new Date(pairCodeExpiresAt).toLocaleString() : ""}
+                          </p>
+                          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                            Open the Zillow Import extension, paste this code, and connect. Then use Capture Gallery on a Zillow listing and Open Photo Picker to import.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                          Click Generate Code below, then paste it in the extension.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Extension detected but direct could not be completed */}
+              {zillowDetectionStatus === "done" && (zillowReadinessState === "supportedExtensionDetected" || zillowReadinessState === "supportedFallbackOnly" || zillowReadinessState === "unknownOrDegraded") && (
+                <>
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                    Extension detected but direct connection could not be completed.
+                  </p>
+                  {pairCodeError && (
+                    <p className="mt-2 text-xs text-red-600 dark:text-red-400">{pairCodeError}</p>
+                  )}
+                  {pairCode ? (
+                    <>
+                      <div className="mt-3 flex items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+                        <span className="font-mono text-xl font-bold tracking-widest text-zinc-900 dark:text-zinc-100">
+                          {pairCode}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                        Expires {pairCodeExpiresAt ? new Date(pairCodeExpiresAt).toLocaleString() : ""}
+                      </p>
+                      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        Open the Zillow Import extension, paste this code, and connect. Then use Capture Gallery on a Zillow listing and Open Photo Picker to import.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                      Click Generate Code below, then paste it in the extension.
+                    </p>
+                  )}
+                </>
+              )}
+
+              {/* No extension but user chose manual: simplified manual UI */}
+              {zillowDetectionStatus === "done" && zillowReadinessState === "supportedNoExtension" && showManualFallback && (
+                <>
+                  {pairCodeError && (
+                    <p className="text-xs text-red-600 dark:text-red-400">{pairCodeError}</p>
+                  )}
+                  {pairCode ? (
+                    <>
+                      <div className="flex items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+                        <span className="font-mono text-xl font-bold tracking-widest text-zinc-900 dark:text-zinc-100">
+                          {pairCode}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                        Expires {pairCodeExpiresAt ? new Date(pairCodeExpiresAt).toLocaleString() : ""}
+                      </p>
+                      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        Open the Zillow Import extension, paste this code, and connect. Then use Capture Gallery on a Zillow listing and Open Photo Picker to import.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                      Generate a code below, then open the extension and paste it to connect.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer: action buttons */}
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+              {zillowDetectionStatus === "done" && zillowReadinessState === "supportedNoExtension" && !showManualFallback && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        if (ZILLOW_EXTENSION_STORE_URL) {
+                          window.open(ZILLOW_EXTENSION_STORE_URL, "_blank", "noopener");
+                        } else {
+                          window.open("chrome://extensions", "_blank", "noopener");
+                        }
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  >
+                    {ZILLOW_EXTENSION_STORE_URL ? "Install Extension" : "Open Chrome Extensions"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowManualFallback(true)}
+                    className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    Use Manual Code Instead
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (directSessionId && directStatus === "connecting") {
+                        await markConnectionFailedAction(directSessionId);
+                      }
+                      directStartAttemptedRef.current = false;
+                      setPairCode(null);
+                      setPairCodeExpiresAt(null);
+                      setPairCodeError(null);
+                      setDirectSessionId(null);
+                      setDirectNonce(null);
+                      setDirectStatus("idle");
+                      setDirectError(null);
+                      setShowManualFallback(false);
+                      setZillowDetectionStatus("idle");
+                      setZillowReadinessState(null);
+                      setZillowDetectionMessage(null);
+                      setZillowDetectionDetail(null);
+                    }}
+                    className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    Try Again
+                  </button>
+                </>
+              )}
+
+              {zillowReadinessState === "supportedDirectHandshakeReady" && directStatus === "connecting" && (
+                <button
+                  type="button"
+                  onClick={() => setShowManualFallback(true)}
+                  className="text-sm font-medium text-zinc-600 underline hover:no-underline dark:text-zinc-400"
+                >
+                  Use Manual Code Instead
+                </button>
+              )}
+
+              {/* Try Again: re-run detection for failed or fallback states */}
+              {(zillowReadinessState === "supportedNoExtension" && showManualFallback) ||
+              zillowReadinessState === "supportedExtensionDetected" ||
+              zillowReadinessState === "supportedFallbackOnly" ||
+              zillowReadinessState === "unknownOrDegraded" ||
+              (zillowReadinessState === "supportedDirectHandshakeReady" && (showManualFallback || directStatus === "failed" || directStatus === "expired")) ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (directSessionId && directStatus === "connecting") {
+                      await markConnectionFailedAction(directSessionId);
+                    }
+                    directStartAttemptedRef.current = false;
+                    setPairCode(null);
+                    setPairCodeExpiresAt(null);
+                    setPairCodeError(null);
+                    setDirectSessionId(null);
+                    setDirectNonce(null);
+                    setDirectStatus("idle");
+                    setDirectError(null);
+                    setShowManualFallback(false);
+                    setZillowDetectionStatus("idle");
+                    setZillowReadinessState(null);
+                    setZillowDetectionMessage(null);
+                    setZillowDetectionDetail(null);
+                  }}
+                  className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  Try Again
+                </button>
+              ) : null}
+
+              {/* Done: on successful connection */}
+              {zillowReadinessState === "supportedDirectHandshakeReady" && directStatus === "connected" && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    directStartAttemptedRef.current = false;
+                    setZillowImportModalOpen(false);
+                    setPairCode(null);
+                    setPairCodeExpiresAt(null);
+                    setPairCodeError(null);
+                    setDirectSessionId(null);
+                    setDirectNonce(null);
+                    setDirectStatus("idle");
+                    setDirectError(null);
+                    setShowManualFallback(false);
+                    setZillowDetectionStatus("idle");
+                    setZillowReadinessState(null);
+                    setZillowDetectionMessage(null);
+                    setZillowDetectionDetail(null);
+                  }}
+                  className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                >
+                  Done
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (directSessionId && directStatus === "connecting") {
+                    await markConnectionFailedAction(directSessionId);
+                  }
+                  directStartAttemptedRef.current = false;
+                  setZillowImportModalOpen(false);
+                  setPairCode(null);
+                  setPairCodeExpiresAt(null);
+                  setPairCodeError(null);
+                  setDirectSessionId(null);
+                  setDirectNonce(null);
+                  setDirectStatus("idle");
+                  setDirectError(null);
+                  setShowManualFallback(false);
+                  setZillowDetectionStatus("idle");
+                  setZillowReadinessState(null);
+                  setZillowDetectionMessage(null);
+                  setZillowDetectionDetail(null);
+                }}
+                className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Close
+              </button>
+
+              {/* Generate Code + Copy Code when in manual flow */}
+              {((zillowReadinessState === "supportedDirectHandshakeReady" && (showManualFallback || directStatus === "failed" || directStatus === "expired")) ||
+                zillowReadinessState === "supportedExtensionDetected" ||
+                zillowReadinessState === "supportedFallbackOnly" ||
+                zillowReadinessState === "unknownOrDegraded" ||
+                (zillowReadinessState === "supportedNoExtension" && showManualFallback)) && (
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setPairCodeError(null);
+                      setPairCodeLoading(true);
+                      const result = await createExtensionPairCodeAction(projectId);
+                      setPairCodeLoading(false);
+                      if ("error" in result) {
+                        setPairCodeError(result.error);
+                        return;
+                      }
+                      setPairCode(result.code);
+                      setPairCodeExpiresAt(result.expiresAt);
+                    }}
+                    disabled={pairCodeLoading}
+                    className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  >
+                    {pairCodeLoading ? "Generating…" : "Generate Code"}
+                  </button>
+                  {pairCode && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (pairCode) void navigator.clipboard.writeText(pairCode);
+                      }}
+                      className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Copy Code
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ZillowStagingThumbnail({
+  media,
+  selected,
+  onToggleSelect,
+  onDelete,
+}: {
+  media: MediaItem;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-700">
+      <label className="flex cursor-pointer items-start gap-2 p-2">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800"
+          aria-label={`Select photo for assignment`}
+        />
+        <div className="relative aspect-[4/3] min-h-0 flex-1 overflow-hidden rounded bg-zinc-200 dark:bg-zinc-700">
+          {isBadPlaceholderUrl(media.url) ? (
+            <div className="absolute inset-0 flex items-center justify-center rounded text-xs text-zinc-500">
+              No image
+            </div>
+          ) : isLegacyBlobUrl(media.url) || !isAllowedHostForNextImage(media.url) ? (
+            <img
+              src={media.url}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <Image
+              src={media.url}
+              alt=""
+              fill
+              className="object-cover"
+              sizes="(max-width:640px) 50vw, 25vw"
+              unoptimized={media.url.startsWith("blob:") || !media.url.startsWith("http")}
+            />
+          )}
+        </div>
+      </label>
+      <div className="flex justify-end border-t border-zinc-200 px-2 py-1 dark:border-zinc-700">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="text-xs text-red-600 hover:underline dark:text-red-400"
+        >
+          Delete
+        </button>
+      </div>
     </div>
   );
 }
@@ -1164,6 +2610,8 @@ function UnassignedRow({
   projectId,
   media,
   rooms,
+  selected,
+  onToggleSelect,
   onAssign,
   onMoveToFrontPage,
   onDelete,
@@ -1171,6 +2619,8 @@ function UnassignedRow({
   projectId: string;
   media: MediaItem;
   rooms: RoomItem[];
+  selected?: boolean;
+  onToggleSelect?: () => void;
   onAssign: () => void;
   onMoveToFrontPage: () => void;
   onDelete: () => void;
@@ -1200,6 +2650,17 @@ function UnassignedRow({
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+      {onToggleSelect != null && (
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={selected ?? false}
+            onChange={onToggleSelect}
+            className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800"
+            aria-label={`Select ${media.caption || "photo"} for assignment`}
+          />
+        </label>
+      )}
       <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-200 dark:bg-zinc-700">
         {isBadPlaceholderUrl(media.url) ? (
           <div

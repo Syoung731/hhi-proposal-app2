@@ -15,7 +15,7 @@ export const HERO_PRESETS = [
 export type HeroPresetKey = (typeof HERO_PRESETS)[number];
 
 export const HERO_PRESET_LABELS: Record<HeroPresetKey, string> = {
-  remove_watermark: "Remove watermark",
+  remove_watermark: "Remove text / watermark",
   brighten: "Brighten photo",
   contrast: "Increase contrast",
   straighten: "Straighten / level",
