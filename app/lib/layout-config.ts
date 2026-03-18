@@ -520,6 +520,7 @@ export const STACKED_DEFAULT_UNDERLINE_COLOR = "#E07A2F";
 /** Three Columns defaults. */
 export const COLUMNS_DEFAULT_UNDERLINE_COLOR = STACKED_DEFAULT_UNDERLINE_COLOR;
 export const COLUMNS_DEFAULT_TEXT_COLOR = "#111827";
+export const COLUMNS_DEFAULT_ICON_COLOR = COLUMNS_DEFAULT_TEXT_COLOR;
 
 /**
  * Validates and returns a hex color string, or the default.

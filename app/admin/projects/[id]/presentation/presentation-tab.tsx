@@ -342,7 +342,7 @@ export function PresentationTab({
           ? (sectionsToPersist as Record<string, SectionPageConfig>)[roomId]
           : undefined;
       const roomCfg = config.pages?.rooms?.[roomId];
-      const enabled = sectionCfg?.include !== false ?? roomCfg?.enabled !== false;
+      const enabled = (sectionCfg?.include ?? roomCfg?.enabled ?? true) !== false;
       const variant = sectionCfg?.layoutVariant ?? roomCfg?.variant ?? "split";
       const featuredMediaId = sectionCfg?.featuredConceptMediaId ?? roomCfg?.featuredMediaId ?? null;
       roomsToPersist[roomId] = {

@@ -36,7 +36,7 @@ export function AdminLayoutChrome({
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <header className="sticky top-0 z-50 border-b-2 border-zinc-200 bg-white shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[1920px] px-4 py-6 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <Link
               href="/admin"
@@ -62,7 +62,7 @@ export function AdminLayoutChrome({
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1400px] px-6 py-10">
+      <main className="mx-auto w-full max-w-[1920px] px-6 py-10">
         {children}
       </main>
     </div>

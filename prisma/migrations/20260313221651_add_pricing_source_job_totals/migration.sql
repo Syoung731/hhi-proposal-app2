@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "PricingSourceJob" ADD COLUMN     "totalCost" DECIMAL(19,4) NOT NULL DEFAULT 0,
+ADD COLUMN     "totalSell" DECIMAL(19,4) NOT NULL DEFAULT 0;

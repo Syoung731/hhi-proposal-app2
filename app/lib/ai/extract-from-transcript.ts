@@ -283,3 +283,68 @@ Rules:
   if (!content) throw new Error("No AI response");
   return content;
 }
+
+/**
+ * Combine multiple section scopes into a single polished scope paragraph.
+ * Uses transcript context plus the existing per-section scopes.
+ */
+export async function mergeRoomScopesNarrative(
+  transcriptText: string,
+  mergedRoomName: string,
+  sections: { name: string; scopeNarrative: string }[],
+  stylePresetPrompt?: string
+): Promise<string> {
+  const nonEmpty = sections.filter(
+    (s) => s.scopeNarrative && s.scopeNarrative.trim().length > 0
+  );
+  const fallback =
+    sections
+      .map((s) => s.scopeNarrative.trim())
+      .filter(Boolean)
+      .join(" ") || "";
+
+  let systemContent = `You are an expert residential remodeler writing proposal scope-of-work.
+
+Your task: combine multiple related sections into ONE clear scope paragraph for a single section.
+
+Rules:
+- The final room/section name is "${mergedRoomName}". Do not change it.
+- Read all of the individual scopes and merge them into one cohesive paragraph.
+- Remove redundancy while preserving every distinct task, material, and important detail.
+- Use professional construction language suitable for a premium client-facing proposal.
+- Output exactly ONE paragraph of prose. No bullet points, no numbering, no list items.
+- Base facts primarily on the provided scopes; you may use transcript context to clarify but do not invent work that is not supported.`;
+
+  if (stylePresetPrompt?.trim()) {
+    systemContent += `\n\nStyle instructions (apply to tone and language where relevant):\n${stylePresetPrompt.trim()}`;
+  }
+
+  const scopesText =
+    nonEmpty.length > 0
+      ? nonEmpty
+          .map(
+            (s, idx) =>
+              `Section ${idx + 1}: "${s.name}"\nScope:\n${s.scopeNarrative.trim()}`
+          )
+          .join("\n\n")
+      : fallback;
+
+  const response = await client.chat.completions.create({
+    model,
+    temperature: 0.2,
+    messages: [
+      {
+        role: "system",
+        content: systemContent,
+      },
+      {
+        role: "user",
+        content: `Transcript (for reference):\n\n${transcriptText}\n\n---\n\nExisting scopes to merge into "${mergedRoomName}":\n\n${scopesText}\n\nWrite a single combined scope paragraph for "${mergedRoomName}". One paragraph only.`,
+      },
+    ],
+  });
+
+  const content = response.choices[0]?.message?.content?.trim();
+  if (!content) throw new Error("No AI response");
+  return content;
+}

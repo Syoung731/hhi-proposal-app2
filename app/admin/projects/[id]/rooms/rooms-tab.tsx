@@ -7,12 +7,15 @@ import {
   createRoomAction,
   updateRoomAction,
   deleteRoomAction,
+  deleteAllRoomsAction,
   reorderRoomsAction,
   generateRoomsFromTranscriptAction,
   updateRoomScopesFromTranscriptAction,
   rewriteRoomScopeAction,
+  mergeRoomsWithAiAction,
   updateRoomsRoomType,
   updateRoomsSectionType,
+  updateRoomSubAreasAction,
 } from "./actions";
 import { updateProjectStylePresetAction } from "../overview/actions";
 import { getRoomTypes } from "@/app/admin/settings/actions";
@@ -59,6 +62,27 @@ function getSqFt(room: Room): number | null {
   const wid = room.widthIn;
   if (len == null || wid == null || len <= 0 || wid <= 0) return null;
   return (len / 12) * (wid / 12);
+}
+
+/** Combined Sq Ft: base room.areaSqFt (or dimensions) + included sub-areas. */
+function getCombinedSqFt(room: Room): number | null {
+  const base =
+    room.areaSqFt != null && !Number.isNaN(room.areaSqFt) && room.areaSqFt > 0
+      ? room.areaSqFt
+      : getSqFt(room) ?? 0;
+  const extra =
+    room.subAreas
+      ?.filter((sa) => sa.includeInArea ?? true)
+      .map((sa) => {
+        if (sa.areaSqFt != null && !Number.isNaN(sa.areaSqFt) && sa.areaSqFt > 0) return sa.areaSqFt;
+        const len = sa.lengthIn;
+        const wid = sa.widthIn;
+        if (len == null || wid == null || len <= 0 || wid <= 0) return 0;
+        return (len / 12) * (wid / 12);
+      })
+      .reduce((a, b) => a + b, 0) ?? 0;
+  const total = base + extra;
+  return total > 0 ? total : null;
 }
 
 /**
@@ -165,7 +189,7 @@ function getRangeTotal(
   const basis = sectionType.pricingBasis ?? "NONE";
 
   if (basis === "PER_SF") {
-    const sqFt = getSqFt(room);
+    const sqFt = getCombinedSqFt(room);
     if (sqFt == null || sqFt <= 0) return null;
     const lowTotal = Math.floor(unitLow * sqFt);
     const highTotal = Math.ceil(unitHigh * sqFt);
@@ -344,6 +368,16 @@ type Room = {
   unitRateLow?: number | null;
   unitRateTarget?: number | null;
   unitRateHigh?: number | null;
+  subAreas?: {
+    id: string;
+    name: string;
+    lengthIn?: number | null;
+    widthIn?: number | null;
+    ceilingHeightIn?: number | null;
+    areaSqFt?: number | null;
+    sortOrder: number;
+    includeInArea?: boolean | null;
+  }[];
 };
 
 type RoomTypeOption = { id: string; name: string };
@@ -556,6 +590,224 @@ function RoomDimensionsRow({
   );
 }
 
+type SubAreaEditorRow = {
+  id: string | null;
+  name: string;
+  length: string;
+  width: string;
+  ceilingHeight: string;
+  includeInArea: boolean;
+};
+
+function RoomSubAreasEditor({
+  projectId,
+  room,
+  onSaved,
+}: {
+  projectId: string;
+  room: Room;
+  onSaved: () => void;
+}) {
+  const [rows, setRows] = useState<SubAreaEditorRow[]>(() => {
+    const sorted = [...(room.subAreas ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    return sorted.map((sa) => ({
+      id: sa.id,
+      name: sa.name ?? "",
+      length: formatInchesToFeetInches(sa.lengthIn ?? null),
+      width: formatInchesToFeetInches(sa.widthIn ?? null),
+      ceilingHeight: formatInchesToFeetInches(sa.ceilingHeightIn ?? null),
+      includeInArea: sa.includeInArea ?? true,
+    }));
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const sorted = [...(room.subAreas ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    setRows(
+      sorted.map((sa) => ({
+        id: sa.id,
+        name: sa.name ?? "",
+        length: formatInchesToFeetInches(sa.lengthIn ?? null),
+        width: formatInchesToFeetInches(sa.widthIn ?? null),
+        ceilingHeight: formatInchesToFeetInches(sa.ceilingHeightIn ?? null),
+        includeInArea: sa.includeInArea ?? true,
+      }))
+    );
+  }, [room.id, room.subAreas]);
+
+  function updateRow(index: number, patch: Partial<SubAreaEditorRow>) {
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  function addRow() {
+    setRows((prev) => [
+      ...prev,
+      { id: null, name: "", length: "", width: "", ceilingHeight: "", includeInArea: true },
+    ]);
+  }
+
+  function removeRow(index: number) {
+    setRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    await updateRoomSubAreasAction(projectId, room.id, rows);
+    setSaving(false);
+    onSaved();
+  }
+
+  const overallSqFtPreview = (() => {
+    const baseLen = room.lengthIn ?? null;
+    const baseWid = room.widthIn ?? null;
+    const base =
+      baseLen != null && baseWid != null && baseLen > 0 && baseWid > 0
+        ? (baseLen / 12) * (baseWid / 12)
+        : room.areaSqFt ?? 0;
+    const extra = rows
+      .filter((r) => r.includeInArea)
+      .map((r) => {
+        const lenIn = effectiveInches(r.length, null);
+        const widIn = effectiveInches(r.width, null);
+        if (lenIn == null || widIn == null || lenIn <= 0 || widIn <= 0) return 0;
+        return (lenIn / 12) * (widIn / 12);
+      })
+      .reduce((a, b) => a + b, 0);
+    const total = base + extra;
+    return total > 0 ? total : null;
+  })();
+
+  if (!rows.length) {
+    return (
+      <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+        <button
+          type="button"
+          onClick={addRow}
+          className="rounded border border-dashed border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          + Add sub-area
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+      <div className="flex items-center justify-between">
+        <div className="font-medium text-zinc-700 dark:text-zinc-300">
+          Sub-areas
+        </div>
+        <button
+          type="button"
+          onClick={addRow}
+          className="rounded border border-dashed border-zinc-300 px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          + Add
+        </button>
+      </div>
+      <div className="space-y-1">
+        {rows.map((row, index) => {
+          const lenIn = effectiveInches(row.length, null);
+          const widIn = effectiveInches(row.width, null);
+          const ceilIn = effectiveInches(row.ceilingHeight, null);
+          return (
+            <div key={row.id ?? index} className="space-y-0.5 rounded border border-zinc-200 p-2 dark:border-zinc-700">
+              <div className="flex flex-wrap items-end gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                    Area name
+                  </label>
+                  <input
+                    type="text"
+                    value={row.name}
+                    onChange={(e) => updateRow(index, { name: e.target.value })}
+                    placeholder="e.g. Toilet room"
+                    className="w-56 rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                    Length
+                  </label>
+                  <input
+                    type="text"
+                    value={row.length}
+                    onChange={(e) => updateRow(index, { length: e.target.value })}
+                    placeholder="L"
+                    className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                    Width
+                  </label>
+                  <input
+                    type="text"
+                    value={row.width}
+                    onChange={(e) => updateRow(index, { width: e.target.value })}
+                    placeholder="W"
+                    className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                    Ceiling
+                  </label>
+                  <input
+                    type="text"
+                    value={row.ceilingHeight}
+                    onChange={(e) => updateRow(index, { ceilingHeight: e.target.value })}
+                    placeholder="Ceiling"
+                    className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                </div>
+                <label className="flex items-center gap-1 text-[11px] text-zinc-600 dark:text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={row.includeInArea}
+                    onChange={(e) => updateRow(index, { includeInArea: e.target.checked })}
+                    className="h-3 w-3 rounded border-zinc-300 dark:border-zinc-600"
+                  />
+                  Include in overall Sq Ft
+                </label>
+                <button
+                  type="button"
+                  onClick={() => removeRow(index)}
+                  className="ml-auto rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-3 text-[11px] text-zinc-500 dark:text-zinc-400">
+                <span>
+                  Sq Ft: {sqFtDisplay(lenIn, widIn)}
+                </span>
+                <span>
+                  Perimeter: {perimeterDisplay(lenIn, widIn)} LF
+                </span>
+                <span>
+                  Wall SF: {wallSfDisplay(lenIn, widIn, ceilIn)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {saving && (
+        <div className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">Saving sub-areas…</div>
+      )}
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving}
+        className="mt-1 rounded bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+      >
+        Save sub-areas
+      </button>
+    </div>
+  );
+}
+
 export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, rooms: initialRooms, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -575,6 +827,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [updatingRoomTypeId, setUpdatingRoomTypeId] = useState<string | null>(null);
   const [updatingSectionTypeId, setUpdatingSectionTypeId] = useState<string | null>(null);
   const [updatingProjectStylePreset, setUpdatingProjectStylePreset] = useState(false);
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
+  const [merging, setMerging] = useState(false);
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -603,6 +857,14 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
     router.refresh();
   }
 
+  function toggleSelected(roomId: string) {
+    setSelectedRoomIds((prev) =>
+      prev.includes(roomId)
+        ? prev.filter((id) => id !== roomId)
+        : [...prev, roomId]
+    );
+  }
+
   async function handleGenerateFromTranscript() {
     setGenerating(true);
     setStatusMessage(null);
@@ -622,6 +884,47 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       }
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleDeleteAll() {
+    if (!rooms.length) return;
+    if (
+      !confirm(
+        "Delete ALL sections in this project? This cannot be undone. Associated media will be unlinked.",
+      )
+    ) {
+      return;
+    }
+    await deleteAllRoomsAction(projectId);
+    router.refresh();
+  }
+
+  async function handleMergeSelected() {
+    if (selectedRoomIds.length < 2 || merging) return;
+    const ordered = rooms.filter((r) => selectedRoomIds.includes(r.id));
+    if (!ordered.length) return;
+    const defaultName = ordered[0]?.name ?? "Merged Section";
+    const confirmed = window.confirm(
+      "Merge selections, are you sure?"
+    );
+    if (!confirmed) return;
+    setMerging(true);
+    setStatusMessage(null);
+    try {
+      const result = await mergeRoomsWithAiAction(
+        projectId,
+        selectedRoomIds,
+        defaultName
+      );
+      if (result.error) {
+        setStatusMessage(result.error);
+      } else {
+        setSelectedRoomIds([]);
+      }
+      router.refresh();
+    } finally {
+      setMerging(false);
     }
   }
 
@@ -742,6 +1045,22 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           >
             {updating ? "Updating…" : "Update scopes from transcript"}
           </button>
+          <button
+            type="button"
+            onClick={handleDeleteAll}
+            disabled={!rooms.length}
+            className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-zinc-800"
+          >
+            Delete all sections
+          </button>
+          <button
+            type="button"
+            onClick={handleMergeSelected}
+            disabled={selectedRoomIds.length < 2 || merging}
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {merging ? "Merging…" : "Merge selected"}
+          </button>
           <span className="ml-2 text-sm text-zinc-500 dark:text-zinc-400">
             Style Preset (applies to all sections):
           </span>
@@ -822,6 +1141,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               roomTypeHighPct={roomTypeHighPct}
               updatingRoomTypeId={updatingRoomTypeId}
               updatingSectionTypeId={updatingSectionTypeId}
+              selected={selectedRoomIds.includes(room.id)}
+              onToggleSelected={() => toggleSelected(room.id)}
               onRoomTypeChange={handleRoomTypeChange}
               onSectionTypeChange={handleSectionTypeChange}
               onDimensionsSaved={() => router.refresh()}
@@ -860,6 +1181,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   roomTypeHighPct={roomTypeHighPct}
                   updatingRoomTypeId={updatingRoomTypeId}
                   updatingSectionTypeId={updatingSectionTypeId}
+                  selected={selectedRoomIds.includes(room.id)}
+                  onToggleSelected={() => toggleSelected(room.id)}
                   onRoomTypeChange={handleRoomTypeChange}
                   onSectionTypeChange={handleSectionTypeChange}
                   onDimensionsSaved={() => router.refresh()}
@@ -892,6 +1215,8 @@ function StaticRoomCard({
   roomTypeHighPct,
   updatingRoomTypeId,
   updatingSectionTypeId,
+  selected,
+  onToggleSelected,
   onRoomTypeChange,
   onSectionTypeChange,
   onDimensionsSaved,
@@ -911,6 +1236,8 @@ function StaticRoomCard({
   roomTypeHighPct: number;
   updatingRoomTypeId: string | null;
   updatingSectionTypeId: string | null;
+  selected: boolean;
+  onToggleSelected: () => void;
   onRoomTypeChange: (roomId: string, roomTypeId: string | null) => void;
   onSectionTypeChange: (roomId: string, sectionTypeId: string | null) => void;
   onDimensionsSaved: () => void;
@@ -938,6 +1265,13 @@ function StaticRoomCard({
         <div className="flex gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={onToggleSelected}
+                className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-900"
+                aria-label="Select section"
+              />
               <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
                 {room.name}
               </h3>
@@ -973,6 +1307,12 @@ function StaticRoomCard({
                 ))}
               </select>
               <SectionPriceRangePill result={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)} />
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                Sq Ft: {(() => {
+                  const sf = getCombinedSqFt(room);
+                  return sf != null ? sf.toFixed(2) : "—";
+                })()}
+              </span>
             </div>
             <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
               {room.scopeNarrative || "—"}
@@ -997,6 +1337,7 @@ function StaticRoomCard({
                 Quantity: {room.quantity ?? "—"}
               </div>
             )}
+            <RoomSubAreasEditor projectId={projectId} room={room} onSaved={onDimensionsSaved} />
             <AdvancedSectionOptions projectId={projectId} room={room} onSaved={onDimensionsSaved} />
           </div>
           <div className="shrink-0 flex flex-col gap-2 items-stretch">
@@ -1120,6 +1461,8 @@ function SortableRoomCard({
   onCancelEdit,
   onDelete,
   onRewriteScope,
+  selected,
+  onToggleSelected,
 }: {
   projectId: string;
   room: Room;
@@ -1139,6 +1482,8 @@ function SortableRoomCard({
   onCancelEdit: () => void;
   onDelete: () => void;
   onRewriteScope: () => void;
+  selected: boolean;
+  onToggleSelected: () => void;
 }) {
   const {
     attributes,
@@ -1195,6 +1540,13 @@ function SortableRoomCard({
             </button>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={onToggleSelected}
+                  className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-900"
+                  aria-label="Select section"
+                />
                 <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
                   {room.name}
                 </h3>
@@ -1230,6 +1582,12 @@ function SortableRoomCard({
                   ))}
                 </select>
                 <SectionPriceRangePill result={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)} />
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Sq Ft: {(() => {
+                    const sf = getCombinedSqFt(room);
+                    return sf != null ? sf.toFixed(2) : "—";
+                  })()}
+                </span>
               </div>
               <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
                 {room.scopeNarrative || "—"}
@@ -1254,6 +1612,7 @@ function SortableRoomCard({
                   Quantity: {room.quantity ?? "—"}
                 </div>
               )}
+              <RoomSubAreasEditor projectId={projectId} room={room} onSaved={onDimensionsSaved} />
               <AdvancedSectionOptions projectId={projectId} room={room} onSaved={onDimensionsSaved} />
             </div>
           </div>
@@ -1359,6 +1718,16 @@ function RoomForm({
   const [dimensionError, setDimensionError] = useState<string | null>(null);
   const [savingPrice, setSavingPrice] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  type SubAreaFormRow = {
+    id: string | null;
+    name: string;
+    length: string;
+    width: string;
+    ceilingHeight: string;
+  };
+
+  // Sub-areas are now managed on the main Sections page, not in this Edit form.
 
   const effectiveMode: MeasurementMode = (() => {
     if (measurementModeOverride && measurementModeOverride !== "USE_TYPE_DEFAULT") return measurementModeOverride as MeasurementMode;

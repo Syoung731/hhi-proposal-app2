@@ -167,6 +167,7 @@ model Room {
   pricingNotes         String?
   bucket               SectionBucket           @default(BASE)
   media                     Media[]
+  subAreas                 RoomSubArea[]
   project                   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   roomType                  RoomType?           @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
   stylePreset               StylePreset?        @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
@@ -182,6 +183,23 @@ model Room {
   @@index([estimateUnit])
 }
 
+/// Optional finer-grained measurement segments for a Room/Section
+model RoomSubArea {
+  id              String    @id @default(cuid())
+  roomId          String
+  name            String
+  lengthIn        Int?
+  widthIn         Int?
+  ceilingHeightIn Int?
+  areaSqFt        Float?
+  sortOrder       Int       @default(0)
+  includeInArea   Boolean   @default(true)  // <‑‑ add this line
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, sortOrder])
+}
 enum MediaPlacement {
   SECTION
   FRONT_PAGE
@@ -600,6 +618,159 @@ model SectionType {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
   rooms                 Room[]
+  pricingSourceRooms    PricingSourceRoom[]
 
   @@index([category])
+}
+
+// ---------------------------------------------------------------------------
+// Third-party API integrations (e.g. JobTread). Credentials stored encrypted.
+// ---------------------------------------------------------------------------
+model Integration {
+  id              String    @id @default(cuid())
+  provider        String    // e.g. "jobtread"
+  name            String    // e.g. "JobTread Production"
+  isActive        Boolean   @default(true)
+  baseUrl         String?
+  encryptedSecret String?
+  metaJson        Json?
+  lastTestedAt    DateTime?
+  lastStatus      String?   // success | error | never_tested
+  lastMessage     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([provider, name])
+  @@index([provider])
+  @@index([isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Canonical JobTread budget (single source of truth for official pricing).
+// ---------------------------------------------------------------------------
+model SyncedBudgetJob {
+  id                  String    @id @default(cuid())
+  jobId               String    @unique
+  jobName             String
+  jobNumber           String?
+  stage               String?
+  location            String?
+  lastSyncedAt        DateTime?
+  lastSyncStatus      String?   // success | warning | error | never_synced
+  lastSyncMessage     String?
+  lastRowCount        Int       @default(0)
+  officialSellTotal   Decimal   @default(0) @db.Decimal(19, 4)
+  officialCostTotal   Decimal   @default(0) @db.Decimal(19, 4)
+  sourceSummarySell   Decimal?  @db.Decimal(19, 4)
+  sourceSummaryCost   Decimal?  @db.Decimal(19, 4)
+  rawBudgetJson       Json?
+  sourceRowCount      Int?      // row count from last sync (for fingerprint comparison)
+  sourceSellTotal     Decimal?  @db.Decimal(19, 4)
+  sourceCostTotal     Decimal?  @db.Decimal(19, 4)
+  sourceFingerprint   String?   // hash of normalized payload; unchanged => skip sync
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  rows                SyncedBudgetRow[]
+
+  @@index([lastSyncStatus])
+  @@index([lastSyncedAt])
+}
+
+model SyncedBudgetRow {
+  id                     String   @id @default(cuid())
+  jobId                  String
+  jobName                String
+  externalBudgetItemId   String
+  groupName              String?  // cost group name (item's direct group)
+  costGroupId            String?  // item's cost group id
+  parentCostGroupId      String?  // parent cost group id (null = top-level = room)
+  parentCostGroupName    String?  // parent cost group name (room name when item is under a trade)
+  itemName               String
+  costCode             String?
+  costCodeName         String?
+  costType             String?
+  unit                 String?
+  quantity             Decimal? @db.Decimal(19, 6)
+  unitCost             Decimal? @db.Decimal(19, 4)
+  unitPrice            Decimal? @db.Decimal(19, 4)
+  extCost              Decimal  @db.Decimal(19, 4)
+  extSell              Decimal  @db.Decimal(19, 4)
+  rawPayloadJson       Json
+  syncedAt             DateTime @default(now())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  job                  SyncedBudgetJob @relation(fields: [jobId], references: [jobId], onDelete: Cascade)
+
+  @@unique([jobId, externalBudgetItemId])
+  @@index([jobId])
+  @@index([groupName])
+  @@index([costCode])
+}
+
+// ---------------------------------------------------------------------------
+// JobTread pricing staging layer (derived from SyncedBudgetJob / SyncedBudgetRow).
+// ---------------------------------------------------------------------------
+
+model PricingSourceJob {
+  id                 String   @id @default(cuid())
+  jobId              String   @unique
+  jobName            String
+  jobNumber          String?
+  includeInPricing   Boolean  @default(false)
+  sourceLastSyncedAt DateTime?
+  totalCost          Decimal  @default(0) @db.Decimal(19, 4)
+  totalSell          Decimal  @default(0) @db.Decimal(19, 4)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  rooms  PricingSourceRoom[]
+  trades PricingSourceTrade[]
+}
+
+model PricingSourceRoom {
+  id                 String   @id @default(cuid())
+  jobId              String
+  pricingJobId       String
+  roomKey            String
+  roomName           String
+  normalizedRoomName String?
+  sectionTypeId      String?
+  sectionTypeSource  String?
+  includeInPricing   Boolean  @default(false)
+  autoDetectedSqFt   Decimal? @db.Decimal(19, 2)
+  manualSqFtOverride Decimal? @db.Decimal(19, 2)
+  totalCost          Decimal  @default(0) @db.Decimal(19, 4)
+  totalSell          Decimal  @default(0) @db.Decimal(19, 4)
+  costPerSqFt        Decimal? @db.Decimal(19, 4)
+  sellPerSqFt        Decimal? @db.Decimal(19, 4)
+  sqFtSource         String?
+  hasValidSqFt       Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  job         PricingSourceJob @relation(fields: [pricingJobId], references: [id], onDelete: Cascade)
+  sectionType SectionType?     @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
+  trades      PricingSourceTrade[]
+
+  @@unique([jobId, roomName])
+  @@index([sectionTypeId])
+  @@index([includeInPricing])
+  @@index([jobId])
+}
+
+model PricingSourceTrade {
+  id        String   @id @default(cuid())
+  jobId     String
+  roomId    String
+  tradeName String
+  totalCost Decimal  @default(0) @db.Decimal(19, 4)
+  totalSell Decimal  @default(0) @db.Decimal(19, 4)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  job  PricingSourceJob  @relation(fields: [jobId], references: [jobId], onDelete: Cascade)
+  room PricingSourceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, tradeName])
+  @@index([jobId])
 }

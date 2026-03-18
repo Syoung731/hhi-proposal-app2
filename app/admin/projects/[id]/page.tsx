@@ -19,6 +19,7 @@ export async function getProject(id: string) {
           roomType: { select: { id: true, name: true, pricePerSqFtLow: true, pricePerSqFtTarget: true, pricePerSqFtHigh: true } },
           stylePreset: { select: { id: true, name: true } },
           sectionType: { select: { id: true, name: true, category: true, defaultMeasurementMode: true, defaultEstimateUnit: true, customUnitLabel: true, pricingBasis: true, priceLow: true, priceTarget: true, priceHigh: true } },
+          subAreas: { orderBy: { sortOrder: "asc" } },
         },
       },
       media: {

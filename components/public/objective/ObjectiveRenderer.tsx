@@ -28,7 +28,8 @@ function resolveGalleryImages(
   media: ObjectiveMediaItem[]
 ): EditorialGalleryImage[] {
   const slots = (photoSlots ?? []).slice(0, 3);
-  return slots
+  return (
+    slots
     .map((slot) => {
       const id = slot?.libraryMediaId ?? null;
       if (!id) return null;
@@ -36,7 +37,8 @@ function resolveGalleryImages(
       const url = item?.url?.trim() ? item.url : null;
       return { id, url, caption: item?.caption ?? null };
     })
-    .filter((x): x is EditorialGalleryImage => x != null && x.url != null);
+    .filter((x) => x != null && x.url != null)
+  ) as EditorialGalleryImage[];
 }
 
 const checkIcon = (

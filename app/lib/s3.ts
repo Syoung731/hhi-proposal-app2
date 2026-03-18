@@ -109,7 +109,9 @@ export async function readObjectToBuffer(fileKey: string): Promise<Buffer> {
   // @ts-expect-error - Body types vary by runtime; handle common async iterable case.
   if (typeof body[Symbol.asyncIterator] === "function") {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    return streamToBuffer(Readable.from(body as AsyncIterable<Uint8Array>));
+    return streamToBuffer(
+      Readable.from(body as unknown as AsyncIterable<Uint8Array>)
+    );
   }
   throw new Error(`Unsupported Body type for key ${fileKey}`);
 }

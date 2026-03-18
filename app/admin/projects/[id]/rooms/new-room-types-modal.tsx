@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { listSectionTypes } from "@/app/admin/settings/actions";
 import {
   bulkResolveNewRoomTypes,
+  createQuickSectionTypeAction,
   type UnmatchedRoomItem,
 } from "./actions";
 
@@ -155,6 +156,7 @@ type RowState = {
   selectedSectionTypeId: string;
   creatingNew: boolean;
   exterior: boolean;
+  newName: string;
 };
 
 type Props = {
@@ -172,20 +174,38 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
   const [rowState, setRowState] = useState<Record<string, RowState>>(() => {
     const init: Record<string, RowState> = {};
     for (const u of unmatchedRooms) {
-      init[u.name] = { selectedSectionTypeId: "", creatingNew: false, exterior: false };
+      init[u.name] = {
+        selectedSectionTypeId: "",
+        creatingNew: false,
+        exterior: false,
+        newName: u.name,
+      };
     }
     return init;
   });
+
+  const [quickModalRoomName, setQuickModalRoomName] = useState<string | null>(
+    null,
+  );
+  const [quickName, setQuickName] = useState("");
+  const [quickExterior, setQuickExterior] = useState(false);
+  const [quickTargetPrice, setQuickTargetPrice] = useState<string>("");
+  const [quickPricingBasis, setQuickPricingBasis] = useState<"NONE" | "PER_SF" | "PER_EACH" | "PER_JOB">("NONE");
+  const [savingQuick, setSavingQuick] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     listSectionTypes().then((list) => {
       if (!cancelled) {
-        const options = (list ?? []).map((st) => ({
-          id: st.id,
-          name: st.name,
-          category: st.category,
-        }));
+        const options = (list ?? [])
+          .map((st) => ({
+            id: st.id,
+            name: st.name,
+            category: st.category,
+          }))
+          .sort((a, b) =>
+            a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+          );
         setSectionTypes(options);
         // Auto-preselect defaults only when none chosen and not creating new; never override user selections.
         setRowState((prev) => {
@@ -223,6 +243,22 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
     }));
   }
 
+  function toggleCreateNew(name: string) {
+    setRowState((prev) => {
+      const current = prev[name]!;
+      const creatingNew = !current.creatingNew;
+      const next: RowState = {
+        ...current,
+        creatingNew,
+        selectedSectionTypeId: creatingNew ? "" : current.selectedSectionTypeId,
+        newName: creatingNew
+          ? (current.newName?.trim() || name)
+          : current.newName,
+      };
+      return { ...prev, [name]: next };
+    });
+  }
+
   async function handleApply() {
     setApplying(true);
     setError(null);
@@ -232,7 +268,10 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
         return {
           name: u.name,
           roomIds: u.roomIds,
-          createNew: { exterior: state.exterior },
+          createNew: {
+            exterior: state.exterior,
+            name: state.newName?.trim() || u.name,
+          },
         };
       }
       if (state.selectedSectionTypeId) {
@@ -252,6 +291,69 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
     }
     router.refresh();
     onClose();
+  }
+
+  function handleOpenQuickModal(rowName: string) {
+    const state = rowState[rowName]!;
+    setQuickModalRoomName(rowName);
+    setQuickName(state.newName?.trim() || rowName);
+    setQuickExterior(state.exterior);
+    setQuickTargetPrice("");
+    setQuickPricingBasis("NONE");
+  }
+
+  async function handleCreateQuickProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!quickModalRoomName) return;
+    const trimmedName = quickName.trim();
+    if (!trimmedName) {
+      setError("Name is required for the new Pricing Profile.");
+      return;
+    }
+    const priceStr = quickTargetPrice.trim();
+    const price =
+      priceStr === ""
+        ? null
+        : Number(priceStr);
+    if (price !== null && Number.isNaN(price)) {
+      setError("Target price must be a number.");
+      return;
+    }
+    setSavingQuick(true);
+    const result = await createQuickSectionTypeAction(
+      trimmedName,
+      quickExterior,
+      quickPricingBasis,
+      price,
+    );
+    setSavingQuick(false);
+    if (result.error || !result.sectionTypeId) {
+      setError(result.error ?? "Failed to create Pricing Profile.");
+      return;
+    }
+    const newOption: SectionTypeOption = {
+      id: result.sectionTypeId,
+      name: trimmedName,
+      category: quickExterior ? "EXTERIOR" : "INTERIOR",
+    };
+    setSectionTypes((prev) =>
+      [...prev, newOption].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      )
+    );
+    setRowState((prev) => {
+      const current = prev[quickModalRoomName]!;
+      return {
+        ...prev,
+        [quickModalRoomName]: {
+          ...current,
+          creatingNew: false,
+          selectedSectionTypeId: result.sectionTypeId!,
+        },
+      };
+    });
+    setQuickModalRoomName(null);
+    setError(null);
   }
 
   return (
@@ -314,32 +416,57 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
                           ))}
                         </select>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className={btnSecondary}
-                          onClick={() =>
-                            setStateFor(u.name, {
-                              creatingNew: !state.creatingNew,
-                              selectedSectionTypeId: state.creatingNew ? "" : state.selectedSectionTypeId,
-                            })
-                          }
-                        >
-                          {state.creatingNew ? "Cancel create" : "Create new Section Type"}
-                        </button>
+                      <div className="space-y-2">
                         {state.creatingNew && (
-                          <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                          <div>
+                            <label
+                              htmlFor={`new-name-${u.name}`}
+                              className={labelClass}
+                            >
+                              New Pricing Profile name
+                            </label>
                             <input
-                              type="checkbox"
-                              checked={state.exterior}
+                              id={`new-name-${u.name}`}
+                              type="text"
+                              className={inputClass + " w-full"}
+                              value={state.newName}
                               onChange={(e) =>
-                                setStateFor(u.name, { exterior: e.target.checked })
+                                setStateFor(u.name, { newName: e.target.value })
                               }
-                              className="rounded border-zinc-300 dark:border-zinc-600"
                             />
-                            Exterior
-                          </label>
+                          </div>
                         )}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            className={btnSecondary}
+                            onClick={() => toggleCreateNew(u.name)}
+                          >
+                            {state.creatingNew ? "Cancel create" : "Create new Section Type"}
+                          </button>
+                          {state.creatingNew && (
+                            <div className="flex flex-wrap items-center gap-3">
+                              <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                                <input
+                                  type="checkbox"
+                                  checked={state.exterior}
+                                  onChange={(e) =>
+                                    setStateFor(u.name, { exterior: e.target.checked })
+                                  }
+                                  className="rounded border-zinc-300 dark:border-zinc-600"
+                                />
+                                Exterior
+                              </label>
+                              <button
+                                type="button"
+                                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                onClick={() => handleOpenQuickModal(u.name)}
+                              >
+                                Create profile now…
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </li>
@@ -350,6 +477,86 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
         </div>
         {error && (
           <p className="px-4 pb-2 text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
+        {quickModalRoomName && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+              <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                New Pricing Profile
+              </h3>
+              <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+                Create a saved Pricing Profile that will appear in the dropdown for all sections.
+              </p>
+              <form onSubmit={handleCreateQuickProfile} className="mt-3 space-y-3">
+                <div>
+                  <label className={labelClass}>Name</label>
+                  <input
+                    type="text"
+                    className={inputClass + " w-full"}
+                    value={quickName}
+                    onChange={(e) => setQuickName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Target price</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className={inputClass + " w-full"}
+                    value={quickTargetPrice}
+                    onChange={(e) => setQuickTargetPrice(e.target.value)}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Pricing basis</label>
+                  <select
+                    className={inputClass + " w-full"}
+                    value={quickPricingBasis}
+                    onChange={(e) =>
+                      setQuickPricingBasis(e.target.value as typeof quickPricingBasis)
+                    }
+                  >
+                    <option value="NONE">None</option>
+                    <option value="PER_SF">Per SF</option>
+                    <option value="PER_EACH">Per Each</option>
+                    <option value="PER_JOB">Per Job</option>
+                  </select>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={quickExterior}
+                    onChange={(e) => setQuickExterior(e.target.checked)}
+                    className="rounded border-zinc-300 dark:border-zinc-600"
+                  />
+                  Exterior
+                </label>
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuickModalRoomName(null)}
+                    className={btnSecondary}
+                    disabled={savingQuick}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className={btnPrimary}
+                    disabled={savingQuick}
+                  >
+                    {savingQuick ? "Saving…" : "Save profile"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
         <div className="flex justify-end gap-2 border-t border-zinc-200 p-4 dark:border-zinc-700">
           <button type="button" onClick={onClose} className={btnSecondary}>

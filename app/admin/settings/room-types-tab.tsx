@@ -7,6 +7,7 @@ import {
   updateSectionTypePricingBasisAction,
   saveRoomTypePctAction,
   recomputeSectionTypeLowHighAction,
+  deleteSectionType,
 } from "./actions";
 import type { SectionTypeForUI } from "./settings-tabs";
 
@@ -82,6 +83,9 @@ export function RoomTypesTab({
   const [pctHighInput, setPctHighInput] = useState("");
   const [pctStatus, setPctStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [pctErrorMessage, setPctErrorMessage] = useState<string | null>(null);
+  const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
+  const [deleteReassignId, setDeleteReassignId] = useState<string | "">("");
+  const [deleteSaving, setDeleteSaving] = useState(false);
   /** Per-row override flag: only toggled by checkbox or set when user manually edits Low/High. Not set when editing Target. */
   const [explicitLowOverride, setExplicitLowOverride] = useState<Record<string, boolean>>({});
   const [explicitHighOverride, setExplicitHighOverride] = useState<Record<string, boolean>>({});
@@ -151,6 +155,26 @@ export function RoomTypesTab({
     setPctLowInput(initialLowPct != null ? String(initialLowPct) : String(DEFAULT_LOW_PCT));
     setPctHighInput(initialHighPct != null ? String(initialHighPct) : String(DEFAULT_HIGH_PCT));
   }, [initialLowPct, initialHighPct]);
+
+  const handleDeleteClick = useCallback((id: string) => {
+    setDeleteModalId(id);
+    setDeleteReassignId("");
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteModalId) return;
+    setDeleteSaving(true);
+    const result = await deleteSectionType(deleteModalId, deleteReassignId || null);
+    setDeleteSaving(false);
+    if (result.error) {
+      setPctStatus("error");
+      setPctErrorMessage(result.error);
+      return;
+    }
+    setDeleteModalId(null);
+    setDeleteReassignId("");
+    setList((prev) => prev.filter((r) => r.id !== deleteModalId));
+  }, [deleteModalId, deleteReassignId]);
 
   const saveTargetCell = useCallback(
     async (sectionId: string, rawValue: string): Promise<{ error?: string }> => {
@@ -554,7 +578,18 @@ export function RoomTypesTab({
                     <td className="px-4 py-2 whitespace-nowrap text-zinc-600 dark:text-zinc-400">
                       {CATEGORY_LABELS[row.category] ?? row.category}
                     </td>
-                    <td className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">{row.name}</td>
+                    <td className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{row.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClick(row.id)}
+                          className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                     <td className="px-4 py-2">
                       <select
                         value={row.pricingBasis}
@@ -687,6 +722,60 @@ export function RoomTypesTab({
           </tbody>
         </table>
       </div>
+      {deleteModalId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+            <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              Delete Pricing Profile
+            </h3>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              You are about to delete this Pricing Profile. You can optionally reassign all sections
+              that use it to another profile. If you skip reassignment, those sections will become
+              Custom (no profile).
+            </p>
+            <div className="mt-3">
+              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Reassign sections to
+              </label>
+              <select
+                value={deleteReassignId}
+                onChange={(e) => setDeleteReassignId(e.target.value)}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+              >
+                <option value="">Do not reassign (set to Custom)</option>
+                {list
+                  .filter((row) => row.id !== deleteModalId)
+                  .map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                onClick={() => {
+                  setDeleteModalId(null);
+                  setDeleteReassignId("");
+                }}
+                disabled={deleteSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50 dark:bg-red-500 dark:hover:bg-red-400"
+                onClick={handleConfirmDelete}
+                disabled={deleteSaving}
+              >
+                {deleteSaving ? "Deleting…" : "Delete profile"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

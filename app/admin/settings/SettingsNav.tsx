@@ -24,10 +24,26 @@ export function SettingsNav() {
               (isActive
                 ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
                 : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100");
+            const jobtreadPricingHref = "/admin/settings/jobtread-pricing";
+            const isJobTreadPricingActive =
+              pathname === jobtreadPricingHref ||
+              pathname.startsWith(jobtreadPricingHref + "/");
+            const jobtreadLinkClass =
+              "block w-full rounded-lg py-2.5 pl-7 pr-3 text-left text-sm transition-colors " +
+              (isJobTreadPricingActive
+                ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100");
             return (
-              <Link key={slug} href={href} className={linkClass}>
-                {label}
-              </Link>
+              <div key={slug}>
+                <Link href={href} className={linkClass}>
+                  {label}
+                </Link>
+                {slug === "pricing-profiles" && (
+                  <Link href={jobtreadPricingHref} className={jobtreadLinkClass}>
+                    JobTread Pricing
+                  </Link>
+                )}
+              </div>
             );
           })}
         </nav>

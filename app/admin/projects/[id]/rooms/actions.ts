@@ -14,6 +14,7 @@ import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 import {
   extractRoomsFromTranscript,
   rewriteRoomScopeNarrative,
+  mergeRoomScopesNarrative,
 } from "@/app/lib/ai/extract-from-transcript";
 import { z } from "zod";
 
@@ -142,7 +143,10 @@ export async function createRoomAction(projectId: string, formData: FormData): P
     .aggregate({ where: { projectId }, _max: { sortOrder: true } })
     .then((r) => r._max.sortOrder ?? -1);
   const sectionTypeIdRaw = (formData.get("sectionTypeId") as string)?.trim() || null;
-  const sectionTypeId = sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : null;
+  // If no sectionTypeId was submitted, keep the existing one so changing dimensions
+  // doesn't reset the Pricing Profile back to Custom.
+  const sectionTypeId =
+    sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : room.sectionTypeId ?? null;
   await prisma.room.create({
     data: {
       projectId,
@@ -271,21 +275,23 @@ export async function updateRoomAction(
     unitRateTargetForm != null && !Number.isNaN(unitRateTargetForm) ||
     unitRateHighForm != null && !Number.isNaN(unitRateHighForm);
 
-  // areaSqFt: from form if valid number; else from lengthIn/widthIn when both present
-  let resolvedAreaSqFt: number | null = null;
+  // areaSqFt: from form if valid number; else from lengthIn/widthIn when both present;
+  // otherwise keep existing areaSqFt (which will later be recomputed from sub-areas, if any).
+  let resolvedAreaSqFtBase: number | null = null;
   if (areaSqFt != null && !Number.isNaN(areaSqFt) && areaSqFt >= 0) {
-    resolvedAreaSqFt = areaSqFt;
+    resolvedAreaSqFtBase = areaSqFt;
   } else if (lengthIn != null && widthIn != null && lengthIn > 0 && widthIn > 0) {
-    resolvedAreaSqFt = Math.round((lengthIn / 12) * (widthIn / 12) * 100) / 100;
+    resolvedAreaSqFtBase = Math.round((lengthIn / 12) * (widthIn / 12) * 100) / 100;
   } else {
-    resolvedAreaSqFt = room.areaSqFt;
+    resolvedAreaSqFtBase = room.areaSqFt;
   }
+  const resolvedAreaSqFt = resolvedAreaSqFtBase;
 
   const mergedForUnitQty: RoomLikeForUnitQuantity = {
     ...room,
     lengthIn,
     widthIn,
-    areaSqFt: resolvedAreaSqFt,
+    areaSqFt: resolvedAreaSqFt ?? null,
     quantity: quantity ?? room.quantity,
     measurementMode: measurementMode ?? undefined,
   };
@@ -415,6 +421,8 @@ export async function updateRoomAction(
     where: { id: roomId },
     data,
   });
+  // After updating main room dimensions, recompute total area from any included sub-areas.
+  await recomputeRoomAreaFromSubAreas(roomId);
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -447,6 +455,16 @@ export async function deleteRoomAction(projectId: string, roomId: string): Promi
   const room = await prisma.room.findFirst({ where: { id: roomId, projectId } });
   if (!room) return { error: "Room not found" };
   await prisma.room.delete({ where: { id: roomId } });
+  await recomputeInvestmentRollups(projectId);
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/** Delete all sections for a project. */
+export async function deleteAllRoomsAction(projectId: string): Promise<{ error?: string }> {
+  await requireAdmin();
+  await prisma.room.deleteMany({ where: { projectId } });
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -999,6 +1017,314 @@ export async function rewriteRoomScopeAction(
   return {};
 }
 
+/** Legacy hook: no-op for now; front-end computes combined area from base room + sub-areas. */
+async function recomputeRoomAreaFromSubAreas(_roomId: string): Promise<void> {
+  return;
+}
+
+export async function mergeRoomsWithAiAction(
+  projectId: string,
+  roomIds: string[],
+  mergedName: string
+): Promise<{ error?: string }> {
+  try {
+    await requireAdmin();
+    const trimmedIds = Array.from(new Set(roomIds.filter((id) => !!id)));
+    if (trimmedIds.length < 2) {
+      return { error: "Select at least two sections to merge." };
+    }
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        id: true,
+        transcriptText: true,
+        stylePresetId: true,
+        stylePreset: { select: { prompt: true } },
+      },
+    });
+    if (!project) return { error: "Project not found." };
+
+    const transcriptText = project.transcriptText?.trim() ?? "";
+
+    const rooms = await prisma.room.findMany({
+      where: {
+        projectId,
+        id: { in: trimmedIds },
+      },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        name: true,
+        scopeNarrative: true,
+        lengthIn: true,
+        widthIn: true,
+        ceilingHeightIn: true,
+        areaSqFt: true,
+        totalLow: true,
+        totalTarget: true,
+        totalHigh: true,
+      },
+    });
+
+    if (rooms.length < 2) {
+      return { error: "Could not find enough sections to merge for this project." };
+    }
+
+    const stylePresetPrompt =
+      project.stylePresetId && project.stylePreset?.prompt
+        ? project.stylePreset.prompt
+        : "";
+
+    let mergedScope: string;
+    try {
+      mergedScope = await mergeRoomScopesNarrative(
+        transcriptText,
+        mergedName,
+        rooms.map((r) => ({
+          name: r.name,
+          scopeNarrative: r.scopeNarrative ?? "",
+        })),
+        stylePresetPrompt || undefined
+      );
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Failed to merge scopes with AI.";
+      return { error: message };
+    }
+
+    const target = rooms[0];
+    const now = new Date();
+    const remainingIds = rooms.slice(1).map((r) => r.id);
+
+    const sum = (field: "totalLow" | "totalTarget" | "totalHigh"): number | null => {
+      const values = rooms
+        .map((r) => r[field])
+        .filter((v): v is number => v != null);
+      if (!values.length) return null;
+      return values.reduce((a, b) => a + b, 0);
+    };
+
+    const totalLow = sum("totalLow");
+    const totalTarget = sum("totalTarget");
+    const totalHigh = sum("totalHigh");
+
+    await prisma.$transaction(async (tx) => {
+      const baseArea =
+        target.lengthIn != null &&
+        target.widthIn != null &&
+        target.lengthIn > 0 &&
+        target.widthIn > 0
+          ? (target.lengthIn / 12) * (target.widthIn / 12)
+          : 0;
+      const subAreasToCreate = rooms
+        .filter((r) => remainingIds.includes(r.id))
+        .map((r, index) => {
+          const areaSqFt =
+            r.lengthIn != null &&
+            r.widthIn != null &&
+            r.lengthIn > 0 &&
+            r.widthIn > 0
+              ? (r.lengthIn / 12) * (r.widthIn / 12)
+              : r.areaSqFt && !Number.isNaN(r.areaSqFt) && r.areaSqFt > 0
+                ? r.areaSqFt
+                : 0;
+          return {
+            roomId: target.id,
+            name: r.name,
+            lengthIn: r.lengthIn,
+            widthIn: r.widthIn,
+            ceilingHeightIn: r.ceilingHeightIn,
+            areaSqFt: areaSqFt > 0 ? Math.round(areaSqFt * 100) / 100 : null,
+            includeInArea: true,
+            sortOrder: index,
+          };
+        });
+      const extraArea = subAreasToCreate
+        .map((s) => s.areaSqFt ?? 0)
+        .filter((v) => Number.isFinite(v) && v > 0)
+        .reduce((a, b) => a + b, 0);
+      const combinedArea = baseArea + extraArea;
+
+      await tx.room.update({
+        where: { id: target.id },
+        data: {
+          name: mergedName || target.name,
+          scopeNarrative: mergedScope,
+          scopeSource: "AI",
+          scopeUpdatedAt: now,
+          // Keep primary room's dimensions; only adjust areaSqFt
+          areaSqFt: combinedArea > 0 ? Math.round(combinedArea * 100) / 100 : target.areaSqFt,
+          totalLow,
+          totalTarget,
+          totalHigh,
+        },
+      });
+
+      if (subAreasToCreate.length) {
+        await tx.roomSubArea.createMany({
+          data: subAreasToCreate,
+        });
+      }
+
+      if (remainingIds.length) {
+        await tx.room.deleteMany({
+          where: { id: { in: remainingIds } },
+        });
+      }
+    });
+
+    // Ensure areaSqFt on the merged room matches its own dimensions plus included sub-areas.
+    await recomputeRoomAreaFromSubAreas(target.id);
+
+    await recomputeInvestmentRollups(projectId);
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+    return {};
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[mergeRoomsWithAiAction] Unexpected error", e);
+    return {
+      error:
+        e instanceof Error
+          ? e.message || "Unexpected error while merging sections."
+          : "Unexpected error while merging sections.",
+    };
+  }
+}
+
+type RoomSubAreaFormInput = {
+  id?: string | null;
+  name?: string;
+  length?: string;
+  width?: string;
+  ceilingHeight?: string;
+  includeInArea?: boolean;
+};
+
+/** Update a room's sub-areas from the main Sections page editor. */
+export async function updateRoomSubAreasAction(
+  projectId: string,
+  roomId: string,
+  subAreas: RoomSubAreaFormInput[]
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    select: { id: true },
+  });
+  if (!room) return { error: "Room not found" };
+
+  type SubAreaForPersist = {
+    id?: string;
+    name: string;
+    lengthIn: number | null;
+    widthIn: number | null;
+    ceilingHeightIn: number | null;
+    areaSqFt: number | null;
+    includeInArea: boolean;
+    sortOrder: number;
+  };
+
+  const toPersist: SubAreaForPersist[] = [];
+  let sortOrder = 0;
+  for (const sa of subAreas ?? []) {
+    const name = (sa.name ?? "").trim();
+    const lengthStr = (sa.length ?? "").trim();
+    const widthStr = (sa.width ?? "").trim();
+    const ceilingStr = (sa.ceilingHeight ?? "").trim();
+    const includeInArea = !!sa.includeInArea;
+    if (!name && !lengthStr && !widthStr && !ceilingStr) continue;
+
+    let lengthIn: number | null = null;
+    let widthIn: number | null = null;
+    let ceilingHeightIn: number | null = null;
+
+    if (lengthStr) {
+      const parsed = parseFeetInchesToInches(lengthStr);
+      if (!parsed.error && parsed.inches != null) lengthIn = parsed.inches;
+    }
+    if (widthStr) {
+      const parsed = parseFeetInchesToInches(widthStr);
+      if (!parsed.error && parsed.inches != null) widthIn = parsed.inches;
+    }
+    if (ceilingStr) {
+      const parsed = parseFeetInchesToInches(ceilingStr);
+      if (!parsed.error && parsed.inches != null) ceilingHeightIn = parsed.inches;
+    }
+
+    let areaSqFt: number | null = null;
+    if (lengthIn != null && widthIn != null && lengthIn > 0 && widthIn > 0) {
+      areaSqFt = Math.round(((lengthIn / 12) * (widthIn / 12)) * 100) / 100;
+    }
+
+    toPersist.push({
+      id: sa.id && sa.id.trim() ? sa.id.trim() : undefined,
+      name: name || "Sub-area",
+      lengthIn,
+      widthIn,
+      ceilingHeightIn,
+      areaSqFt,
+      includeInArea,
+      sortOrder: sortOrder++,
+    });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.roomSubArea.findMany({
+      where: { roomId },
+      select: { id: true },
+    });
+    const existingIds = new Set(existing.map((sa) => sa.id));
+    const incomingIds = new Set(
+      toPersist.map((sa) => sa.id).filter((id): id is string => !!id)
+    );
+
+    const deleteIds = [...existingIds].filter((id) => !incomingIds.has(id));
+    if (deleteIds.length) {
+      await tx.roomSubArea.deleteMany({
+        where: { id: { in: deleteIds } },
+      });
+    }
+
+    for (const sa of toPersist) {
+      if (sa.id && existingIds.has(sa.id)) {
+        await tx.roomSubArea.update({
+          where: { id: sa.id },
+          data: {
+            name: sa.name,
+            lengthIn: sa.lengthIn,
+            widthIn: sa.widthIn,
+            ceilingHeightIn: sa.ceilingHeightIn,
+            areaSqFt: sa.areaSqFt,
+            includeInArea: sa.includeInArea,
+            sortOrder: sa.sortOrder,
+          },
+        });
+      } else {
+        await tx.roomSubArea.create({
+          data: {
+            roomId,
+            name: sa.name,
+            lengthIn: sa.lengthIn,
+            widthIn: sa.widthIn,
+            ceilingHeightIn: sa.ceilingHeightIn,
+            areaSqFt: sa.areaSqFt,
+            includeInArea: sa.includeInArea,
+            sortOrder: sa.sortOrder,
+          },
+        });
+      }
+    }
+  });
+
+  await recomputeRoomAreaFromSubAreas(roomId);
+  await recomputeInvestmentRollups(projectId);
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
 /** Create a RoomType or return existing one (case-insensitive name). Enforces unique name. */
 export async function createRoomType(name: string, exterior: boolean): Promise<{ roomTypeId?: string; error?: string }> {
   await requireAdmin();
@@ -1076,7 +1402,7 @@ export type NewRoomTypeResolution = {
   /** Map to existing Pricing Profile (SectionType). */
   sectionTypeId?: string;
   /** Create a new SectionType and assign it. */
-  createNew?: { exterior: boolean };
+  createNew?: { exterior: boolean; name?: string };
 };
 
 /** Apply mappings/creates from the Unmatched sections modal. Stores mapping on Room.sectionTypeId (Pricing Profile). */
@@ -1091,7 +1417,8 @@ export async function bulkResolveNewRoomTypes(
     if (res.sectionTypeId) {
       sectionTypeId = res.sectionTypeId;
     } else if (res.createNew) {
-      const out = await getOrCreateSectionTypeForName(res.name, res.createNew.exterior);
+      const nameToUse = res.createNew.name?.trim() || res.name;
+      const out = await getOrCreateSectionTypeForName(nameToUse, res.createNew.exterior);
       if (out.error) return { error: out.error };
       sectionTypeId = out.sectionTypeId;
     }
@@ -1125,5 +1452,42 @@ async function getOrCreateSectionTypeForName(
       defaultEstimateUnit: "SF",
     },
   });
+  return { sectionTypeId: created.id };
+}
+
+/** Quick-create a Pricing Profile (SectionType) with name, pricing basis, and optional target price. */
+export async function createQuickSectionTypeAction(
+  name: string,
+  exterior: boolean,
+  pricingBasis: string,
+  priceTarget: number | null
+): Promise<{ sectionTypeId?: string; error?: string }> {
+  await requireAdmin();
+  const trimmed = name?.trim() ?? "";
+  if (!trimmed) return { error: "Name is required" };
+  const normalizedBasis =
+    pricingBasis === "PER_SF" || pricingBasis === "PER_EACH" || pricingBasis === "PER_JOB"
+      ? pricingBasis
+      : "NONE";
+  const category = exterior ? "EXTERIOR" : "INTERIOR";
+  const existing = await prisma.sectionType.findFirst({
+    where: { name: { equals: trimmed, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (existing) {
+    return { sectionTypeId: existing.id };
+  }
+  const created = await prisma.sectionType.create({
+    data: {
+      name: trimmed,
+      category,
+      pricingBasis: normalizedBasis as any,
+      defaultMeasurementMode: "AREA",
+      defaultEstimateUnit: "SF",
+      priceTarget: priceTarget ?? undefined,
+    },
+  });
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/projects");
   return { sectionTypeId: created.id };
 }

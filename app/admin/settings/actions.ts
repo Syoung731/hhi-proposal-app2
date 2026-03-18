@@ -9,6 +9,9 @@ import type { SectionCategory, MeasurementMode, EstimateUnit, PricingBasis } fro
 import { SUPER_ADMIN_EMAIL } from "@/app/lib/constants";
 import { GoogleGenAI } from "@google/genai";
 import { getPresignedUploadUrl, uploadBuffer, deleteR2Objects, readObjectToBuffer } from "@/app/lib/s3";
+import { normalizeBudgetJson } from "@/app/lib/jobtread/budget-json-normalizer";
+import { parseBudgetExportText } from "@/app/lib/jobtread/budget-text-parser";
+import { syncNormalizedJobBudget } from "@/app/lib/jobtread/sync-budget";
 import sharp from "sharp";
 
 /** Get or create the singleton CompanySettings. Auto-create on first visit with defaults. */
@@ -280,6 +283,269 @@ export async function saveIntegrationsAction(
   });
   revalidatePath("/admin/settings");
   return {};
+}
+
+// ---------------------------------------------------------------------------
+// JobTread integration (Grant Key, base URL, test connection)
+// ---------------------------------------------------------------------------
+
+import {
+  getOrCreateJobTreadIntegration,
+  saveJobTreadCredentials,
+  testJobTreadConnection,
+} from "@/app/integrations/jobtread";
+
+/** Get current JobTread integration state for the Integrations tab. */
+export async function getJobTreadIntegrationAction() {
+  await requireAdmin();
+  return getOrCreateJobTreadIntegration();
+}
+
+/** Save JobTread name, base URL, and optionally grant key (leave blank to keep existing). */
+export async function saveJobTreadIntegrationAction(formData: FormData): Promise<{ error?: string }> {
+  await requireAdmin();
+  const name = (formData.get("jobtreadName") as string)?.trim() || "JobTread";
+  const baseUrl = (formData.get("jobtreadBaseUrl") as string)?.trim() || undefined;
+  const grantKey = (formData.get("jobtreadGrantKey") as string)?.trim() ?? "";
+  try {
+    await saveJobTreadCredentials({
+      name,
+      apiBaseUrl: baseUrl,
+      ...(grantKey ? { grantKey } : {}),
+      isEnabled: true,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to save";
+    return { error: message };
+  }
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/settings/integrations");
+  return {};
+}
+
+/** Test JobTread API connection and update last status. */
+export async function testJobTreadConnectionAction(): Promise<{ ok: boolean; error?: string }> {
+  await requireAdmin();
+  return testJobTreadConnection();
+}
+
+// ---------------------------------------------------------------------------
+// Synced budget inspector (read-only, for admin debug)
+// ---------------------------------------------------------------------------
+
+export type SyncedBudgetInspectorSummary = {
+  jobId: string;
+  jobName: string;
+  jobNumber: string | null;
+  lastSyncedAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncMessage: string | null;
+  lastRowCount: number;
+  officialSellTotal: string;
+  officialCostTotal: string;
+  sourceSummarySell: string | null;
+  sourceSummaryCost: string | null;
+};
+
+export type SyncedBudgetInspectorRow = {
+  id: string;
+  groupName: string | null;
+  itemName: string;
+  costCode: string | null;
+  costCodeName: string | null;
+  costType: string | null;
+  unit: string | null;
+  quantity: string | null;
+  unitCost: string | null;
+  unitPrice: string | null;
+  extCost: string;
+  extSell: string;
+};
+
+export type SyncedBudgetInspectorResult = {
+  summary: SyncedBudgetInspectorSummary | null;
+  rows: SyncedBudgetInspectorRow[];
+};
+
+function decimalToDisplay(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "number" && !Number.isNaN(value)) return value.toFixed(2);
+  const s = String(value);
+  if (!s) return "—";
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? s : n.toFixed(2);
+}
+
+/** Load synced budget job summary + first 25 rows for inspector. Returns empty result if no job found. */
+export async function getSyncedBudgetInspectorAction(
+  jobId: string
+): Promise<SyncedBudgetInspectorResult> {
+  await requireAdmin();
+  const trimmed = jobId?.trim();
+  if (!trimmed) {
+    return { summary: null, rows: [] };
+  }
+
+  const job = await prisma.syncedBudgetJob.findUnique({
+    where: { jobId: trimmed },
+  });
+  if (!job) {
+    return { summary: null, rows: [] };
+  }
+
+  const rows = await prisma.syncedBudgetRow.findMany({
+    where: { jobId: trimmed },
+    orderBy: [{ groupName: "asc" }, { itemName: "asc" }, { id: "asc" }],
+    take: 25,
+  });
+
+  const summary: SyncedBudgetInspectorSummary = {
+    jobId: job.jobId,
+    jobName: job.jobName,
+    jobNumber: job.jobNumber ?? null,
+    lastSyncedAt: job.lastSyncedAt?.toISOString() ?? null,
+    lastSyncStatus: job.lastSyncStatus ?? null,
+    lastSyncMessage: job.lastSyncMessage ?? null,
+    lastRowCount: job.lastRowCount,
+    officialSellTotal: decimalToDisplay(job.officialSellTotal),
+    officialCostTotal: decimalToDisplay(job.officialCostTotal),
+    sourceSummarySell: job.sourceSummarySell != null ? decimalToDisplay(job.sourceSummarySell) : null,
+    sourceSummaryCost: job.sourceSummaryCost != null ? decimalToDisplay(job.sourceSummaryCost) : null,
+  };
+
+  const inspectorRows: SyncedBudgetInspectorRow[] = rows.map((r) => ({
+    id: r.id,
+    groupName: r.groupName ?? null,
+    itemName: r.itemName,
+    costCode: r.costCode ?? null,
+    costCodeName: r.costCodeName ?? null,
+    costType: r.costType ?? null,
+    unit: r.unit ?? null,
+    quantity: r.quantity != null ? decimalToDisplay(r.quantity) : null,
+    unitCost: r.unitCost != null ? decimalToDisplay(r.unitCost) : null,
+    unitPrice: r.unitPrice != null ? decimalToDisplay(r.unitPrice) : null,
+    extCost: decimalToDisplay(r.extCost),
+    extSell: decimalToDisplay(r.extSell),
+  }));
+
+  return { summary, rows: inspectorRows };
+}
+
+// ---------------------------------------------------------------------------
+// Dev-only: parse and sync pasted budget export text
+// ---------------------------------------------------------------------------
+
+export type ParseAndSyncBudgetTextResult =
+  | {
+      ok: true;
+      jobId: string;
+      rowCount: number;
+      officialSell: string;
+      officialCost: string;
+      status: string;
+    }
+  | { ok: false; error: string };
+
+/** Dev-only: parse DataX-style budget text and sync into canonical tables. Admin-only. */
+export async function parseAndSyncBudgetTextAction(
+  formData: FormData
+): Promise<ParseAndSyncBudgetTextResult> {
+  await requireAdmin();
+  const budgetText = (formData.get("budgetText") as string)?.trim() ?? "";
+  if (!budgetText) {
+    return { ok: false, error: "Budget text is required." };
+  }
+
+  let budget;
+  try {
+    budget = parseBudgetExportText(budgetText);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to parse budget text.";
+    return { ok: false, error: message };
+  }
+
+  if (!budget.jobId || !budget.jobName) {
+    return { ok: false, error: "Parsed budget must have jobId and jobName (from Job: line)." };
+  }
+  if (!budget.items?.length) {
+    return { ok: false, error: "Parsed budget must have at least one item row." };
+  }
+
+  const result = await syncNormalizedJobBudget(budget);
+  if (result.status === "error") {
+    return { ok: false, error: result.message ?? "Sync failed." };
+  }
+
+  revalidatePath("/admin/settings/integrations");
+  return {
+    ok: true,
+    jobId: budget.jobId,
+    rowCount: result.rowCount,
+    officialSell: result.sellTotal.toFixed(2),
+    officialCost: result.costTotal.toFixed(2),
+    status: result.status,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Dev-only: parse and sync pasted budget JSON
+// ---------------------------------------------------------------------------
+
+export type ParseAndSyncBudgetJsonResult =
+  | {
+      ok: true;
+      jobId: string;
+      rowCount: number;
+      officialSell: string;
+      officialCost: string;
+      status: string;
+    }
+  | { ok: false; error: string };
+
+/** Dev-only: parse budget JSON and sync into canonical tables. Admin-only. */
+export async function parseAndSyncBudgetJsonAction(
+  formData: FormData
+): Promise<ParseAndSyncBudgetJsonResult> {
+  await requireAdmin();
+  const budgetJsonRaw = (formData.get("budgetJson") as string)?.trim() ?? "";
+  if (!budgetJsonRaw) {
+    return { ok: false, error: "Budget JSON is required." };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(budgetJsonRaw);
+  } catch {
+    return { ok: false, error: "Invalid JSON. Check syntax (e.g. quotes, commas, brackets)." };
+  }
+
+  const normalized = normalizeBudgetJson(parsed);
+  if (!normalized.ok) {
+    return { ok: false, error: normalized.error };
+  }
+  const budget = normalized.budget;
+
+  if (!budget.jobId || !budget.jobName) {
+    return { ok: false, error: "Parsed budget must have jobId and jobName." };
+  }
+  if (!budget.items?.length) {
+    return { ok: false, error: "Parsed budget must have at least one item row." };
+  }
+
+  const result = await syncNormalizedJobBudget(budget);
+  if (result.status === "error") {
+    return { ok: false, error: result.message ?? "Sync failed." };
+  }
+
+  revalidatePath("/admin/settings/integrations");
+  return {
+    ok: true,
+    jobId: budget.jobId,
+    rowCount: result.rowCount,
+    officialSell: result.sellTotal.toFixed(2),
+    officialCost: result.costTotal.toFixed(2),
+    status: result.status,
+  };
 }
 
 const PRICE_PER_SQ_FT_MAX = 5000;
@@ -939,12 +1205,28 @@ export async function updateSectionType(
   return {};
 }
 
-export async function deleteSectionType(id: string): Promise<{ error?: string }> {
+export async function deleteSectionType(
+  id: string,
+  reassignSectionTypeId?: string | null
+): Promise<{ error?: string }> {
   await requireAdmin();
   const st = await prisma.sectionType.findUnique({ where: { id } });
   if (!st) return { error: "Section type not found" };
+  if (reassignSectionTypeId) {
+    if (reassignSectionTypeId === id) {
+      return { error: "Cannot reassign to the same Pricing Profile." };
+    }
+    const target = await prisma.sectionType.findUnique({
+      where: { id: reassignSectionTypeId },
+      select: { id: true },
+    });
+    if (!target) return { error: "Replacement Pricing Profile not found." };
+  }
   await prisma.$transaction([
-    prisma.room.updateMany({ where: { sectionTypeId: id }, data: { sectionTypeId: null } }),
+    prisma.room.updateMany({
+      where: { sectionTypeId: id },
+      data: { sectionTypeId: reassignSectionTypeId ?? null },
+    }),
     prisma.sectionType.delete({ where: { id } }),
   ]);
   revalidatePath("/admin/settings");

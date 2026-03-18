@@ -1,0 +1,2 @@
+-- No-op: SyncedBudgetJob and SyncedBudgetRow were already created by migration 20260311210000_add_synced_budget_job_and_row.
+-- This duplicate migration is left as a no-op so migration history stays consistent; mark as applied with: prisma migrate resolve --applied 20260311210121_add_synced_budget_job_and_row

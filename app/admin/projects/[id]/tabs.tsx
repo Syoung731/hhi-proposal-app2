@@ -150,6 +150,15 @@ export function ProjectTabs({
               unitRateLow: r.unitRateLow ?? null,
               unitRateTarget: r.unitRateTarget ?? null,
               unitRateHigh: r.unitRateHigh ?? null,
+              subAreas: (r.subAreas ?? []).map((sa) => ({
+                id: sa.id,
+                name: sa.name,
+                lengthIn: sa.lengthIn ?? null,
+                widthIn: sa.widthIn ?? null,
+                ceilingHeightIn: sa.ceilingHeightIn ?? null,
+                areaSqFt: sa.areaSqFt ?? null,
+                sortOrder: sa.sortOrder,
+              })),
             }))}
             stylePresets={stylePresets}
             sectionTypes={sectionTypes}

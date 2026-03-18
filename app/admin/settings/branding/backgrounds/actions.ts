@@ -536,9 +536,15 @@ export async function createBrandBackground(
     };
   }
 
+  if (!data.name) {
+    throw new Error("Background name is required.");
+  }
+
   const toCreate: BrandBackgroundCreateData = {
     ...data,
+    name: data.name,
     slug,
+    tags: data.tags ?? undefined,
   };
 
   try {
