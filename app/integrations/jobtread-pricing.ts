@@ -1514,7 +1514,7 @@ export async function runDirectJobTreadBudgetForJob(
   const TEN_OAK_PARK_UI_SELL = 249_488.81;
   const TEN_OAK_PARK_UI_COST = 135_708.06;
 
-  if (jobId === TEN_OAK_PARK_ID && process.env.NODE_ENV !== 'production') {
+  if (jobId === TEN_OAK_PARK_ID && (process.env.NODE_ENV as string) !== 'production') {
     if (DEBUG_JOBTREAD_SYNC) {
       // eslint-disable-next-line no-console
       console.log(
