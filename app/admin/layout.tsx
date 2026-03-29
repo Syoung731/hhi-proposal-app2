@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { AdminLayoutChrome } from "./AdminLayoutChrome";
@@ -33,16 +32,7 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  let identity: { userId: string; email: string };
-  try {
-    identity = await requireAdmin();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (message.includes("Forbidden")) {
-      return <AdminForbiddenPage />;
-    }
-    redirect("/sign-in?redirect_url=" + encodeURIComponent("/admin"));
-  }
+  const identity = await requireAdmin();
 
   const [settings, employee] = await Promise.all([
     prisma.companySettings.findFirst(),
