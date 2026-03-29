@@ -146,7 +146,7 @@ export async function createRoomAction(projectId: string, formData: FormData): P
   // If no sectionTypeId was submitted, keep the existing one so changing dimensions
   // doesn't reset the Pricing Profile back to Custom.
   const sectionTypeId =
-    sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : room.sectionTypeId ?? null;
+    sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : null;
   await prisma.room.create({
     data: {
       projectId,
