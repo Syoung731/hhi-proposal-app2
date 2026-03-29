@@ -36,7 +36,7 @@ const TABS: { slug: string; label: string; hrefOnly?: boolean }[] = [
   { slug: "media", label: "Media" },
   { slug: "timeline", label: "Timeline" },
   { slug: "investment", label: "Investment" },
-  { slug: "presentation", label: "Presentation", hrefOnly: true },
+  { slug: "deck", label: "Deck", hrefOnly: true },
   { slug: "publish", label: "Preview & Publish" },
 ];
 

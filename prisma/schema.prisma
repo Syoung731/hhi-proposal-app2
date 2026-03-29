@@ -61,6 +61,7 @@ model Project {
   proposal            Proposal?
   extensionPairCodes       ExtensionPairCode[]
   zillowBrowserConnections ZillowBrowserConnection[]
+  proposalDeck             ProposalDeck?
 
   @@index([status])
   @@index([createdAt])
@@ -511,10 +512,17 @@ model BrandBackground {
   isActive        Boolean  @default(true)
   sortOrder       Int      @default(0)
   tags            String[] // optional for search/filter
+  // Generation provenance — null for manually-configured or pre-refactor records
+  generationMode  String?  // "subtle-texture" | "blueprint-overlay" | "slide-visual"
+  stylePreset     String?  // "architectural" | "editorial" | "technical" | "warm-luxury"
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  overlayIcon BrandIcon? @relation(fields: [overlayIconId], references: [id], onDelete: SetNull)
+  compositionSeed    String?
+  textZoneSuggestion Json?
+
+  overlayIcon BrandIcon?  @relation(fields: [overlayIconId], references: [id], onDelete: SetNull)
+  deckSlides  DeckSlide[]
 
   @@index([isActive, sortOrder])
 }
@@ -773,4 +781,47 @@ model PricingSourceTrade {
 
   @@unique([roomId, tradeName])
   @@index([jobId])
+}
+
+// ---------------------------------------------------------------------------
+// Proposal Deck — persisted slide deck per project.
+// ---------------------------------------------------------------------------
+
+model ProposalDeck {
+  id        String      @id @default(cuid())
+  projectId String      @unique
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  slides    DeckSlide[]
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model DeckSlide {
+  id             String       @id @default(cuid())
+  deckId         String
+  type           String
+  layoutKey      String
+  order          Int          @default(0)
+  isEnabled      Boolean      @default(true)
+  isUserHidden   Boolean      @default(false)
+  isUserModified Boolean      @default(false)
+  source         String       @default("manual")
+  sectionId      String?
+  headline       String?
+  subheadline    String?
+  body           String?
+  content        Json?
+  isLocked       Boolean      @default(false)
+  lockPosition   String?
+  backgroundId   String?
+  textZone       Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deck           ProposalDeck  @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  background     BrandBackground? @relation(fields: [backgroundId], references: [id], onDelete: SetNull)
+
+  @@index([deckId, order])
+  @@index([deckId, type])
+  @@index([sectionId])
+  @@index([backgroundId])
 }

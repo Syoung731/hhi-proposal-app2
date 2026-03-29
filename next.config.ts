@@ -1,6 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Safeguard: allow Server Action bodies up to 5 MB so that the
+    // reference-image upload FormData action (uploadReferenceImageAction)
+    // can accept files up to ~4 MB after multipart overhead.
+    serverActions: {
+      bodySizeLimit: "5mb",
+    },
+  },
   // Resolve node: built-ins for Turbopack server chunks (avoids ChunkLoadError for node:crypto)
   turbopack: {
     resolveAlias: {

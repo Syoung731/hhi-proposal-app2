@@ -23,6 +23,7 @@ export const SETTINGS_TABS: { slug: string; label: string }[] = [
   { slug: "value-pillars", label: "Value Pillars" },
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
+  { slug: "dev-integrations", label: "DEV Integrations" },
 ];
 
 export type BrandIconForUI = {
@@ -54,6 +55,14 @@ export type BrandBackgroundForUI = {
   isActive: boolean;
   sortOrder: number;
   tags: string[];
+  /** Generation mode used when this background was AI-generated. Null for manually configured records. */
+  generationMode: string | null;
+  /** Style preset used during generation. Only set for "slide-visual" mode. */
+  stylePreset: string | null;
+  /** Composition seed used during slide-visual generation (e.g. "left-weighted"). */
+  compositionSeed?: string | null;
+  /** Cached text zone suggestion derived from composition seed or AI vision analysis. */
+  textZoneSuggestion?: import("@/app/lib/deck/types").TextZoneSuggestion | null;
 };
 
 export type CompanySettingsForUI = {

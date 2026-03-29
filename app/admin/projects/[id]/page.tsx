@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
 import { listActiveStylePresets, listSectionTypes, getOrCreateCompanySettings } from "@/app/admin/settings/actions";
-import { ensureInvestmentLineItemsForBuckets } from "./investment/actions";
 import { ProjectTabs } from "./tabs";
 
 const TAB = "tab";
@@ -54,10 +53,6 @@ export default async function AdminProjectPage({
   const sp = await searchParams;
   const tab = (typeof sp[TAB] === "string" ? sp[TAB] : undefined) || "overview";
   const roomIdFromUrl = typeof sp.roomId === "string" ? sp.roomId : undefined;
-
-  if (tab === "investment") {
-    await ensureInvestmentLineItemsForBuckets(id);
-  }
 
   const [project, stylePresets, sectionTypes, companySettings] = await Promise.all([
     getProject(id),

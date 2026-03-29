@@ -1,26 +1,42 @@
- "use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
-import { uploadBuffer, deleteR2Objects } from "@/app/lib/s3";
+import { uploadBuffer, deleteR2Objects, readObjectToBuffer } from "@/app/lib/s3";
 import { GoogleGenAI } from "@google/genai";
 import type { BrandBackground } from "@/app/generated/prisma";
+import type { Prisma } from "@/app/generated/prisma";
 import sharp from "sharp";
+import type { TextZoneSuggestion } from "@/app/lib/deck/types";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
 
-const BACKGROUND_SYSTEM_PREFIX = `Create a seamless, tileable, subtle background texture.
-No focal point.
-Low contrast.
-No text.
-No logos.
-Designed for use behind presentation content.`;
+// ─── Generation mode types ────────────────────────────────────────────────────
 
-const NUM_IMAGES = 4;
+/**
+ * Controls the prompt strategy and intended downstream use of the generated asset.
+ *
+ * - "subtle-texture"    Low-contrast seamless tile. Composited behind text at ~5–15% opacity.
+ * - "blueprint-overlay" Architectural line-work tile. Technical/drafting quality, tiled at low opacity.
+ * - "slide-visual"      Full-bleed editorial composition. Brand-aware. Designed to fill one slide.
+ */
+export type BackgroundGenerationMode = "subtle-texture" | "blueprint-overlay" | "slide-visual";
 
-export type BackgroundImageType = "subtle_texture" | "icon_pattern" | "gradient_texture";
+/**
+ * Visual mood preset. Applied when mode is "slide-visual".
+ *
+ * - "architectural"  Geometric, structured, precision-first. Exposed concrete / steel forms.
+ * - "editorial"      High-contrast design-magazine mood. Bold yet refined.
+ * - "technical"      Blueprint precision meets luxury brand. Grid-based, engineered-looking.
+ * - "warm-luxury"    Organic warmth with premium finish. Linen, stone, warm wood grain.
+ */
+export type BackgroundStylePreset =
+  | "architectural"
+  | "editorial"
+  | "technical"
+  | "warm-luxury";
 
 export type BrandBackgroundActionErrorCode = "NOT_FOUND" | "VALIDATION" | "UNKNOWN";
 
@@ -32,54 +48,347 @@ export type BrandBackgroundSimpleResult =
   | { ok: true }
   | { ok: false; errorCode: BrandBackgroundActionErrorCode; message: string };
 
-function buildBackgroundPrompt(userPrompt: string, type: BackgroundImageType): string {
-  const trimmed = (userPrompt ?? "").trim() || "Subtle paper-like texture for document background";
-  const styleHint =
-    type === "icon_pattern"
-      ? "Subtle repeating pattern of small motifs or shapes, very low contrast."
-      : type === "gradient_texture"
-        ? "Very subtle gradient with light texture, low contrast, neutral."
-        : "Subtle, even texture; no strong focal point.";
-  return `${BACKGROUND_SYSTEM_PREFIX}
+// ─── Prompt builders ──────────────────────────────────────────────────────────
 
-Style description:
-${styleHint}
+function buildSubtleTexturePrompt(userPrompt: string): string {
+  const trimmed = userPrompt.trim() || "Subtle paper-like texture for document background";
+  return `Create a seamless, tileable, subtle background texture for professional presentation documents.
+
+Design intent:
+- Low contrast, even surface with no strong focal point
+- Optimized to sit behind text and graphic content without competing
+- Examples of suitable material references: fine paper grain, linen weave, soft concrete, muted noise
 
 User description: ${trimmed}
 
-Output a single square image, high resolution (at least 1024x1024, preferably 2048x2048). PNG format.`;
+Technical requirements:
+- Output a single square image, at least 1024×1024px, PNG format
+- Seamless tiling: left edge must match right edge, top edge must match bottom edge
+- No text, no logos, no strong directional gradients, no human figures`;
 }
+
+function buildBlueprintOverlayPrompt(userPrompt: string): string {
+  const trimmed = userPrompt.trim() || "Light architectural floor plan grid with fine drafting lines";
+  return `Create a single square tile for use as a repeating architectural blueprint overlay on a presentation slide background.
+
+Design intent:
+- Architectural drafting quality: thin, precise line work only
+- Inspired by floor plan fragments, drafting grids, or construction detail callouts
+- Watermark quality — this tile will be composited at very low opacity (5–15%) behind presentation content
+- Monochromatic: use only pale, cool lines (near-white or very light gray-blue) on a pure white field
+- No fills, no shading, no heavy strokes — only fine technical linework
+- Must read as deliberate architectural detail, not decorative pattern
+
+User description: ${trimmed}
+
+Technical requirements:
+- Output a single square image, at least 1024×1024px, PNG format
+- Seamless tiling: left edge must match right edge, top edge must match bottom edge
+- No text labels, no color fills, no human figures`;
+}
+
+// Per-mode strict behavior following the new concise framework.
+// Each string is injected directly into the prompt as a behavior directive.
+const SLIDE_MODE_BEHAVIOR: Record<BackgroundStylePreset, string> = {
+  architectural:
+    "Architectural massing and structural edges dominate. Strong physical depth and form. Clean modern building elements — concrete planes, steel frames, glass reveals, slab edges. No graphic abstraction, no soft glow, no fading center.",
+  editorial:
+    "Graphic composition dominates over physical structures. Bold contrast between flat light and dark planes. Sharp edges, asymmetric layout. Must feel like a designed magazine spread — not a render, not a photo. Avoid all realistic architectural depth.",
+  technical:
+    "Blueprint linework dominates the composition. Lines must be crisp, visible, and structurally organized — grid overlays, section-cut geometry, dimensional notation, drafting fragments. Minimal material presence behind the lines. Precise and technical. No soft fades that obscure line clarity.",
+  "warm-luxury":
+    "Material texture dominates. A single luxury surface — warm stone, wood grain, or linen — fills the active zone as a macro close-up abstraction. Warm, refined, natural tones. Soft but controlled directional light raking across the surface. No glow effects, no atmospheric blur. Calm, minimal, premium.",
+};
+
+// Per-seed composition direction (plain language injected into prompt).
+const SLIDE_COMPOSITION_DIRECTION: Record<Exclude<SlideCompositionSeed, "split-diptych">, string> = {
+  "left-weighted":
+    "Visual mass anchored hard to the left 30% of the frame. The remaining right 70% is a clean, uninterrupted, near-uniform field for text overlay. Strong left-heavy hierarchy — the right side must contain nothing.",
+  "right-weighted":
+    "Visual mass anchored hard to the right 30% of the frame. The remaining left 70% is a clean, uninterrupted, near-uniform field for text overlay. Strong right-heavy hierarchy — the left side must contain nothing.",
+  "bottom-fade":
+    "Visual weight grounded at the bottom 25% of the frame, dissolving upward. The upper 75% is a clean, open, near-uniform field for title and body copy. Bottom-heavy hierarchy only — nothing creeps into the upper zone.",
+  corner:
+    "Single visual anchor in the lower-left corner only — approximately 20% of the frame. All remaining area is open, clean, and text-safe. The corner element must read as a legible architectural form or material fragment, not a gradient blob.",
+};
+
+type SlideCompositionSeed = "left-weighted" | "right-weighted" | "bottom-fade" | "corner" | "split-diptych";
+
+function buildSlideVisualPrompt(
+  userPrompt: string,
+  stylePreset: BackgroundStylePreset,
+  brand: { accentColor: string; textColor: string; companyName: string },
+  compositionSeed: SlideCompositionSeed
+): string {
+  // Split-diptych is a full-frame narrative composition — handled separately.
+  if (compositionSeed === "split-diptych") {
+    return buildSplitDiptychPrompt(userPrompt, brand);
+  }
+
+  const behavior = SLIDE_MODE_BEHAVIOR[stylePreset];
+  const direction = SLIDE_COMPOSITION_DIRECTION[compositionSeed];
+  const cue = userPrompt.trim()
+    || "luxury residential design-build — craft, precision, and architectural transformation";
+
+  // Single clean prompt following the BASE COMPOSITION RULE:
+  // dominant element → transition → empty text field.
+  return `16:9 presentation slide background for a luxury design-build company. ${behavior} ${direction} The dominant visual element occupies the active zone only; the transition into the text field is controlled and directional — no radial gradients, no centered glow, no washed-out middle. The text field is completely empty: no objects, linework, shadows, or texture of any kind. Composition subject (interpret as material and architectural language — not a literal scene): ${cue}. Brand accent ${brand.accentColor} used as a subtle material highlight only. Deep tone ${brand.textColor} anchors structural edge or shadow mass. Negative space is warm off-white or cream. No rooms, environments, or scenes. No people, logos, text, or watermarks. Single 16:9 landscape image, 1792×1024px minimum, PNG.`;
+}
+
+function buildSplitDiptychPrompt(
+  userPrompt: string,
+  brand: { accentColor: string; textColor: string; companyName: string }
+): string {
+  const cue = userPrompt.trim()
+    || "architectural blueprint sketch transitioning to a luxury finished home";
+
+  return `16:9 presentation slide background divided into three horizontal zones. This is a full-frame narrative diptych — high contrast between zones is required and correct.
+
+LEFT ZONE (left 44%): A dense, detailed architectural pencil-sketch or ink-drawing — floor plan, section geometry, elevation, or structural linework drawn on warm ivory drafting paper. Dark graphite lines, cool analytical tone, technical and unresolved. Fill this zone with linework — multiple layers of structure, not a sparse gesture.
+
+CENTER ZONE (middle 12–16%): A dramatic near-black vertical void with irregular, torn or fractured edges where it meets the left and right zones. The darkness peaks at the centerline. The left boundary of the void should look like a ragged tear — organic, energetic. This is the highest-contrast element in the image. Smooth soft gradient edges here are incorrect — the boundary must have graphic force.
+
+RIGHT ZONE (right 44%): ${cue.toLowerCase().includes("home") || cue.toLowerCase().includes("house") || cue.toLowerCase().includes("residen") || cue.toLowerCase().includes("built")
+    ? `A photorealistic luxury residential exterior — premium finished home with warm golden-hour light, large windows, stone or wood cladding, manicured landscaping. Rich warm tones, architectural photography quality. This zone must look like a beautiful finished home, not an abstract surface.`
+    : `A richly rendered warm luxury material surface — honed travertine, warm wood grain, or premium stone — treated as a photographic close-up with warm directional light. Rich, warm, and detailed.`
+  }
+
+TOP 16%: Text-safe header strip — completely clean, near-uniform, low contrast. No detail, no linework, no edge may enter.
+
+Composition cue: ${cue}. Brand accent ${brand.accentColor} as subtle highlight in the right zone only. No people, logos, text labels, or watermarks. Single 16:9 landscape image, 1792×1024px minimum, PNG.`;
+}
+
+function buildPrompts(
+  userPrompt: string,
+  mode: BackgroundGenerationMode,
+  stylePreset: BackgroundStylePreset,
+  brand: { accentColor: string; textColor: string; companyName: string }
+): string[] {
+  switch (mode) {
+    case "subtle-texture":
+      return [
+        buildSubtleTexturePrompt(userPrompt),
+        buildSubtleTexturePrompt(userPrompt),
+        buildSubtleTexturePrompt(userPrompt),
+      ];
+    case "blueprint-overlay":
+      return [
+        buildBlueprintOverlayPrompt(userPrompt),
+        buildBlueprintOverlayPrompt(userPrompt),
+      ];
+    case "slide-visual":
+      // Five parallel calls — four single-zone compositions + one full-frame split diptych.
+      return [
+        buildSlideVisualPrompt(userPrompt, stylePreset, brand, "left-weighted"),
+        buildSlideVisualPrompt(userPrompt, stylePreset, brand, "right-weighted"),
+        buildSlideVisualPrompt(userPrompt, stylePreset, brand, "bottom-fade"),
+        buildSlideVisualPrompt(userPrompt, stylePreset, brand, "corner"),
+        buildSlideVisualPrompt(userPrompt, stylePreset, brand, "split-diptych"),
+      ];
+  }
+}
+
+// ─── Generation input/output types ───────────────────────────────────────────
 
 export type GenerateBackgroundImagesInput = {
   prompt: string;
-  type: BackgroundImageType;
+  mode: BackgroundGenerationMode;
+  /** Mood preset — only meaningful for "slide-visual" mode. */
+  stylePreset?: BackgroundStylePreset | null;
+  /** Brand colors and identity injected into slide-visual prompts. */
+  brandContext?: {
+    accentColor?: string | null;
+    textColor?: string | null;
+    companyName?: string | null;
+  } | null;
+  /**
+   * R2 object key for an optional reference image that was pre-uploaded via
+   * uploadReferenceImageAction. The action fetches the bytes from R2 itself
+   * so no binary data ever crosses the Server Action JSON boundary.
+   * The object is deleted from R2 after generation completes (success or error).
+   */
+  referenceImageKey?: string | null;
+  /**
+   * MIME type of the reference image (e.g. "image/png", "image/jpeg").
+   * Must be provided together with referenceImageKey.
+   */
+  referenceImageMimeType?: string | null;
+  /**
+   * Describes which aspect of the reference image should influence generation.
+   * - "composition"      — adopt the spatial layout and framing
+   * - "style"            — match the overall visual style and treatment
+   * - "color-mood"       — draw from the color palette and tonality
+   * - "visual-hierarchy" — follow the contrast and emphasis structure
+   */
+  referenceNote?: "composition" | "style" | "color-mood" | "visual-hierarchy" | null;
+};
+
+type GeneratedImage = {
+  imageUrl: string;
+  imageKey: string;
+  compositionSeed?: string | null;
 };
 
 export type GenerateBackgroundImagesResult = {
   error?: string;
-  images?: { imageUrl: string; imageKey: string }[];
+  images?: GeneratedImage[];
 };
 
 /**
- * Generate 2–4 background texture images via Gemini, upload to R2, return URLs and keys.
- * Reuses the same Gemini image model and R2 upload pattern as brand icon generation.
+ * Upload a reference image to R2 for use with generateBackgroundImagesAction.
+ *
+ * Accepts a FormData payload with a single "file" field (image/png, image/jpeg,
+ * or image/webp, max 4 MB). Returns the R2 key and public URL.
+ *
+ * Stored under brand-backgrounds/ref-images/ with a random key so they cannot
+ * be guessed. generateBackgroundImagesAction deletes the object after use.
+ */
+export async function uploadReferenceImageAction(
+  formData: FormData
+): Promise<{ ok: true; key: string; url: string } | { ok: false; error: string }> {
+  await requireAdmin();
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "No file provided." };
+  }
+
+  const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    return { ok: false, error: "Reference image must be PNG, JPEG, or WebP." };
+  }
+
+  const MAX_BYTES = 4 * 1024 * 1024; // 4 MB
+  if (file.size > MAX_BYTES) {
+    return { ok: false, error: "Reference image must be under 4 MB." };
+  }
+
+  const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+  const objectKey = `brand-backgrounds/ref-images/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+  try {
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const { publicUrl, fileKey } = await uploadBuffer(objectKey, bytes, file.type);
+    return { ok: true, key: fileKey, url: publicUrl };
+  } catch (err) {
+    console.error("[uploadReferenceImageAction] R2 upload failed:", err);
+    return { ok: false, error: "Failed to upload reference image. Please try again." };
+  }
+}
+
+/**
+ * Generate background images via Gemini.
+ *
+ * - subtle-texture:    3 parallel calls, same seamless-texture prompt
+ * - blueprint-overlay: 2 parallel calls, same architectural-line prompt
+ * - slide-visual:      2 parallel calls, two distinct composition-seed prompts
+ *
+ * An optional reference image can be provided via `referenceImageKey` (an R2
+ * object key returned by uploadReferenceImageAction). The action fetches the
+ * image bytes from R2, passes them to Gemini as inline data, then deletes the
+ * temporary object — no binary data ever travels through the SA JSON payload.
  */
 export async function generateBackgroundImagesAction(
   input: GenerateBackgroundImagesInput
 ): Promise<GenerateBackgroundImagesResult> {
   await requireAdmin();
 
-  const prompt = (input.prompt ?? "").toString().trim();
-  const type = input.type ?? "subtle_texture";
-
   if (!GEMINI_API_KEY?.trim()) {
     return { error: "GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local." };
   }
 
-  const fullPrompt = buildBackgroundPrompt(prompt, type);
+  const userPrompt = (input.prompt ?? "").toString().trim();
+  const mode = input.mode ?? "subtle-texture";
+  const stylePreset = input.stylePreset ?? "architectural";
+  const brand = {
+    accentColor: input.brandContext?.accentColor?.trim() || "#E07B3F",
+    textColor:   input.brandContext?.textColor?.trim()   || "#1A2B3C",
+    companyName: input.brandContext?.companyName?.trim() || "Design-Build Company",
+  };
+
+  const prompts = buildPrompts(userPrompt, mode, stylePreset, brand);
+
+  // Build a matching seeds array so each result can be tagged with its composition seed.
+  const seeds: (string | null)[] = mode === "slide-visual"
+    ? ["left-weighted", "right-weighted", "bottom-fade", "corner", "split-diptych"]
+    : prompts.map(() => null);
+
+  // Optional reference image parts prepended to each Gemini message.
+  // Image bytes are fetched from R2 here — never sent through the SA payload.
+  const refPrefix: unknown[] = [];
+  const refKey = input.referenceImageKey?.trim() || null;
+  if (refKey && input.referenceImageMimeType?.trim()) {
+    try {
+      const refBytes = await readObjectToBuffer(refKey);
+
+      let refInstruction: string;
+      if (mode === "slide-visual") {
+        // For slide-visual, the reference image is compositional guidance only.
+        // We need to extract layout logic, contrast structure, and visual tension —
+        // NOT recreate the image as a subject or scene.
+        const slideNoteMap: Record<string, string> = {
+          "composition":
+            "Extract the SPATIAL LOGIC of this image — where visual mass and detail sit, " +
+            "how the frame is divided, where negative space opens. Apply that compositional weight " +
+            "distribution to a 16:9 slide background with a structured text-safe zone. " +
+            "Do NOT recreate any specific subject, room, or scene from the reference.",
+          "style":
+            "Extract the VISUAL LANGUAGE of this image — the material quality, tonal register, " +
+            "surface character, and atmospheric treatment. Translate this into abstract architectural " +
+            "elements (linework, material texture, structural silhouette) appropriate for a slide " +
+            "background. Do NOT copy subject matter or scene composition literally.",
+          "color-mood":
+            "Extract the COLOR RELATIONSHIPS and tonal mood of this image — palette, temperature, " +
+            "light/dark ratio, and the emotional register. Build the slide background's active zone " +
+            "and negative space using these tones and contrast logic. Do NOT recreate the scene.",
+          "visual-hierarchy":
+            "Extract the CONTRAST RHYTHM and visual emphasis of this image — what is heavy vs light, " +
+            "active vs passive, dense vs open. Apply that same hierarchy logic to the slide background: " +
+            "the dominant zone must be text-safe, and the active zone should carry the visual weight " +
+            "in the same proportional way. Do NOT copy subject matter literally.",
+        };
+        const note = input.referenceNote ?? null;
+        const noteInstruction = note
+          ? (slideNoteMap[note] ?? slideNoteMap["composition"])
+          : "Extract the COMPOSITIONAL STRUCTURE of this image — weight distribution, contrast rhythm, " +
+            "and the relationship between active and quiet zones. Apply this logic to a 16:9 slide " +
+            "background where the quieter zone serves as a text-safe field. " +
+            "Do NOT recreate the subject, room, or scene.";
+        refInstruction =
+          `[REFERENCE IMAGE — COMPOSITIONAL GUIDANCE ONLY]\n` +
+          `This image is a design reference, not a subject to recreate.\n` +
+          `${noteInstruction}\n` +
+          `The output must remain a SLIDE BACKGROUND with 40–60% low-contrast negative space. ` +
+          `Do not let the reference pull the output toward a realistic scene, hero render, or stock photo.`;
+      } else {
+        // For texture modes, keep the reference guidance generic and lightweight.
+        const genericNoteMap: Record<string, string> = {
+          "composition":      "spatial layout and framing",
+          "style":            "overall visual style and treatment",
+          "color-mood":       "color palette and tonality",
+          "visual-hierarchy": "contrast and emphasis structure",
+        };
+        const noteLabel = input.referenceNote
+          ? (genericNoteMap[input.referenceNote] ?? "general visual direction")
+          : "general visual direction";
+        refInstruction = `[Reference image provided. Use it to guide the ${noteLabel} only. Generate a new, original image — do not copy the reference literally.]`;
+      }
+
+      refPrefix.push({ text: refInstruction });
+      refPrefix.push({
+        inlineData: {
+          mimeType: input.referenceImageMimeType.trim(),
+          data: refBytes.toString("base64"),
+        },
+      });
+    } catch (err) {
+      console.warn("[generateBackgroundImagesAction] Could not load reference image from R2; proceeding without it:", err);
+    }
+  }
+
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
 
-  const generateOne = async (): Promise<{ imageUrl: string; imageKey: string } | null> => {
+  const generateOne = async (promptText: string): Promise<{ imageUrl: string; imageKey: string } | null> => {
     let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
     try {
       response = await ai.models.generateContent({
@@ -87,16 +396,14 @@ export async function generateBackgroundImagesAction(
         contents: [
           {
             role: "user",
-            parts: [{ text: fullPrompt }],
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            parts: [...refPrefix, { text: promptText }] as any,
           },
         ],
-        config: {
-          responseModalities: ["IMAGE"],
-        },
+        config: { responseModalities: ["IMAGE"] },
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`Gemini image request failed: ${msg}`);
+      throw new Error(`Gemini image request failed: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     const candidates = (response as { candidates?: unknown[] })?.candidates;
@@ -106,7 +413,7 @@ export async function generateBackgroundImagesAction(
     }
 
     let imageBase64: string | undefined;
-    let mimeType: string | undefined;
+    let mimeType = "image/png";
     for (const part of parts) {
       const p = part as { inlineData?: { mimeType?: string; data?: string } };
       if (p.inlineData?.data) {
@@ -122,25 +429,33 @@ export async function generateBackgroundImagesAction(
 
     const bytes = Buffer.from(imageBase64, "base64");
     const objectKey = `brand-backgrounds/global/${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
-
-    const { publicUrl, fileKey } = await uploadBuffer(objectKey, bytes, mimeType ?? "image/png");
+    const { publicUrl, fileKey } = await uploadBuffer(objectKey, bytes, mimeType);
     return { imageUrl: publicUrl, imageKey: fileKey };
   };
 
-  const results: { imageUrl: string; imageKey: string }[] = [];
+  const results: GeneratedImage[] = [];
   const errors: string[] = [];
 
-  const promises = Array.from({ length: NUM_IMAGES }, () =>
-    generateOne().catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      errors.push(msg);
-      return null;
-    })
+  const settled = await Promise.all(
+    prompts.map((p) =>
+      generateOne(p).catch((e) => {
+        errors.push(e instanceof Error ? e.message : String(e));
+        return null;
+      })
+    )
   );
 
-  const settled = await Promise.all(promises);
-  for (const r of settled) {
-    if (r) results.push(r);
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i];
+    if (r) results.push({ ...r, compositionSeed: seeds[i] ?? null });
+  }
+
+  // Clean up the ephemeral reference image from R2 (success or failure).
+  // Fire-and-forget: generation result is not affected if cleanup fails.
+  if (refKey) {
+    deleteR2Objects([refKey]).catch((err) => {
+      console.warn("[generateBackgroundImagesAction] Failed to delete temp reference image:", err);
+    });
   }
 
   if (results.length === 0) {
@@ -173,6 +488,12 @@ export type BrandBackgroundCreateData = {
   sortOrder?: number;
   isAvailable?: boolean;
   isActive?: boolean;
+  /** Generation mode used to produce the overlay image, if AI-generated. */
+  generationMode?: BackgroundGenerationMode | null;
+  /** Style preset used during generation. Only meaningful for "slide-visual" mode. */
+  stylePreset?: BackgroundStylePreset | null;
+  /** Composition seed used when mode is "slide-visual" (e.g. "left-weighted"). */
+  compositionSeed?: string | null;
 };
 
 export type BrandBackgroundUpdateData = {
@@ -190,6 +511,10 @@ export type BrandBackgroundUpdateData = {
   sortOrder?: number;
   isAvailable?: boolean;
   isActive?: boolean;
+  generationMode?: BackgroundGenerationMode | null;
+  stylePreset?: BackgroundStylePreset | null;
+  /** Composition seed used when mode is "slide-visual" (e.g. "left-weighted"). */
+  compositionSeed?: string | null;
 };
 
 const PREVIEW_WIDTH = 640;
@@ -257,14 +582,31 @@ async function generateAndStoreBackgroundPreview(
   });
   if (!bg) return null;
 
-  // Prefer explicit overlay image; fall back to overlay icon PNG if present.
-  const overlayImageUrl =
-    bg.overlayImageUrl ??
-    (bg.overlayIcon ? bg.overlayIcon.imageUrl ?? null : null);
+  // Resolve the overlay image.
+  // Prefer the explicit overlay image; fall back to the icon PNG.
+  // Fetch via R2 key so we can embed as a base64 data URI — librsvg (used by
+  // Sharp) cannot load remote HTTP URLs during server-side SVG rendering.
+  const overlayKey =
+    bg.overlayImageKey ??
+    (bg.overlayIcon?.imageKey ?? null);
+
+  let overlayDataUri: string | null = null;
+  if (overlayKey) {
+    try {
+      const buf = await readObjectToBuffer(overlayKey);
+      overlayDataUri = `data:image/png;base64,${buf.toString("base64")}`;
+    } catch {
+      // Key missing or unreadable — fall back to the public URL as a last
+      // resort (may not render in all environments, but better than nothing).
+      overlayDataUri =
+        bg.overlayImageUrl ??
+        (bg.overlayIcon?.imageUrl ?? null);
+    }
+  }
 
   const svg = buildBackgroundPreviewSvg({
     baseColorHex: bg.baseColorHex,
-    overlayImageUrl,
+    overlayImageUrl: overlayDataUri,
     overlayOpacity: bg.overlayOpacity,
     overlayScale: bg.overlayScale,
     overlaySpacing: bg.overlaySpacing,
@@ -465,6 +807,30 @@ function validateAndNormalizeBackgroundInput(
     (out as BrandBackgroundUpdateData).sortOrder = Number(input.sortOrder);
   }
 
+  // Generation provenance
+  const VALID_MODES: BackgroundGenerationMode[] = ["subtle-texture", "blueprint-overlay", "slide-visual"];
+  const VALID_PRESETS: BackgroundStylePreset[] = ["architectural", "editorial", "technical", "warm-luxury"];
+
+  if ("generationMode" in input) {
+    const raw = input.generationMode ?? null;
+    (out as BrandBackgroundUpdateData).generationMode =
+      raw && VALID_MODES.includes(raw as BackgroundGenerationMode)
+        ? (raw as BackgroundGenerationMode)
+        : null;
+  }
+
+  if ("stylePreset" in input) {
+    const raw = input.stylePreset ?? null;
+    (out as BrandBackgroundUpdateData).stylePreset =
+      raw && VALID_PRESETS.includes(raw as BackgroundStylePreset)
+        ? (raw as BackgroundStylePreset)
+        : null;
+  }
+
+  if ("compositionSeed" in input) {
+    (out as BrandBackgroundUpdateData).compositionSeed = input.compositionSeed ?? null;
+  }
+
   // Post condition: allow base-color-only backgrounds OR any overlay combination.
   const finalBase =
     "baseColorHex" in out
@@ -564,6 +930,9 @@ export async function createBrandBackground(
         isActive: toCreate.isActive ?? true,
         sortOrder: toCreate.sortOrder ?? 0,
         tags: normalizeTags(toCreate.tags),
+        generationMode: toCreate.generationMode ?? null,
+        stylePreset: toCreate.stylePreset ?? null,
+        compositionSeed: toCreate.compositionSeed ?? null,
       },
     });
 
@@ -672,6 +1041,9 @@ export async function updateBrandBackground(
           isAvailable: data.isAvailable,
         }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.generationMode !== undefined && { generationMode: data.generationMode }),
+        ...(data.stylePreset !== undefined && { stylePreset: data.stylePreset }),
+        ...(data.compositionSeed !== undefined && { compositionSeed: data.compositionSeed }),
       },
     });
 
@@ -756,24 +1128,243 @@ export async function deleteBrandBackground(
     return { ok: true };
   }
 
-  const key = existing.overlayImageKey ?? null;
+  const overlayKey = existing.overlayImageKey ?? null;
+  const previewKey = existing.previewImageKey ?? null;
 
   await prisma.brandBackground.delete({ where: { id } });
 
-  if (key) {
+  // Clean up R2 objects — collect all keys to delete (overlay + cached preview).
+  const keysToDelete = [overlayKey, previewKey].filter(Boolean) as string[];
+  if (keysToDelete.length > 0) {
     try {
-      await deleteR2Objects([key]);
+      await deleteR2Objects(keysToDelete);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return {
         ok: false,
         errorCode: "UNKNOWN",
-        message: `Background deleted, but failed to delete overlay image from storage: ${msg}`,
+        message: `Background deleted, but failed to delete stored images from R2: ${msg}`,
       };
     }
   }
 
   revalidatePath("/admin/settings");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Preview regeneration
+// ---------------------------------------------------------------------------
+
+/**
+ * Regenerate and store the preview PNG for a single background.
+ * Call this from the UI when a card shows a blank thumbnail.
+ */
+export async function regenerateBackgroundPreviewAction(
+  id: string
+): Promise<BrandBackgroundActionResult> {
+  await requireAdmin();
+
+  const existing = await prisma.brandBackground.findUnique({ where: { id } });
+  if (!existing) {
+    return { ok: false, errorCode: "NOT_FOUND", message: "Background not found" };
+  }
+
+  const updated = await generateAndStoreBackgroundPreview(id);
+  if (!updated) {
+    return {
+      ok: false,
+      errorCode: "UNKNOWN",
+      message: "Preview regeneration failed — check that the overlay image is still accessible.",
+    };
+  }
+
+  revalidatePath("/admin/settings");
+  return { ok: true, background: updated };
+}
+
+/**
+ * Backfill preview images for every BrandBackground that has a null or missing
+ * previewImageUrl. Run once from the UI to fix existing records.
+ * Returns counts of successes and failures.
+ */
+export async function backfillAllBackgroundPreviewsAction(): Promise<{
+  ok: boolean;
+  message: string;
+  succeeded: number;
+  failed: number;
+}> {
+  await requireAdmin();
+
+  const targets = await prisma.brandBackground.findMany({
+    where: {
+      OR: [
+        { previewImageUrl: null },
+        { previewImageKey: null },
+      ],
+    },
+    select: { id: true },
+  });
+
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const { id } of targets) {
+    const result = await generateAndStoreBackgroundPreview(id);
+    if (result) {
+      succeeded++;
+    } else {
+      failed++;
+    }
+  }
+
+  revalidatePath("/admin/settings");
+  return {
+    ok: true,
+    message: `Backfill complete: ${succeeded} updated, ${failed} failed.`,
+    succeeded,
+    failed,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Text Zone Analysis
+// ---------------------------------------------------------------------------
+
+// Seed-to-zone derivation table (no API call needed)
+const SEED_ZONES: Record<string, Omit<TextZoneSuggestion, "analyzedAt" | "source">> = {
+  "left-weighted":  { x: 0.32, y: 0.10, width: 0.62, height: 0.80, padding: 0.04, textAlign: "left",   recommendedTextColor: "dark",  confidence: 0.92 },
+  "right-weighted": { x: 0.06, y: 0.10, width: 0.62, height: 0.80, padding: 0.04, textAlign: "left",   recommendedTextColor: "dark",  confidence: 0.92 },
+  "bottom-fade":    { x: 0.08, y: 0.06, width: 0.84, height: 0.65, padding: 0.04, textAlign: "center", recommendedTextColor: "dark",  confidence: 0.90 },
+  "corner":         { x: 0.22, y: 0.06, width: 0.72, height: 0.88, padding: 0.04, textAlign: "left",   recommendedTextColor: "dark",  confidence: 0.88 },
+  "split-diptych":  { x: 0.08, y: 0.00, width: 0.84, height: 0.16, padding: 0.04, textAlign: "center", recommendedTextColor: "dark",  confidence: 0.85 },
+};
+
+export async function analyzeBackgroundTextZoneAction(
+  backgroundId: string
+): Promise<{ ok: true; zone: TextZoneSuggestion } | { ok: false; error: string }> {
+  await requireAdmin();
+
+  const bg = await prisma.brandBackground.findUnique({ where: { id: backgroundId } });
+  if (!bg) return { ok: false, error: "Background not found." };
+
+  // Return cached suggestion if fresh (< 30 days)
+  if (bg.textZoneSuggestion) {
+    const cached = bg.textZoneSuggestion as TextZoneSuggestion;
+    const age = Date.now() - new Date(cached.analyzedAt).getTime();
+    if (age < 30 * 24 * 60 * 60 * 1000) return { ok: true, zone: cached };
+  }
+
+  // Derive deterministically if composition seed is known
+  if (bg.compositionSeed && SEED_ZONES[bg.compositionSeed]) {
+    const zone: TextZoneSuggestion = {
+      ...SEED_ZONES[bg.compositionSeed],
+      source: "derived",
+      analyzedAt: new Date().toISOString(),
+    };
+    await prisma.brandBackground.update({
+      where: { id: backgroundId },
+      data: { textZoneSuggestion: zone as unknown as Prisma.InputJsonValue },
+    });
+    return { ok: true, zone };
+  }
+
+  // Fall back to Gemini vision analysis
+  const imageUrl = bg.previewImageUrl ?? bg.overlayImageUrl;
+  if (!imageUrl) {
+    // Return a safe default zone
+    const fallback: TextZoneSuggestion = {
+      x: 0.05, y: 0.08, width: 0.55, height: 0.84, padding: 0.04,
+      textAlign: "left", recommendedTextColor: "dark", confidence: 0.40,
+      source: "ai-vision", analyzedAt: new Date().toISOString(),
+    };
+    return { ok: true, zone: fallback };
+  }
+
+  try {
+    const zone = await analyzeImageTextZoneWithGemini(imageUrl);
+    await prisma.brandBackground.update({
+      where: { id: backgroundId },
+      data: { textZoneSuggestion: zone as unknown as Prisma.InputJsonValue },
+    });
+    return { ok: true, zone };
+  } catch (err) {
+    console.error("[analyzeBackgroundTextZoneAction] Gemini vision failed:", err);
+    const fallback: TextZoneSuggestion = {
+      x: 0.05, y: 0.08, width: 0.55, height: 0.84, padding: 0.04,
+      textAlign: "left", recommendedTextColor: "dark", confidence: 0.30,
+      source: "ai-vision", analyzedAt: new Date().toISOString(),
+    };
+    return { ok: true, zone: fallback };
+  }
+}
+
+async function analyzeImageTextZoneWithGemini(imageUrl: string): Promise<TextZoneSuggestion> {
+  // Fetch image bytes
+  const res = await fetch(imageUrl);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const mimeType = res.headers.get("content-type") ?? "image/png";
+  const base64 = buffer.toString("base64");
+
+  const prompt = `You are analyzing a presentation slide background image for text placement.
+
+Find the single largest region with:
+- Uniform, low-contrast tonality
+- No visible texture, edges, or objects
+- Enough space for a headline and 2–3 lines of body copy
+
+Return ONLY this JSON object. No explanation, no markdown.
+{"x":0.0,"y":0.0,"width":0.6,"height":0.8,"textAlign":"left","recommendedTextColor":"dark","confidence":0.85}
+
+Rules:
+- x, y, width, height normalized 0.0–1.0 (x+width ≤ 1.0, y+height ≤ 1.0)
+- minimum width 0.35, minimum height 0.30
+- textAlign: "left" if zone in left half, "right" if right half, "center" if centered
+- recommendedTextColor: "dark" if zone is light/neutral, "light" if zone is dark
+- confidence: 0.0–1.0`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: mimeType, data: base64 } },
+            { text: prompt },
+          ],
+        }],
+        generationConfig: { temperature: 0, maxOutputTokens: 200 },
+      }),
+    }
+  );
+
+  if (!response.ok) throw new Error(`Gemini vision failed: ${response.status}`);
+
+  const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+  // Extract JSON from response
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("No JSON in Gemini response");
+
+  const parsed = JSON.parse(match[0]) as {
+    x: number; y: number; width: number; height: number;
+    textAlign: string; recommendedTextColor: string; confidence: number;
+  };
+
+  return {
+    x: Math.max(0, Math.min(0.65, parsed.x)),
+    y: Math.max(0, Math.min(0.70, parsed.y)),
+    width: Math.max(0.35, Math.min(1 - parsed.x, parsed.width)),
+    height: Math.max(0.30, Math.min(1 - parsed.y, parsed.height)),
+    padding: 0.04,
+    textAlign: (["left","center","right"].includes(parsed.textAlign) ? parsed.textAlign : "left") as "left" | "center" | "right",
+    recommendedTextColor: (parsed.recommendedTextColor === "light" ? "light" : "dark") as "light" | "dark",
+    confidence: Math.max(0, Math.min(1, parsed.confidence)),
+    source: "ai-vision",
+    analyzedAt: new Date().toISOString(),
+  };
 }
 

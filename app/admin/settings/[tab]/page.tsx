@@ -90,6 +90,10 @@ export default async function SettingsTabPage({
         isActive: b.isActive,
         sortOrder: b.sortOrder,
         tags: b.tags,
+        generationMode: (b as { generationMode?: string | null }).generationMode ?? null,
+        stylePreset: (b as { stylePreset?: string | null }).stylePreset ?? null,
+        compositionSeed: (b as { compositionSeed?: string | null }).compositionSeed ?? null,
+        textZoneSuggestion: (b as { textZoneSuggestion?: unknown }).textZoneSuggestion as import("@/app/lib/deck/types").TextZoneSuggestion | null ?? null,
       }))}
       iconLibraryContext={{
         companyName: settings.companyName ?? "",

@@ -23,15 +23,24 @@ function createPrismaClient(): PrismaClient {
 
 function getPrisma(): PrismaClient {
   const cached = globalForPrisma.prisma;
-  // Reuse global cached instance only when it has required delegates (company, valuePillar).
+  // Reuse global cached instance only when it has all required model delegates.
   // Dev server caches the PrismaClient across HMR; after schema changes the old instance
-  // can be missing new delegates or have stale column set, causing findMany/column errors.
+  // can be missing new delegates or have a stale WASM query engine, causing field errors.
+  // Add each new model here so stale cached instances are automatically replaced.
   if (
     cached != null &&
     "company" in cached &&
     cached.company !== undefined &&
     "valuePillar" in cached &&
-    cached.valuePillar !== undefined
+    cached.valuePillar !== undefined &&
+    "proposalDeck" in cached &&
+    cached.proposalDeck !== undefined &&
+    "deckSlide" in cached &&
+    cached.deckSlide !== undefined &&
+    "brandBackground" in cached &&
+    cached.brandBackground !== undefined &&
+    "brandIcon" in cached &&
+    cached.brandIcon !== undefined
   ) {
     return cached;
   }

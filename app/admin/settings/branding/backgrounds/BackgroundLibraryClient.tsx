@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { BrandBackgroundForUI, BrandIconForUI } from "../../settings-tabs";
 import {
@@ -9,11 +9,16 @@ import {
   toggleBrandBackgroundActive,
   toggleBackgroundAvailabilityAction,
   updateBrandBackground,
+  regenerateBackgroundPreviewAction,
+  backfillAllBackgroundPreviewsAction,
   type BrandBackgroundCreateData,
   type BrandBackgroundUpdateData,
   type BrandBackgroundActionResult,
   type BrandBackgroundActionErrorCode,
+  type BackgroundGenerationMode,
+  type BackgroundStylePreset,
   generateBackgroundImagesAction,
+  uploadReferenceImageAction,
 } from "./actions";
 import { BackgroundPreviewSurface } from "./BackgroundPreviewSurface";
 
@@ -27,11 +32,45 @@ const SCALE_RANGE = { min: 25, max: 300 };
 const SPACING_RANGE = { min: 10, max: 600 };
 const ROTATION_RANGE = { min: 0, max: 45 };
 
-const BACKGROUND_GEN_TYPES = [
-  { value: "subtle_texture", label: "Subtle texture" },
-  { value: "icon_pattern", label: "Icon pattern" },
-  { value: "gradient_texture", label: "Gradient + texture" },
-] as const;
+const BACKGROUND_GEN_MODES: {
+  value: BackgroundGenerationMode;
+  label: string;
+  description: string;
+  count: string;
+}[] = [
+  {
+    value: "subtle-texture",
+    label: "Subtle Texture",
+    description: "Low-contrast seamless tile. Composited behind text at ~5–15% opacity.",
+    count: "3 results",
+  },
+  {
+    value: "blueprint-overlay",
+    label: "Blueprint Overlay",
+    description: "Architectural line-work tile. Technical / drafting quality, tiled at low opacity.",
+    count: "2 results",
+  },
+  {
+    value: "slide-visual",
+    label: "Slide Visual",
+    description: "Text-safe 16:9 slide backgrounds. 4 single-zone compositions + 1 full-frame concept-to-built split diptych.",
+    count: "5 results",
+  },
+];
+
+const STYLE_PRESETS: { value: BackgroundStylePreset; label: string }[] = [
+  { value: "architectural", label: "Architectural — concrete, steel, geometric forms" },
+  { value: "editorial",     label: "Editorial — design-magazine, high-contrast, refined" },
+  { value: "technical",     label: "Technical — blueprint precision meets luxury brand" },
+  { value: "warm-luxury",   label: "Warm Luxury — linen, stone, warm wood grain" },
+];
+
+const REFERENCE_NOTES: { value: NonNullable<import("./actions").GenerateBackgroundImagesInput["referenceNote"]>; label: string }[] = [
+  { value: "composition",      label: "Borrow the composition / spatial layout" },
+  { value: "style",            label: "Match the overall visual style" },
+  { value: "color-mood",       label: "Draw from the color palette and mood" },
+  { value: "visual-hierarchy", label: "Follow the contrast and emphasis structure" },
+];
 
 type Props = {
   brandIcons: BrandIconForUI[];
@@ -43,7 +82,7 @@ type Props = {
   panelMode?: boolean;
 };
 
-type GeneratedImage = { imageUrl: string; imageKey: string };
+type GeneratedImage = { imageUrl: string; imageKey: string; compositionSeed?: string | null };
 
 type PanelMode = "saved" | "edit";
 
@@ -83,6 +122,8 @@ export function BackgroundLibraryClient({
   const [kebabOpenId, setKebabOpenId] = useState<string | null>(null);
   const [statusById, setStatusById] = useState<Record<string, Status>>({});
   const [errorById, setErrorById] = useState<Record<string, string | null>>({});
+  const [backfillStatus, setBackfillStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
 
   // Builder state (single source of truth)
   const [builderMode, setBuilderMode] = useState<"create" | "edit">("create");
@@ -105,11 +146,18 @@ export function BackgroundLibraryClient({
     overlayRotation: DEFAULT_ROTATION,
   });
 
-  // AI generator state (images feed into builder as overlay images)
+  // AI generator state
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiType, setAiType] = useState<"subtle_texture" | "icon_pattern" | "gradient_texture">(
-    "subtle_texture"
-  );
+  const [aiMode, setAiMode] = useState<BackgroundGenerationMode>("subtle-texture");
+  const [aiStylePreset, setAiStylePreset] = useState<BackgroundStylePreset>("architectural");
+  // Reference image: uploaded to R2 first; only the key+url are kept in state.
+  // No base64 ever touches the Server Action JSON payload.
+  const [aiRefImageKey, setAiRefImageKey] = useState<string | null>(null);
+  const [aiRefImageUrl, setAiRefImageUrl] = useState<string | null>(null);
+  const [aiRefImageMimeType, setAiRefImageMimeType] = useState<string | null>(null);
+  const [aiRefUploading, setAiRefUploading] = useState(false);
+  const [aiRefUploadError, setAiRefUploadError] = useState<string | null>(null);
+  const [aiRefNote, setAiRefNote] = useState<import("./actions").GenerateBackgroundImagesInput["referenceNote"]>(null);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResults, setAiResults] = useState<GeneratedImage[]>([]);
@@ -153,6 +201,37 @@ export function BackgroundLibraryClient({
     });
   }, [visibleBackgrounds, search]);
 
+  // ── Debug: log the live preview recipe whenever the builder draft changes ──
+  // Fires any time a background is loaded into the builder or a control is
+  // adjusted.  Shows exactly what BackgroundPreviewSurface will receive.
+  useEffect(() => {
+    if (!editingId) return;
+    const tileSizePx =
+      builderDraft.overlaySpacing * (builderDraft.overlayScale / 100 || 1);
+    console.log("[BgLib] Live preview recipe", {
+      editingId,
+      builderMode,
+      overlayMode: builderDraft.overlayMode,
+      baseColorHex: builderDraft.baseColorHex,
+      // image overlay
+      overlayImageUrl:
+        builderDraft.overlayMode === "image"
+          ? builderDraft.overlayImageUrl
+          : "(not image mode)",
+      // icon overlay
+      overlayIconId:
+        builderDraft.overlayMode === "icon" ? builderDraft.overlayIconId : "(not icon mode)",
+      overlayOpacity: builderDraft.overlayOpacity,
+      overlayScale: builderDraft.overlayScale,
+      overlaySpacing: builderDraft.overlaySpacing,
+      overlayRotation: builderDraft.overlayRotation,
+      // Derived — what BackgroundPreviewSurface computes
+      computedTileSizePx: tileSizePx,
+      willUseCoverMode: tileSizePx >= 2000,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, builderDraft]);
+
   function parseTagsCsv(raw: string): string[] {
     return raw
       .split(",")
@@ -183,8 +262,28 @@ export function BackgroundLibraryClient({
     });
   }
 
-  function loadBackgroundIntoBuilder(bg: BrandBackgroundForUI) {
-    setPanelModeState("edit");
+  /**
+   * Hydrates all builder state fields from a saved background record.
+   * Does NOT change the panel tab — callers decide whether to switch.
+   */
+  function hydrateBuilderState(bg: BrandBackgroundForUI) {
+    const resolvedOverlayMode = bg.overlayImageUrl ? "image" : bg.overlayIconId ? "icon" : "none";
+    const computedTileSizePx = (bg.overlaySpacing ?? DEFAULT_SPACING) * ((bg.overlayScale ?? DEFAULT_SCALE) / 100 || 1);
+    console.log("[BgLib] hydrateBuilderState", {
+      id: bg.id,
+      name: bg.name,
+      generationMode: bg.generationMode,
+      overlayImageUrl: bg.overlayImageUrl,
+      overlayIconId: bg.overlayIconId,
+      overlayOpacity: bg.overlayOpacity,
+      overlayScale: bg.overlayScale,
+      overlaySpacing: bg.overlaySpacing,
+      overlayRotation: bg.overlayRotation,
+      previewImageUrl: bg.previewImageUrl,
+      resolvedOverlayMode,
+      computedTileSizePx,
+      willUseCoverMode: computedTileSizePx >= 2000,
+    });
     setSelectedBackgroundId(bg.id);
     setBuilderMode("edit");
     setEditingId(bg.id);
@@ -197,11 +296,7 @@ export function BackgroundLibraryClient({
       slug: bg.slug,
       tagsCsv: (bg.tags ?? []).join(", "),
       baseColorHex: bg.baseColorHex ?? "#ffffff",
-      overlayMode: bg.overlayImageUrl
-        ? "image"
-        : bg.overlayIconId
-          ? "icon"
-          : "none",
+      overlayMode: resolvedOverlayMode,
       overlayImageUrl: bg.overlayImageUrl ?? null,
       overlayImageKey: bg.overlayImageKey ?? null,
       overlayIconId: bg.overlayIconId ?? null,
@@ -212,11 +307,19 @@ export function BackgroundLibraryClient({
     });
   }
 
+  function loadBackgroundIntoBuilder(bg: BrandBackgroundForUI) {
+    // Hydrate builder AND switch to Create/Edit panel.
+    // Called by "Edit selected" pill and "Edit this background" kebab item.
+    console.log("[BgLib] loadBackgroundIntoBuilder → switching to edit panel for:", bg.id, bg.name);
+    hydrateBuilderState(bg);
+    setPanelModeState("edit");
+  }
+
   function handleSelectSavedBackground(bg: BrandBackgroundForUI) {
-    setSelectedBackgroundId(bg.id);
-    if (panelModeState === "edit") {
-      loadBackgroundIntoBuilder(bg);
-    }
+    // Card click: hydrate builder so the small selected-preview updates,
+    // but STAY on the Saved Backgrounds panel (no tab switch).
+    console.log("[BgLib] Card selected → hydrating builder (staying on Saved tab):", bg.id, bg.name);
+    hydrateBuilderState(bg);
   }
 
   async function handleSaveBackground() {
@@ -246,6 +349,12 @@ export function BackgroundLibraryClient({
       overlaySpacing: builderDraft.overlaySpacing,
       overlayRotation: builderDraft.overlayRotation,
       tags,
+      // Preserve generation provenance so the record knows how it was created.
+      generationMode: selectedAiKey ? aiMode : undefined,
+      stylePreset: selectedAiKey && aiMode === "slide-visual" ? aiStylePreset : undefined,
+      compositionSeed: selectedAiKey
+        ? (aiResults.find(r => r.imageKey === selectedAiKey)?.compositionSeed ?? null)
+        : null,
     };
 
     const isEdit = builderMode === "edit" && editingId;
@@ -317,6 +426,8 @@ export function BackgroundLibraryClient({
         isActive: bg.isActive,
         sortOrder: bg.sortOrder,
         tags: bg.tags ?? [],
+        generationMode: (bg as { generationMode?: string | null }).generationMode ?? null,
+        stylePreset: (bg as { stylePreset?: string | null }).stylePreset ?? null,
       };
 
       setBackgrounds((prev) => {
@@ -360,6 +471,8 @@ export function BackgroundLibraryClient({
   }
 
   async function handleToggleAvailability(id: string) {
+    const current = backgrounds.find((b) => b.id === id);
+    console.log("[BgLib] Toggling availability for id:", id, "| currently isAvailable:", current?.isAvailable);
     setStatusById((prev) => ({ ...prev, [id]: "saving" }));
     setErrorById((prev) => ({ ...prev, [id]: null }));
 
@@ -443,15 +556,69 @@ export function BackgroundLibraryClient({
     });
   }
 
+  async function handleRegeneratePreview(id: string) {
+    setStatusById((prev) => ({ ...prev, [id]: "saving" }));
+    setErrorById((prev) => ({ ...prev, [id]: null }));
+    const result = await regenerateBackgroundPreviewAction(id);
+    if (!result.ok) {
+      setStatusById((prev) => ({ ...prev, [id]: "error" }));
+      setErrorById((prev) => ({ ...prev, [id]: result.message ?? "Preview regeneration failed" }));
+      return;
+    }
+    // Update the local backgrounds list with the refreshed previewImageUrl
+    if ("background" in result && result.background) {
+      const bg = result.background;
+      setBackgrounds((prev) =>
+        prev.map((b) =>
+          b.id === id
+            ? {
+                ...b,
+                previewImageUrl: (bg as { previewImageUrl?: string | null }).previewImageUrl ?? b.previewImageUrl,
+                previewImageKey: (bg as { previewImageKey?: string | null }).previewImageKey ?? b.previewImageKey,
+              }
+            : b
+        )
+      );
+    }
+    setStatusById((prev) => ({ ...prev, [id]: "idle" }));
+    startTransition(() => { router.refresh(); });
+  }
+
+  async function handleBackfillPreviews() {
+    setBackfillStatus("running");
+    setBackfillMessage(null);
+    const result = await backfillAllBackgroundPreviewsAction();
+    setBackfillStatus(result.ok ? "done" : "error");
+    setBackfillMessage(result.message);
+    startTransition(() => { router.refresh(); });
+  }
+
   async function handleGenerateBackground() {
     setAiGenerating(true);
     setAiError(null);
     setAiResults([]);
     const result = await generateBackgroundImagesAction({
-      prompt: aiPrompt.trim() || "Subtle paper-like texture for document background",
-      type: aiType,
+      prompt: aiPrompt.trim(),
+      mode: aiMode,
+      stylePreset: aiStylePreset,
+      brandContext: {
+        accentColor: effectiveAccent,
+        textColor: effectiveText,
+        companyName: companyName || "Design-Build Company",
+      },
+      // Pass R2 key only — no binary data in the SA payload.
+      // The action fetches bytes from R2 itself and cleans up after use.
+      referenceImageKey: aiRefImageKey,
+      referenceImageMimeType: aiRefImageMimeType,
+      referenceNote: aiRefNote,
     });
     setAiGenerating(false);
+    // The server action deleted the temp ref image from R2 after use.
+    // Clear the client-side ref state so the next generation starts fresh.
+    setAiRefImageKey(null);
+    setAiRefImageUrl(null);
+    setAiRefImageMimeType(null);
+    setAiRefNote(null);
     if (result.error) {
       setAiError(result.error);
       return;
@@ -490,6 +657,13 @@ export function BackgroundLibraryClient({
   function handleSelectAiResult(img: GeneratedImage, index: number) {
     setSelectedAiKey(img.imageKey);
     const existingSlugs = backgrounds.map((b) => b.slug);
+
+    // Default overlay settings vary by mode.
+    // slide-visual: full opacity, non-tiling (large spacing acts as no-repeat)
+    // others: low opacity tile with spacing
+    const isSlideVisual = aiMode === "slide-visual";
+    const modeSlug = aiMode === "slide-visual" ? "slide-visual" : aiMode === "blueprint-overlay" ? "blueprint" : "texture";
+
     setBuilderDraft((prev) => {
       const next: BuilderDraft = {
         ...prev,
@@ -497,19 +671,17 @@ export function BackgroundLibraryClient({
         overlayImageUrl: img.imageUrl,
         overlayImageKey: img.imageKey,
         overlayIconId: null,
-        overlayOpacity: 8,
+        overlayOpacity: isSlideVisual ? 100 : 8,
         overlayScale: 100,
-        overlaySpacing: 140,
+        overlaySpacing: isSlideVisual ? 9999 : 140,
         overlayRotation: 0,
       };
 
       if (!prev.name.trim()) {
-        const name = `AI Background ${index + 1}`;
-        next.name = name;
+        next.name = `AI ${modeSlug.charAt(0).toUpperCase() + modeSlug.slice(1)} ${index + 1}`;
       }
       if (!prev.slug.trim()) {
-        const baseSlug = `ai-background-${index + 1}`;
-        next.slug = generateUniqueSlug(baseSlug, existingSlugs);
+        next.slug = generateUniqueSlug(`ai-${modeSlug}-${index + 1}`, existingSlugs);
       }
 
       return next;
@@ -628,52 +800,186 @@ export function BackgroundLibraryClient({
                   AI Background Generator
                 </h2>
                 <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                  Describe the background style. Generated images can be used as repeating texture overlays.
+                  Choose a mode, describe what you want, then generate.
                 </p>
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleGenerateBackground();
-                  }}
-                  disabled={aiGenerating}
-                  className="inline-flex h-8 items-center justify-center rounded-lg bg-zinc-900 px-3 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                >
-                  {aiGenerating ? "Generating…" : "Generate with AI"}
-                </button>
+              <button
+                type="button"
+                onClick={() => { void handleGenerateBackground(); }}
+                disabled={aiGenerating}
+                className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-3 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {aiGenerating ? "Generating…" : "Generate with AI"}
+              </button>
+            </div>
+
+            {/* Generation mode selector */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Mode</p>
+              <div className="grid grid-cols-1 gap-1.5">
+                {BACKGROUND_GEN_MODES.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setAiMode(opt.value)}
+                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition ${
+                      aiMode === opt.value
+                        ? "border-zinc-900 bg-zinc-900 dark:border-zinc-100 dark:bg-zinc-100"
+                        : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500"
+                    }`}
+                  >
+                    <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-full border-2 ${
+                      aiMode === opt.value
+                        ? "border-white bg-white dark:border-zinc-900 dark:bg-zinc-900"
+                        : "border-zinc-400 bg-transparent dark:border-zinc-500"
+                    }`} />
+                    <span className="min-w-0">
+                      <span className={`block text-[11px] font-semibold leading-tight ${
+                        aiMode === opt.value ? "text-white dark:text-zinc-900" : "text-zinc-900 dark:text-zinc-100"
+                      }`}>
+                        {opt.label}
+                        <span className={`ml-1.5 font-normal opacity-60`}>{opt.count}</span>
+                      </span>
+                      <span className={`block text-[10px] leading-snug mt-0.5 ${
+                        aiMode === opt.value ? "text-zinc-300 dark:text-zinc-600" : "text-zinc-500 dark:text-zinc-400"
+                      }`}>
+                        {opt.description}
+                      </span>
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
-            <div className="space-y-2">
+
+            {/* Style preset — only visible for slide-visual */}
+            {aiMode === "slide-visual" && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Visual Mood</p>
+                <select
+                  value={aiStylePreset}
+                  onChange={(e) => setAiStylePreset(e.target.value as BackgroundStylePreset)}
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
+                >
+                  {STYLE_PRESETS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                  Brand colors ({effectiveAccent}, {effectiveText}) are automatically injected.
+                </p>
+              </div>
+            )}
+
+            {/* Description */}
+            <div className="space-y-1.5">
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                Describe the background style…
+                {aiMode === "slide-visual"
+                  ? "Describe material, texture, or architectural cues…"
+                  : "Describe the texture or pattern…"}
               </label>
+              {aiMode === "slide-visual" && (
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                  Describe materials or architectural elements — not a full scene. The AI will generate 4 background variants (left-weighted, right-weighted, bottom fade, corner).
+                </p>
+              )}
               <textarea
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
-                rows={3}
-                className="w-full max-h-[90px] resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
-                placeholder="e.g. Subtle paper texture, light blueprint grid, soft concrete noise…"
+                rows={2}
+                className="w-full max-h-[80px] resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
+                placeholder={
+                  aiMode === "subtle-texture"
+                    ? "e.g. Soft paper grain, muted linen weave, warm concrete…"
+                    : aiMode === "blueprint-overlay"
+                    ? "e.g. Floor plan fragments, drafting grid, construction detail callouts…"
+                    : "e.g. Warm stone surface, linear wood grain, geometric steel framing…"
+                }
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                Type
-              </label>
-              <select
-                value={aiType}
-                onChange={(e) =>
-                  setAiType(e.target.value as typeof aiType)
-                }
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
-              >
-                {BACKGROUND_GEN_TYPES.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+
+            {/* Optional reference image */}
+            <details className="group">
+              <summary className="cursor-pointer text-[11px] font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 select-none list-none flex items-center gap-1">
+                <span className="group-open:hidden">▶</span>
+                <span className="hidden group-open:inline">▼</span>
+                Optional: reference image
+              </summary>
+              <div className="mt-2 space-y-2 pl-4">
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                  Upload an image to guide — not copy — the output. Choose what to borrow from it.
+                </p>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={aiRefUploading}
+                  className="block w-full text-[11px] text-zinc-600 dark:text-zinc-400 file:mr-2 file:rounded file:border-0 file:bg-zinc-100 file:px-2 file:py-1 file:text-[11px] file:font-medium file:text-zinc-700 disabled:opacity-50 dark:file:bg-zinc-800 dark:file:text-zinc-200"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) {
+                      setAiRefImageKey(null);
+                      setAiRefImageUrl(null);
+                      setAiRefImageMimeType(null);
+                      setAiRefUploadError(null);
+                      return;
+                    }
+                    // Upload to R2 immediately so the SA payload stays key-only.
+                    setAiRefUploading(true);
+                    setAiRefUploadError(null);
+                    setAiRefImageKey(null);
+                    setAiRefImageUrl(null);
+                    const fd = new FormData();
+                    fd.set("file", file);
+                    const result = await uploadReferenceImageAction(fd);
+                    setAiRefUploading(false);
+                    if (!result.ok) {
+                      setAiRefUploadError(result.error);
+                      return;
+                    }
+                    setAiRefImageKey(result.key);
+                    setAiRefImageUrl(result.url);
+                    setAiRefImageMimeType(file.type);
+                  }}
+                />
+                {/* Upload progress / error */}
+                {aiRefUploading && (
+                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                    Uploading…
+                  </p>
+                )}
+                {aiRefUploadError && (
+                  <p className="text-[10px] text-red-600 dark:text-red-400">
+                    {aiRefUploadError}
+                  </p>
+                )}
+                {/* Thumbnail preview + aspect note selector */}
+                {aiRefImageUrl && !aiRefUploading && (
+                  <div className="space-y-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={aiRefImageUrl}
+                      alt="Reference image preview"
+                      className="h-16 w-full rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
+                    />
+                    <p className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+                      What to borrow from it:
+                    </p>
+                    <select
+                      value={aiRefNote ?? ""}
+                      onChange={(e) =>
+                        setAiRefNote((e.target.value || null) as typeof aiRefNote)
+                      }
+                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
+                    >
+                      <option value="">Choose…</option>
+                      {REFERENCE_NOTES.map((n) => (
+                        <option key={n.value} value={n.value}>{n.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </details>
+
             {aiError && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
                 {aiError}
@@ -733,15 +1039,32 @@ export function BackgroundLibraryClient({
         <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start">
           {/* Left: Saved Backgrounds grid */}
           <div className="min-w-0 flex-1 space-y-3 lg:max-w-[360px]">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Saved Backgrounds
                 </h2>
-                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {filteredBackgrounds.length} item
-                  {filteredBackgrounds.length === 1 ? "" : "s"}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    {filteredBackgrounds.length} item{filteredBackgrounds.length === 1 ? "" : "s"}
+                  </span>
+                  {hasBackgrounds && (
+                    <button
+                      type="button"
+                      onClick={() => { void handleBackfillPreviews(); }}
+                      disabled={backfillStatus === "running"}
+                      title="Regenerate missing preview images for all saved backgrounds"
+                      className="inline-flex items-center rounded-md border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-600 shadow-sm transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    >
+                      {backfillStatus === "running" ? "Fixing…" : "Fix previews"}
+                    </button>
+                  )}
+                </div>
               </div>
+              {backfillMessage && (
+                <p className={`text-[11px] ${backfillStatus === "error" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                  {backfillMessage}
+                </p>
+              )}
               {!hasBackgrounds ? (
                 <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
                   <p className="font-medium text-zinc-800 dark:text-zinc-100">
@@ -770,46 +1093,76 @@ export function BackgroundLibraryClient({
                           ? brandIcons.find((i) => i.id === bg.overlayIconId)?.imageUrl ?? null
                           : null;
 
-                      const effectivePreviewUrl =
-                        bg.previewImageUrl ??
-                        bg.overlayImageUrl ??
-                        overlayIconImageUrl ??
-                        null;
+                      // Thumbnail opacity: boost to minimum 70% so low-opacity textures
+                      // (subtle-texture / blueprint at 6–8%) are visible in the card grid.
+                      // The actual design opacity is preserved in the builder live preview.
+                      const thumbnailOpacity = Math.max(bg.overlayOpacity ?? DEFAULT_OPACITY, 70);
+
+                      const resolvedOverlayMode = bg.overlayImageUrl ? "image" : overlayIconImageUrl ? "icon" : "none";
+                      const computedTileSizePx = (bg.overlaySpacing ?? DEFAULT_SPACING) * ((bg.overlayScale ?? DEFAULT_SCALE) / 100 || 1);
+                      console.log("[BgLib] Card render", {
+                        id: bg.id,
+                        name: bg.name,
+                        generationMode: bg.generationMode,
+                        baseColorHex: bg.baseColorHex,
+                        overlayType: resolvedOverlayMode,
+                        overlayImageUrl: bg.overlayImageUrl ?? null,
+                        overlayIconImageUrl,
+                        overlayOpacity: bg.overlayOpacity,
+                        thumbnailOpacity,
+                        overlayScale: bg.overlayScale,
+                        overlaySpacing: bg.overlaySpacing,
+                        computedTileSizePx,
+                        willUseCoverMode: computedTileSizePx >= 2000,
+                        previewImageUrl: bg.previewImageUrl,
+                      });
 
                       return (
                         <article
                           key={bg.id}
-                          className={`relative flex flex-col rounded-xl border bg-white p-3 text-xs shadow-sm dark:bg-zinc-900 ${
+                          className={`relative flex flex-col rounded-xl border bg-white text-xs shadow-sm transition-shadow dark:bg-zinc-900 ${
                             isSelected
                               ? "border-zinc-900 ring-2 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
-                              : "border-zinc-200 dark:border-zinc-800"
+                              : "border-zinc-200 hover:border-zinc-400 hover:shadow-md dark:border-zinc-800 dark:hover:border-zinc-600"
                           }`}
                         >
+                          {/* ── Kebab overlay (stopPropagation so card click doesn't fire) ── */}
                           {isKebabOpen && (
                             <>
                               <div
                                 className="fixed inset-0 z-10"
                                 aria-hidden
-                                onClick={() => setKebabOpenId(null)}
+                                onClick={(e) => { e.stopPropagation(); setKebabOpenId(null); }}
                               />
-                              <div className="absolute left-3 top-7 z-20 min-w-[140px] rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                              <div className="absolute right-2 top-8 z-20 min-w-[148px] rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     loadBackgroundIntoBuilder(bg);
                                     setKebabOpenId(null);
                                   }}
                                   className="block w-full px-3 py-1.5 text-left text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                 >
-                                  Edit
+                                  Edit this background
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    void handleToggleActive(
-                                      bg.id,
-                                      bg.isActive
-                                    );
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleRegeneratePreview(bg.id);
+                                    setKebabOpenId(null);
+                                  }}
+                                  disabled={status === "saving" || pending}
+                                  className="block w-full px-3 py-1.5 text-left text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                >
+                                  Regenerate preview
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleToggleActive(bg.id, bg.isActive);
                                     setKebabOpenId(null);
                                   }}
                                   disabled={status === "saving" || pending}
@@ -819,7 +1172,8 @@ export function BackgroundLibraryClient({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     void handleDelete(bg.id, bg.name);
                                     setKebabOpenId(null);
                                   }}
@@ -832,69 +1186,79 @@ export function BackgroundLibraryClient({
                             </>
                           )}
 
-                          <div className="mb-2">
+                          {/* ── Selectable card body — clicking anywhere here loads into builder ── */}
+                          <button
+                            type="button"
+                            onClick={() => handleSelectSavedBackground(bg)}
+                            className="flex w-full flex-col gap-0 rounded-t-xl p-3 pb-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-inset"
+                            aria-label={`Select background: ${bg.name}`}
+                          >
+                            {/* Thumbnail — opacity boosted to min 70% so low-opacity textures are visible */}
+                            <BackgroundPreviewSurface
+                              recipe={{
+                                baseColorHex: bg.baseColorHex ?? "#f5f4f1",
+                                overlayImageUrl: bg.overlayImageUrl ?? null,
+                                overlayOpacity: thumbnailOpacity,
+                                overlayScale: bg.overlayScale ?? DEFAULT_SCALE,
+                                overlaySpacing: bg.overlaySpacing ?? DEFAULT_SPACING,
+                                overlayRotation: bg.overlayRotation ?? DEFAULT_ROTATION,
+                                overlayIconImageUrl: overlayIconImageUrl,
+                              }}
+                              className="mb-2 h-24 w-full"
+                            >
+                              {/* Selected badge */}
+                              {isSelected && (
+                                <span className="absolute left-1.5 top-1.5 inline-flex items-center rounded-full bg-zinc-900/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-zinc-100/90 dark:text-zinc-900">
+                                  Selected
+                                </span>
+                              )}
+                              {/* Base-color-only hint */}
+                              {!bg.overlayImageUrl && !overlayIconImageUrl && (
+                                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-zinc-400 dark:text-zinc-500 pointer-events-none">
+                                  Base color only
+                                </span>
+                              )}
+                            </BackgroundPreviewSurface>
+
+                            {/* Name / slug */}
+                            <p
+                              className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100"
+                              title={bg.name}
+                            >
+                              {bg.name}
+                            </p>
+                            {bg.slug && (
+                              <p
+                                className="truncate text-[11px] text-zinc-500 dark:text-zinc-400"
+                                title={bg.slug}
+                              >
+                                {bg.slug}
+                              </p>
+                            )}
+                          </button>
+
+                          {/* ── Bottom bar: active badge, kebab, availability toggle ── */}
+                          <div className="flex items-center justify-between gap-2 border-t border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                            {/* Left: availability toggle — stopPropagation so it doesn't bubble to card */}
                             <button
                               type="button"
-                              onClick={() => handleSelectSavedBackground(bg)}
-                              className="block w-full text-left"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleToggleAvailability(bg.id);
+                              }}
+                              disabled={status === "saving" || pending}
+                              title={bg.isAvailable ? "Click to mark unavailable" : "Click to mark available"}
+                              className={`inline-flex h-6 items-center rounded-full px-2 text-[10px] font-medium transition ${
+                                bg.isAvailable
+                                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50"
+                                  : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                              } disabled:opacity-50`}
                             >
-                              {effectivePreviewUrl ? (
-                                <div className="relative h-24 w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
-                                  <img
-                                    src={effectivePreviewUrl}
-                                    alt={bg.name}
-                                    className="h-full w-full object-cover"
-                                  />
-                                  {isSelected && (
-                                    <span className="absolute left-1.5 top-1.5 inline-flex items-center rounded-full bg-zinc-900/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-zinc-100/90 dark:text-zinc-900">
-                                      Selected
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <BackgroundPreviewSurface
-                                  recipe={{
-                                    baseColorHex: bg.baseColorHex ?? "#ffffff",
-                                    overlayImageUrl: bg.overlayImageUrl ?? null,
-                                    overlayOpacity:
-                                      bg.overlayOpacity ?? DEFAULT_OPACITY,
-                                    overlayScale: bg.overlayScale ?? DEFAULT_SCALE,
-                                    overlaySpacing:
-                                      bg.overlaySpacing ?? DEFAULT_SPACING,
-                                    overlayRotation:
-                                      bg.overlayRotation ?? DEFAULT_ROTATION,
-                                    overlayIconImageUrl:
-                                      overlayIconImageUrl,
-                                  }}
-                                  className="h-24 w-full"
-                                >
-                                  {isSelected && (
-                                    <span className="absolute left-1.5 top-1.5 inline-flex items-center rounded-full bg-zinc-900/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-zinc-100/90 dark:text-zinc-900">
-                                      Selected
-                                    </span>
-                                  )}
-                                </BackgroundPreviewSurface>
-                              )}
+                              {bg.isAvailable ? "Available" : "Unavailable"}
                             </button>
-                          </div>
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <p
-                                className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100"
-                                title={bg.name}
-                              >
-                                {bg.name}
-                              </p>
-                              {bg.slug && (
-                                <p
-                                  className="truncate text-[11px] text-zinc-500 dark:text-zinc-400"
-                                  title={bg.slug}
-                                >
-                                  {bg.slug}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex flex-col items-end gap-1">
+
+                            {/* Right: active badge + kebab */}
+                            <div className="flex items-center gap-1.5">
                               <span
                                 className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
                                   bg.isActive
@@ -906,39 +1270,22 @@ export function BackgroundLibraryClient({
                               </span>
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setKebabOpenId(isKebabOpen ? null : bg.id)
-                                }
-                                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setKebabOpenId(isKebabOpen ? null : bg.id);
+                                }}
+                                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
                                 aria-label="Actions"
                               >
-                                <svg
-                                  className="h-4 w-4"
-                                  fill="currentColor"
-                                  viewBox="0 0 20 20"
-                                >
+                                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                                 </svg>
                               </button>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleToggleAvailability(bg.id);
-                            }}
-                            disabled={status === "saving" || pending}
-                            className={`mt-2 inline-flex h-7 items-center justify-center rounded-md px-2.5 text-[11px] font-medium shadow-sm transition ${
-                              bg.isAvailable
-                                ? "border border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:border-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                                : "border border-zinc-300 bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400"
-                            }`}
-                          >
-                            {bg.isAvailable ? "Available" : "Unavailable"}
-                          </button>
+
                           {error && (
-                            <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">
+                            <p className="px-3 pb-2 text-[10px] text-red-600 dark:text-red-400">
                               {error}
                             </p>
                           )}
