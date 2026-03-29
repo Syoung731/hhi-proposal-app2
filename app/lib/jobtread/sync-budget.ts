@@ -764,7 +764,7 @@ export async function syncNormalizedJobBudget(
 
       if (dataToInsert.length > 0) {
         await tx.syncedBudgetRow.createMany({
-          data: dataToInsert as Parameters<typeof tx.syncedBudgetRow.createMany>[0]["data"],
+          data: dataToInsert as never,
         });
       }
     },
