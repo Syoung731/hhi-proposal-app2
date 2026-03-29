@@ -174,6 +174,13 @@ export async function rebuildPricingStaging(
   roomsCount: number;
   tradesCount: number;
   scope: "full" | "jobs";
+  classificationSummary: {
+    buildJobsFound: number;
+    buildJobsIncluded: number;
+    jobsSynced: number;
+    syncedBudgetRowsWritten: number;
+    unchangedCount: number;
+  };
 }> {
   const jobIds = options?.jobIds?.length ? options.jobIds : undefined;
   const scope = jobIds ? "jobs" : "full";
@@ -676,6 +683,13 @@ export async function rebuildPricingStaging(
     roomsCount,
     tradesCount,
     scope,
+    classificationSummary: {
+      buildJobsFound: jobs.length,
+      buildJobsIncluded: jobs.length,
+      jobsSynced: jobs.length,
+      syncedBudgetRowsWritten: jobs.reduce((sum, j) => sum + j.rows.length, 0),
+      unchangedCount: 0,
+    },
   };
 
   finalizeNormalizationStats(normalizationStats, {
@@ -721,7 +735,7 @@ export async function rebuildPricingStaging(
     totalSell: normalizeNumber(t.totalSell) ?? 0,
   }));
 
-  const deleteJobFilter = jobIds?.length ? { where: { jobId: { in: jobIds } } } : {};
+  const deleteJobFilter = jobIds?.length ? { where: { jobId: { in: jobIds } } } : undefined;
 
   await prisma.$transaction(
     async (tx) => {
