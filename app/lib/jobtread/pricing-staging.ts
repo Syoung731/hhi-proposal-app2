@@ -183,7 +183,7 @@ export async function rebuildPricingStaging(
   };
 }> {
   const jobIds = options?.jobIds?.length ? options.jobIds : undefined;
-  const scope = jobIds ? "jobs" : "full";
+  const scope: "jobs" | "full" = jobIds ? "jobs" : "full";
 
   const normalizationStats = createNormalizationStatsCollector();
   const [jobs, sectionTypes] = await Promise.all([
