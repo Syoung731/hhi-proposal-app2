@@ -9,6 +9,7 @@
 import { createHash } from "crypto";
 import { Prisma } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
+import { logDevError, logDevSyncRun, updateDevSyncRun } from "@/src/lib/dev-context";
 import type {
   NormalizedJobBudget,
   NormalizedBudgetItem,
@@ -97,7 +98,7 @@ function hasUndefined(value: unknown): boolean {
  * - Replaces NaN/Infinity with null
  * - Plain objects only (no class instances); non-plain objects replaced with null
  */
-function toPrismaJson(value: unknown): Prisma.InputJsonValue {
+function toPrismaJson(value: unknown): Prisma.InputJsonValue | null {
   if (value === undefined) return null;
   if (value === null) return null;
   if (typeof value === "boolean" || typeof value === "string") return value;
@@ -654,6 +655,15 @@ export async function syncNormalizedJobBudget(
   let status: "success" | "warning" | "error" = "success";
   let message: string | null = null;
 
+  const syncRunId = await logDevSyncRun({
+    jobId,
+    status: "running",
+    summary: "jobtread sync started (syncNormalizedJobBudget)",
+    route: "jobtread/syncNormalizedJobBudget",
+  });
+
+  try {
+
   // --- All expensive work before the transaction ---
   const rows = flattenBudgetToCanonicalRows(budget);
   if (
@@ -773,7 +783,40 @@ export async function syncNormalizedJobBudget(
   }
 
   logSyncResult(jobId, rowCount, sellTotal, costTotal, status);
+  if (syncRunId != null) {
+    const completionSummary =
+      status === "warning" && message
+        ? `completed with warning: ${message}`
+        : `completed (rows=${rowCount}, sell=${sellTotal.toFixed(2)}, cost=${costTotal.toFixed(2)})`;
+    await updateDevSyncRun(syncRunId, {
+      status: "success",
+      summary: completionSummary,
+      errorMessage: status === "warning" ? message : null,
+      route: "jobtread/syncNormalizedJobBudget",
+    });
+  }
   return { status, message, rowCount, sellTotal, costTotal };
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    await logDevError({
+      source: "server",
+      severity: "error",
+      message: `JobTread syncNormalizedJobBudget failed: ${errMsg}`,
+      route: "jobtread/syncNormalizedJobBudget",
+      component: "syncNormalizedJobBudget",
+      jobId,
+      stack: e instanceof Error ? e.stack ?? null : null,
+    });
+    if (syncRunId != null) {
+      await updateDevSyncRun(syncRunId, {
+        status: "failed",
+        summary: "jobtread sync failed (syncNormalizedJobBudget)",
+        errorMessage: errMsg,
+        route: "jobtread/syncNormalizedJobBudget",
+      });
+    }
+    throw e;
+  }
 }
 
 /**
@@ -784,12 +827,38 @@ export async function syncJobBudget(jobId: string): Promise<SyncJobBudgetResult>
   const now = new Date();
   let status: "success" | "warning" | "error" = "success";
   let message: string | null = null;
+  let didCallSyncNormalizedJobBudget = false;
+  const env = process.env.NODE_ENV === "production" ? "production" : "local";
 
   try {
     const budget = await fetchNormalizedJobBudget(jobId);
     if (!budget) {
       status = "error";
       message = "Job not found or budget unavailable.";
+
+      const syncRunId = await logDevSyncRun({
+        jobId,
+        status: "running",
+        summary: "jobtread sync started (budget unavailable)",
+        route: "/api/admin/jobtread/sync-budget",
+      });
+      if (syncRunId != null) {
+        await updateDevSyncRun(syncRunId, {
+          status: "failed",
+          summary: "jobtread sync failed (budget unavailable)",
+          errorMessage: message,
+          route: "/api/admin/jobtread/sync-budget",
+        });
+      }
+      await logDevError({
+        source: "server",
+        severity: "error",
+        message: message ?? "JobTread sync failed",
+        route: "/api/admin/jobtread/sync-budget",
+        component: "syncJobBudget",
+        jobId,
+        env,
+      });
       await prisma.$transaction(async (tx) => {
         await upsertSyncedBudgetJob(tx, {
           jobId,
@@ -816,6 +885,7 @@ export async function syncJobBudget(jobId: string): Promise<SyncJobBudgetResult>
       return { status, message, rowCount: 0, sellTotal: 0, costTotal: 0 };
     }
 
+    didCallSyncNormalizedJobBudget = true;
     return await syncNormalizedJobBudget(budget);
   } catch (e) {
     status = "error";
@@ -839,6 +909,33 @@ export async function syncJobBudget(jobId: string): Promise<SyncJobBudgetResult>
           : `JobTread budget fetch failed at step ${step}`;
     } else {
       message = e instanceof Error ? e.message : String(e);
+    }
+
+    if (!didCallSyncNormalizedJobBudget) {
+      const syncRunId = await logDevSyncRun({
+        jobId,
+        status: "running",
+        summary: "jobtread sync started (exception before normalized sync)",
+        route: "/api/admin/jobtread/sync-budget",
+      });
+      if (syncRunId != null) {
+        await updateDevSyncRun(syncRunId, {
+          status: "failed",
+          summary: "jobtread sync failed (exception)",
+          errorMessage: message ?? null,
+          route: "/api/admin/jobtread/sync-budget",
+        });
+      }
+      await logDevError({
+        source: "server",
+        severity: "error",
+        message: message ?? "JobTread sync failed",
+        route: "/api/admin/jobtread/sync-budget",
+        component: "syncJobBudget",
+        jobId,
+        env,
+        stack: e instanceof Error ? e.stack ?? null : null,
+      });
     }
     try {
       await prisma.$transaction(async (tx) => {
