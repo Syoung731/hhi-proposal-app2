@@ -118,7 +118,7 @@ function toPrismaJson(value: unknown): Prisma.InputJsonValue | null {
     if (Object.prototype.toString.call(value) !== "[object Object]") {
       return null;
     }
-    const out: Record<string, Prisma.InputJsonValue> = {};
+    const out: Record<string, Prisma.InputJsonValue | null> = {};
     for (const [k, v] of Object.entries(obj)) {
       if (v === undefined) continue;
       const safe = toPrismaJson(v);
