@@ -1,43 +1,15 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+// Auth proxy stub — Clerk removed for development.
+// This passthrough replaces the Clerk redirect so all admin routes
+// are accessible without authentication.
+// Restore real Clerk proxy before production.
+
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-// Routes where proxy runs but no auth is required (Clerk can still run).
-// "/" and "/p/*" are NOT listed — they are excluded by config.matcher so proxy never runs for them.
-const isPublicRoute = createRouteMatcher([
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/api/(.*)",
-  "/trpc/(.*)",
-]);
+export default function proxy(_request: NextRequest) {
+  return NextResponse.next();
+}
 
-const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
-
-export default clerkMiddleware(
-  async (auth, req) => {
-    if (isPublicRoute(req)) {
-      return NextResponse.next();
-    }
-
-    if (isAdminRoute(req)) {
-      const { userId } = await auth();
-
-      if (!userId) {
-        const signInUrl = new URL("/sign-in", req.url);
-        signInUrl.searchParams.set("redirect_url", req.url);
-        return NextResponse.redirect(signInUrl);
-      }
-    }
-
-    return NextResponse.next();
-  },
-  {
-    signInUrl: "/sign-in",
-    signUpUrl: "/sign-up",
-  }
-);
-
-// Clerk proxy runs ONLY on these routes. "/" and "/p/*" are explicitly NOT included,
-// so those routes bypass proxy entirely (no Clerk).
 export const config = {
   matcher: [
     "/admin/:path*",

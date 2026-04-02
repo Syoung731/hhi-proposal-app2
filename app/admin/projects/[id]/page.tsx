@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
 import { listActiveStylePresets, listSectionTypes, getOrCreateCompanySettings } from "@/app/admin/settings/actions";
+import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 import { ProjectTabs } from "./tabs";
 
 const TAB = "tab";
@@ -54,8 +55,12 @@ export default async function AdminProjectPage({
   const tab = (typeof sp[TAB] === "string" ? sp[TAB] : undefined) || "overview";
   const roomIdFromUrl = typeof sp.roomId === "string" ? sp.roomId : undefined;
 
+  // recomputeInvestmentRollups runs in parallel with non-project lookups so the
+  // investmentLineItems returned by getProject always reflect the latest SectionType
+  // rates — even for rooms whose totalLow/totalHigh was never written (stale rows
+  // set via updateRoomsSectionType before Fix A).
   const [project, stylePresets, sectionTypes, companySettings] = await Promise.all([
-    getProject(id),
+    recomputeInvestmentRollups(id).catch(() => null).then(() => getProject(id)),
     listActiveStylePresets(),
     listSectionTypes(),
     getOrCreateCompanySettings(),

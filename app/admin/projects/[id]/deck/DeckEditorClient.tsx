@@ -362,6 +362,20 @@ export function DeckEditorClient({
     );
   }, [activeSlideId]);
 
+  /**
+   * Update aiBackground directly on the active slide WITHOUT going through
+   * updateSlide, so isUserModified is never touched by this operation.
+   * Pass null to clear the current AI background.
+   */
+  const handleAiBackgroundChange = useCallback((url: string | null) => {
+    if (!activeSlideId) return;
+    setSlides((prev) =>
+      prev.map((s) =>
+        s.id === activeSlideId ? { ...s, aiBackground: url ?? undefined } : s
+      )
+    );
+  }, [activeSlideId]);
+
   const duplicateSlide = useCallback((id: string) => {
     setSlides((prev) => {
       const idx = prev.findIndex((s) => s.id === id);
@@ -604,6 +618,29 @@ export function DeckEditorClient({
     }
   }, [projectId, slides]);
 
+  // ── Re-sync investment slide ───────────────────────────────────────────────
+  // Clears isUserModified on the investment slide, saves all slides, then
+  // re-runs the full server sync so fresh line items are injected.
+  const handleResyncInvestment = useCallback(async () => {
+    // Build updated slide list with isUserModified cleared on the investment slide.
+    const updatedSlides = slides.map((s) =>
+      s.type === "investment" ? { ...s, isUserModified: false } : s
+    );
+    setSlides(updatedSlides);
+    setSaveStatus("saving");
+    // Pass updatedSlides directly so refreshDeckAction saves the cleared flag
+    // before re-running the sync — avoids the async-state timing issue.
+    const result = await refreshDeckAction(projectId, updatedSlides);
+    if (result.slides && result.slides.length > 0) {
+      const sorted = result.slides.sort((a, b) => a.order - b.order);
+      setSlides(sorted);
+      setActiveSlideId((prev) => (result.slides!.find((s) => s.id === prev) ? prev : sorted[0]?.id ?? prev));
+      setSaveStatus("saved");
+    } else {
+      setSaveStatus(result.error ? "error" : "saved");
+    }
+  }, [projectId, slides]);
+
   // ── Auto-generate Scope Breakdown slide ───────────────────────────────────
   // Builds ONE scope-breakdown slide covering every room that does NOT have a
   // proposal-selected render.  Only one such slide is allowed per deck.
@@ -808,6 +845,7 @@ export function DeckEditorClient({
         <InspectorPanel
           slide={activeSlide}
           branding={branding}
+          projectId={projectId}
           onUpdate={updateSlide}
           onDuplicate={duplicateSlide}
           onRemove={removeSlide}
@@ -816,6 +854,8 @@ export function DeckEditorClient({
           brandBackgrounds={brandBackgrounds}
           onBackgroundChange={handleBackgroundChange}
           onTextZoneChange={handleTextZoneChange}
+          onAiBackgroundChange={handleAiBackgroundChange}
+          onResyncInvestment={handleResyncInvestment}
         />
       </div>
     </div>

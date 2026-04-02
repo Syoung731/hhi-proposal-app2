@@ -8,6 +8,14 @@ import { GoogleGenAI } from "@google/genai";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-image";
 
+/**
+ * Model for text-to-image generation (no input image required).
+ * Separate from GEMINI_MODEL which is used for image-in → image-out editing.
+ * Override via GEMINI_IMAGE_GEN_MODEL env var if needed.
+ */
+const GEMINI_IMAGE_GEN_MODEL =
+  process.env.GEMINI_IMAGE_GEN_MODEL ?? "imagen-4.0-fast-generate-001";
+
 async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
@@ -370,4 +378,69 @@ Do not include any other text, headers, or numbering. Only the bullets or NONE.`
   return {
     differences: bullets.slice(0, 6),
   };
+}
+
+// ─── Text-to-image generation ─────────────────────────────────────────────────
+
+export type GenerateSlideBackgroundResult = {
+  bytes: Buffer;
+  mimeType: string;
+};
+
+/**
+ * Generate a slide background image from a text prompt using Imagen 4.
+ * No input image required — pure text-to-image via the standard Gemini API key.
+ *
+ * Uses GEMINI_IMAGE_GEN_MODEL env var (default: "imagen-4.0-fast-generate-001").
+ * Override with "imagen-4.0-generate-001" or "imagen-4.0-ultra-generate-001"
+ * for higher quality when needed.
+ *
+ * This is intentionally separate from GEMINI_MODEL (image-in → image-out editing).
+ */
+export async function generateSlideBackground(
+  prompt: string
+): Promise<GenerateSlideBackgroundResult> {
+  if (!GEMINI_API_KEY?.trim()) {
+    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+
+  let response: Awaited<ReturnType<typeof ai.models.generateImages>>;
+  try {
+    response = await ai.models.generateImages({
+      model: GEMINI_IMAGE_GEN_MODEL,
+      prompt,
+      config: {
+        numberOfImages: 1,
+        outputMimeType: "image/png",
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Imagen image generation failed: ${msg}`);
+  }
+
+  const generated = (
+    response as { generatedImages?: unknown[] }
+  )?.generatedImages;
+
+  if (!generated?.length) {
+    throw new Error("Imagen returned no generated images.");
+  }
+
+  const imageData = (
+    generated[0] as { image?: { imageBytes?: string; mimeType?: string } }
+  )?.image;
+
+  if (!imageData?.imageBytes) {
+    throw new Error(
+      "Imagen returned an image record with no imageBytes — the prompt may have been blocked."
+    );
+  }
+
+  const bytes = Buffer.from(imageData.imageBytes, "base64");
+  const mimeType = imageData.mimeType ?? "image/png";
+
+  return { bytes, mimeType };
 }

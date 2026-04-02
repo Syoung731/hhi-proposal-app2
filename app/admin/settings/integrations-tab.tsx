@@ -10,6 +10,9 @@ import {
   getSyncedBudgetInspectorAction,
   parseAndSyncBudgetTextAction,
   parseAndSyncBudgetJsonAction,
+  getAnthropicIntegrationAction,
+  saveAnthropicApiKeyAction,
+  testAnthropicConnectionAction,
 } from "./actions";
 import type { CompanySettingsForUI } from "./settings-tabs";
 
@@ -331,6 +334,77 @@ export function IntegrationsTab({ settings }: Props) {
       setPasteJsonSyncError(result.error);
     }
   }
+
+  // --- Anthropic state ---
+  type AnthropicState = Awaited<ReturnType<typeof getAnthropicIntegrationAction>>;
+  const [anthropic, setAnthropic] = useState<AnthropicState | null>(null);
+  const [anthropicLoading, setAnthropicLoading] = useState(true);
+  const [anthropicSaveStatus, setAnthropicSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [anthropicSaveError, setAnthropicSaveError] = useState<string | null>(null);
+  const [anthropicTestStatus, setAnthropicTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [anthropicTestResult, setAnthropicTestResult] = useState<string | null>(null);
+  const [anthropicTestError, setAnthropicTestError] = useState<string | null>(null);
+
+  const refreshAnthropic = useCallback(async () => {
+    const data = await getAnthropicIntegrationAction();
+    setAnthropic(data);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAnthropicIntegrationAction().then((data) => {
+      if (!cancelled) {
+        setAnthropic(data);
+        setAnthropicLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleAnthropicSave(formData: FormData) {
+    setAnthropicSaveStatus("saving");
+    setAnthropicSaveError(null);
+    const result = await saveAnthropicApiKeyAction(formData);
+    if (result.error) {
+      setAnthropicSaveStatus("error");
+      setAnthropicSaveError(result.error);
+      return;
+    }
+    setAnthropicSaveStatus("saved");
+    await refreshAnthropic();
+    router.refresh();
+    setTimeout(() => setAnthropicSaveStatus("idle"), 3000);
+  }
+
+  async function handleAnthropicTest() {
+    setAnthropicTestStatus("testing");
+    setAnthropicTestError(null);
+    setAnthropicTestResult(null);
+    const result = await testAnthropicConnectionAction();
+    if (result.ok) {
+      setAnthropicTestStatus("ok");
+      setAnthropicTestResult(`Connected — model: ${result.model}`);
+      await refreshAnthropic();
+      router.refresh();
+    } else {
+      setAnthropicTestStatus("error");
+      setAnthropicTestError(result.error ?? "Connection failed");
+    }
+    setTimeout(() => setAnthropicTestStatus("idle"), 5000);
+  }
+
+  const anthropicBadge: "connected" | "error" | "not_connected" =
+    anthropicTestStatus === "ok"
+      ? "connected"
+      : anthropicTestStatus === "error"
+        ? "error"
+        : anthropic?.lastStatus === "success"
+          ? "connected"
+          : anthropic?.lastStatus === "error"
+            ? "error"
+            : anthropic?.hasApiKey
+              ? "connected"
+              : "not_connected";
 
   const badgeState = getConnectionBadgeState(jobTread);
 
@@ -767,6 +841,114 @@ export function IntegrationsTab({ settings }: Props) {
                 </div>
               </div>
             )}
+          </div>
+        )}
+      </section>
+
+      {/* Anthropic (Claude AI) integration */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+            Anthropic (Claude AI)
+          </h3>
+          <span
+            className={
+              anthropicBadge === "connected"
+                ? "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-800/40 dark:text-green-200"
+                : anthropicBadge === "error"
+                  ? "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800/40 dark:text-red-200"
+                  : "inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+            }
+          >
+            {anthropicBadge === "connected"
+              ? "Connected"
+              : anthropicBadge === "error"
+                ? "Error"
+                : "Not Connected"}
+          </span>
+        </div>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Powers the AI Estimate Engine. Paste your API key below — it is stored encrypted in the database.
+        </p>
+
+        {anthropicLoading ? (
+          <p className="text-sm text-zinc-500">Loading…</p>
+        ) : (
+          <div className="flex flex-col gap-6 rounded-xl border border-zinc-200 bg-zinc-50/50 p-6 dark:border-zinc-700 dark:bg-zinc-800/30">
+            {/* API key form */}
+            <form action={handleAnthropicSave} className="flex flex-col gap-4">
+              <div>
+                <label htmlFor="anthropicApiKey" className={labelClass}>
+                  API key
+                </label>
+                <input
+                  id="anthropicApiKey"
+                  name="anthropicApiKey"
+                  type="password"
+                  placeholder={anthropic?.hasApiKey ? "••••••••  (saved — paste new key to replace)" : "sk-ant-api03-..."}
+                  className={inputClass}
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Get a key from{" "}
+                  <a
+                    href="https://console.anthropic.com/settings/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-zinc-700 dark:hover:text-zinc-200"
+                  >
+                    console.anthropic.com
+                  </a>
+                  . Leave blank to keep the existing key.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={anthropicSaveStatus === "saving"}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                >
+                  {anthropicSaveStatus === "saving" ? "Saving…" : "Save Key"}
+                </button>
+                {anthropicSaveStatus === "saved" && (
+                  <span className="text-sm text-green-600 dark:text-green-400">
+                    Saved successfully.
+                  </span>
+                )}
+                {anthropicSaveStatus === "error" && anthropicSaveError && (
+                  <span className="text-sm text-red-600 dark:text-red-400">
+                    {anthropicSaveError}
+                  </span>
+                )}
+              </div>
+            </form>
+
+            {/* Test connection */}
+            <div className="flex items-center gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={handleAnthropicTest}
+                disabled={anthropicTestStatus === "testing" || !anthropic?.hasApiKey}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {anthropicTestStatus === "testing" ? "Testing…" : "Test Connection"}
+              </button>
+              {anthropicTestStatus === "ok" && anthropicTestResult && (
+                <span className="text-sm text-green-600 dark:text-green-400">
+                  {anthropicTestResult}
+                </span>
+              )}
+              {anthropicTestStatus === "error" && anthropicTestError && (
+                <span className="text-sm text-red-600 dark:text-red-400">
+                  {anthropicTestError}
+                </span>
+              )}
+              {anthropicTestStatus === "idle" && anthropic?.lastStatus === "success" && (
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Last tested: {anthropic.lastTestedAt ? new Date(anthropic.lastTestedAt).toLocaleString() : "—"}
+                </span>
+              )}
+            </div>
           </div>
         )}
       </section>

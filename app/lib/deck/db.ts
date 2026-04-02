@@ -26,6 +26,7 @@ import type {
   BeforeAfterContent,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
+  InvestmentContent,
 } from "./types";
 
 // ─── Internal type alias ─────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ function dbToSlide(row: DbRow): ProposalSlide {
     textZone: (row as { textZone?: unknown }).textZone
       ? ((row as { textZone?: unknown }).textZone as import("@/app/lib/deck/types").TextZoneSetting)
       : null,
+    aiBackground: (row as { aiBackground?: string | null }).aiBackground ?? null,
   };
 }
 
@@ -405,6 +407,71 @@ async function syncScopeBreakdownSlide(
   }
 }
 
+// ─── Auto-sync: Investment slide ─────────────────────────────────────────────
+
+/**
+ * Keeps the investment slide content in sync with the project's
+ * InvestmentLineItem records.
+ *
+ * Mirrors the before/after sync pattern:
+ * - Runs on every page load.
+ * - Skipped when isUserModified = true (user has taken ownership of the content).
+ * - Always overwrites lineItems so additions, deletions, and edits in the
+ *   Investment tab are immediately reflected.
+ */
+async function syncInvestmentSlide(
+  _deckId: string,
+  projectId: string,
+  existing: DbRow[]
+): Promise<void> {
+  // Find the investment slide — skip if the user has manually edited it.
+  const investmentRow = existing.find((r) => r.type === "investment");
+  if (!investmentRow || investmentRow.isUserModified) return;
+
+  // Fetch all line items included in totals, in presentation order.
+  const items = await prisma.investmentLineItem.findMany({
+    where: { projectId, includeInTotals: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  // Check if the project has a COPE room with pricing data
+  const copeRoom = await prisma.room.findFirst({
+    where: { projectId, isProjectOverhead: true },
+    select: { totalLow: true, totalTarget: true, totalHigh: true },
+  });
+  const hasCopePricing = copeRoom && (copeRoom.totalLow != null || copeRoom.totalTarget != null || copeRoom.totalHigh != null);
+
+  // Preserve retainerLabel / retainerAmount / address the user may have set
+  // in the inspector — only replace lineItems.
+  const currentContent = (investmentRow.content ?? {}) as InvestmentContent;
+  const lineItems = items.map((item) => ({
+    id: item.id,
+    label: item.label,
+    bucket: String(item.bucket ?? ""),
+    rangeLow: item.rangeLow ?? null,
+    rangeTarget: item.rangeTarget ?? null,
+    rangeHigh: item.rangeHigh ?? null,
+    overrideLow: item.overrideLow ?? null,
+    overrideTarget: item.overrideTarget ?? null,
+    overrideHigh: item.overrideHigh ?? null,
+    isOverride: item.isOverride,
+    includeInTotals: item.includeInTotals,
+    sortOrder: item.sortOrder,
+    // Mark the BASE line item as containing COPE data when a COPE room has pricing
+    isCope: item.bucket === "BASE" && hasCopePricing ? true : undefined,
+  }));
+  const updatedContent: InvestmentContent = {
+    ...currentContent,
+    lineItems,
+  };
+
+  await prisma.deckSlide.update({
+    where: { id: investmentRow.id },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: { content: updatedContent as any },
+  });
+}
+
 // ─── Backfill: default slides added after initial seed ────────────────────────
 
 /**
@@ -552,6 +619,7 @@ export async function getDeckForProject({
   // Auto-sync auto-generated slide types.
   await syncBeforeAfterSlides(deck.id, existing, roomsWithMedia);
   await syncScopeBreakdownSlide(deck.id, existing, roomsWithMedia);
+  await syncInvestmentSlide(deck.id, projectId, existing);
 
   // Return final visible slides.
   const final = await prisma.deckSlide.findMany({
@@ -612,6 +680,7 @@ export async function saveAllSlides(
         backgroundId: slide.backgroundId ?? null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         textZone: slide.textZone !== undefined ? (slide.textZone as any) : null,
+        aiBackground: slide.aiBackground ?? null,
       };
 
       await tx.deckSlide.upsert({

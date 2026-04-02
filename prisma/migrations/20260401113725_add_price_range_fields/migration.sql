@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "CompanyContext" ADD COLUMN     "priceRangeHighPct" DOUBLE PRECISION DEFAULT 10,
+ADD COLUMN     "priceRangeLowPct" DOUBLE PRECISION DEFAULT -10;
+
+-- AlterTable
+ALTER TABLE "EstimateLineItem" ADD COLUMN     "totalPriceHigh" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "totalPriceLow" DOUBLE PRECISION NOT NULL DEFAULT 0;

@@ -14,6 +14,7 @@ import { LOGO_DEFAULTS } from "@/app/lib/deck/types";
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ function AbsoluteLogo({
         transformOrigin: "top left",
         transform: `scale(${scale})`,
         maxWidth: "60%",
-        zIndex: 50,
+        zIndex: 100,
         pointerEvents: "none", // never blocks slide interaction
       }}
     >
@@ -208,7 +209,7 @@ function HeroImageLayout({ slide, branding }: Props) {
             <h1
               className="font-serif leading-tight"
               style={{
-                fontSize: "2.1em",
+                fontSize: "2.8em",
                 fontWeight: 700,
                 color: branding.textColor,
                 lineHeight: 1.15,
@@ -268,7 +269,7 @@ function HeroImageLayout({ slide, branding }: Props) {
           </p>
           <h1
             className="font-serif leading-tight"
-            style={{ fontSize: "2.1em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.35em" }}
+            style={{ fontSize: "2.8em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.35em" }}
           >
             {slide.subheadline || "Project Investment\n& Design Concept"}
           </h1>
@@ -509,7 +510,7 @@ function RightPanelOverlayLayout({ slide, branding }: Props) {
             <h1
               className="font-serif"
               style={{
-                fontSize: "1.85em",
+                fontSize: "2.5em",
                 fontWeight: 700,
                 color: branding.textColor,
                 lineHeight: 1.15,
@@ -574,7 +575,7 @@ function RightPanelOverlayLayout({ slide, branding }: Props) {
           )}
           <h1
             className="font-serif"
-            style={{ fontSize: "1.85em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.35em" }}
+            style={{ fontSize: "2.5em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.35em" }}
           >
             {slide.subheadline || "Project Proposal"}
           </h1>
@@ -665,7 +666,7 @@ function SplitDarkEditorialLayout({ slide, branding }: Props) {
             <h1
               className="font-serif"
               style={{
-                fontSize: "2.0em",
+                fontSize: "2.6em",
                 fontWeight: 700,
                 color: "#FFFFFF",
                 lineHeight: 1.15,
@@ -748,7 +749,7 @@ function SplitDarkEditorialLayout({ slide, branding }: Props) {
           )}
           <h1
             className="font-serif"
-            style={{ fontSize: "2.0em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.3em" }}
+            style={{ fontSize: "2.6em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.3em" }}
           >
             {slide.subheadline || "Project Proposal"}
           </h1>
@@ -868,7 +869,7 @@ function BottomCardOverlayLayout({ slide, branding }: Props) {
           <h1
             className="font-serif"
             style={{
-              fontSize: "1.7em",
+              fontSize: "2.2em",
               fontWeight: 700,
               color: branding.textColor,
               lineHeight: 1.15,
@@ -925,7 +926,7 @@ function BottomCardOverlayLayout({ slide, branding }: Props) {
           )}
           <h1
             className="font-serif"
-            style={{ fontSize: "1.7em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.3em" }}
+            style={{ fontSize: "2.2em", fontWeight: 700, lineHeight: 1.15, marginBottom: "0.3em" }}
           >
             {slide.subheadline || "Project Proposal"}
           </h1>
@@ -958,6 +959,7 @@ function BottomCardOverlayLayout({ slide, branding }: Props) {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
+// hasAiBackground accepted; CoverSlide layouts have transparent roots by default.
 export function CoverSlide({ slide, branding }: Props) {
   switch (slide.layoutKey) {
     case "hero-image":

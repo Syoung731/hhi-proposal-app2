@@ -6,16 +6,28 @@ import {
 } from "../app/generated/prisma/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-dotenv.config();
+// Load .env first, then .env.local (override) — mirrors Next.js behavior.
+// .env.local is where real local credentials live in Next.js projects.
+dotenv.config({ path: ".env" });
+dotenv.config({ path: ".env.local", override: true });
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is missing for seed.");
+// Prefer DIRECT_URL (non-pooler) for the seed script.
+// prisma.config.ts documents this: the pooler endpoint can cause advisory-lock
+// timeouts and doesn't support the standard TCP connections that PrismaPg/pg needs.
+// Fall back to DATABASE_URL so the script still works in environments that only
+// set one of the two.
+const seedConnectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+if (!seedConnectionString) {
+  throw new Error(
+    "Neither DIRECT_URL nor DATABASE_URL is set. " +
+    "Add DIRECT_URL (non-pooler Neon URL) to .env or .env.local."
+  );
 }
 
 // Prisma 7 requires an adapter OR accelerateUrl.
 // We are using Neon Postgres directly, so we use PrismaPg adapter.
 const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: seedConnectionString,
 });
 
 const prisma = new PrismaClient({
@@ -29,6 +41,92 @@ function slugify(title: string): string {
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
 }
+
+// ─── Brand Backgrounds ───────────────────────────────────────────────────────
+// 10 curated backgrounds matching HHI brand aesthetic.
+// description is not a BrandBackground schema field — omitted.
+const BRAND_BACKGROUNDS_SEED = [
+  {
+    slug: "blueprint-grid",
+    name: "Blueprint Grid",
+    baseColorHex: "#F8F9FA",
+    generationMode: "blueprint-overlay",
+    stylePreset: "technical",
+    sortOrder: 1,
+  },
+  {
+    slug: "warm-linen",
+    name: "Warm Linen",
+    baseColorHex: "#F8F4EE",
+    generationMode: "subtle-texture",
+    stylePreset: "warm-luxury",
+    sortOrder: 2,
+  },
+  {
+    slug: "navy-solid",
+    name: "Navy Dark",
+    baseColorHex: "#1A2332",
+    generationMode: "subtle-texture",
+    stylePreset: "architectural",
+    sortOrder: 3,
+  },
+  {
+    slug: "architectural-sketch",
+    name: "Architectural Sketch",
+    baseColorHex: "#F5F2EC",
+    generationMode: "blueprint-overlay",
+    stylePreset: "warm-luxury",
+    sortOrder: 4,
+  },
+  {
+    slug: "pure-white",
+    name: "Clean White",
+    baseColorHex: "#FFFFFF",
+    generationMode: "subtle-texture",
+    stylePreset: "editorial",
+    sortOrder: 5,
+  },
+  {
+    slug: "navy-blueprint",
+    name: "Blueprint Dark",
+    baseColorHex: "#003153",
+    generationMode: "blueprint-overlay",
+    stylePreset: "technical",
+    sortOrder: 6,
+  },
+  {
+    slug: "warm-gray",
+    name: "Warm Gray",
+    baseColorHex: "#F0EDEA",
+    generationMode: "subtle-texture",
+    stylePreset: "editorial",
+    sortOrder: 7,
+  },
+  {
+    slug: "charcoal-dark",
+    name: "Charcoal",
+    baseColorHex: "#2D2D2D",
+    generationMode: "subtle-texture",
+    stylePreset: "architectural",
+    sortOrder: 8,
+  },
+  {
+    slug: "coastal-sand",
+    name: "Coastal Sand",
+    baseColorHex: "#EDE8DF",
+    generationMode: "subtle-texture",
+    stylePreset: "warm-luxury",
+    sortOrder: 9,
+  },
+  {
+    slug: "grid-overlay-light",
+    name: "Graph Paper",
+    baseColorHex: "#FAFAFA",
+    generationMode: "blueprint-overlay",
+    stylePreset: "technical",
+    sortOrder: 10,
+  },
+] as const;
 
 // Full HHI Builders RoomTypes (standard). Exterior room types are marked isExterior: true.
 const ROOM_TYPES_SEED = [
@@ -292,6 +390,113 @@ async function main() {
     });
     console.log("Created default CompanySettings row.");
   }
+
+  // Ensure one CompanyContext row exists (singleton for AI pricing).
+  const DEFAULT_ESTIMATION_ASSUMPTIONS = `STANDARD ESTIMATION ASSUMPTIONS:
+1. CEILING HEIGHT: If ceiling height is not provided, assume 9 ft standard ceiling height. If ceiling height IS provided, use the given height.
+2. WALL AREA CALCULATION: For a room with dimensions L x W and ceiling height H: Total wall linear feet = 2*(L + W). Total wall square footage = Total wall linear feet x H. Subtract openings: each standard door = 21 SF, each window = 12 SF. For bathrooms: subtract tiled areas from paintable wall SF.
+3. FLOOR AREA: Use the provided square footage exactly. Do not reduce floor area unless the scope explicitly states partial flooring.
+4. DRYWALL: When scope says "to studs" or "gut", assume ALL walls and ceiling in the room need new drywall. Wall SF + ceiling SF = total drywall.
+5. SCOPE BOUNDARIES: Only include items that are clearly within the described scope of work. If the scope says "all other fixtures to remain," do NOT include replacement of those fixtures. If adding an item that is not explicitly in the scope, you MUST explain why it is necessary in the notes field.
+6. ELECTRICAL: Do not add new electrical runs unless the scope explicitly calls for new circuits, relocated outlets, or new lighting. Minor reconnection for existing fixtures after demo is included in the trade's base labor.
+7. PAINT: After new drywall, all new surfaces need primer + 2 coats. Calculate paint SF from wall + ceiling areas minus tiled surfaces.
+8. PROTECTION: Content protection (Ram Board, plastic sheeting), final construction cleaning, dumpster/waste removal, permits, and supervision are all handled at the PROJECT level in the COPE budget. Do NOT include any of these items in room-level estimates.
+9. QUANTITIES: Always show your math in the notes field. Example: "48 SF room, 9 ft ceilings, walls = 2*(8+6)*9 = 252 SF minus 21 SF door = 231 SF wall area"`;
+
+  const companyContextCount = await prisma.companyContext.count();
+  if (companyContextCount === 0) {
+    await prisma.companyContext.create({
+      data: {
+        market: "Hilton Head Island, SC",
+        marketNotes:
+          "Second home/vacation market, coastal construction premium. Island location affects material delivery costs. Hurricane-rated construction requirements.",
+        clientProfile:
+          "Luxury residential renovation, $150K-$500K+ projects. Discerning homeowners expect high-end finishes and premium materials.",
+        defaultFinishTier: "high-end",
+        standardInclusions:
+          "The following are handled at the project level in COPE and should NOT be included in room-level estimates: project supervision, content protection (Ram Board), construction cleaning, dumpster/waste removal, port-o-let, permit coordination.",
+        markupStructure:
+          "Catalog items have unitCost (our cost) and unitPrice (client price). Markup varies by trade and item type — it is already baked into the catalog prices. Do not apply additional markup. Use unitPrice from catalog as-is.",
+        estimationAssumptions: DEFAULT_ESTIMATION_ASSUMPTIONS,
+      },
+    });
+    console.log("Created default CompanyContext row for AI pricing.");
+  } else {
+    // Backfill estimationAssumptions if missing
+    const existingCtx = await prisma.companyContext.findFirst();
+    if (existingCtx && !existingCtx.estimationAssumptions) {
+      await prisma.companyContext.update({
+        where: { id: existingCtx.id },
+        data: { estimationAssumptions: DEFAULT_ESTIMATION_ASSUMPTIONS },
+      });
+      console.log("Backfilled estimationAssumptions on CompanyContext.");
+    }
+
+    // Update old PROTECTION rule to exclude COPE items from room estimates
+    if (existingCtx && existingCtx.estimationAssumptions) {
+      const updated = existingCtx.estimationAssumptions.replace(
+        /8\. PROTECTION: Every project includes content protection[^\n]*Include these as standard\./,
+        "8. PROTECTION: Content protection (Ram Board, plastic sheeting), final construction cleaning, dumpster/waste removal, permits, and supervision are all handled at the PROJECT level in the COPE budget. Do NOT include any of these items in room-level estimates."
+      );
+      if (updated !== existingCtx.estimationAssumptions) {
+        await prisma.companyContext.update({
+          where: { id: existingCtx.id },
+          data: { estimationAssumptions: updated },
+        });
+        console.log("Updated estimation assumptions to exclude COPE items from room estimates.");
+      }
+    }
+
+    // Update standardInclusions to clarify COPE items are project-level
+    if (existingCtx && existingCtx.standardInclusions) {
+      const oldInclusions = "Project supervision, content protection (Ram Board), construction cleaning, dumpster/waste removal, port-o-let, permit coordination";
+      if (existingCtx.standardInclusions === oldInclusions) {
+        await prisma.companyContext.update({
+          where: { id: existingCtx.id },
+          data: {
+            standardInclusions:
+              "The following are handled at the project level in COPE and should NOT be included in room-level estimates: project supervision, content protection (Ram Board), construction cleaning, dumpster/waste removal, port-o-let, permit coordination.",
+          },
+        });
+        console.log("Updated standardInclusions to clarify COPE items are project-level.");
+      }
+    }
+  }
+
+  // Brand backgrounds: upsert by slug so re-running seed is safe
+  for (const bg of BRAND_BACKGROUNDS_SEED) {
+    await prisma.brandBackground.upsert({
+      where: { slug: bg.slug },
+      create: {
+        slug: bg.slug,
+        name: bg.name,
+        baseColorHex: bg.baseColorHex,
+        generationMode: bg.generationMode,
+        stylePreset: bg.stylePreset,
+        sortOrder: bg.sortOrder,
+        isActive: true,
+        isAvailable: true,
+        tags: [],
+      },
+      update: {
+        name: bg.name,
+        baseColorHex: bg.baseColorHex,
+        generationMode: bg.generationMode,
+        stylePreset: bg.stylePreset,
+        sortOrder: bg.sortOrder,
+        isActive: true,
+        isAvailable: true,
+      },
+    });
+  }
+  console.log("Brand backgrounds upserted:", BRAND_BACKGROUNDS_SEED.length);
+
+  // Flag COPE template as project overhead
+  await prisma.roomTemplate.updateMany({
+    where: { displayName: "COPE" },
+    data: { isProjectOverhead: true },
+  });
+  console.log("Flagged COPE template as project overhead.");
 
   console.log("Seed complete. Sample project slug:", slug);
 }

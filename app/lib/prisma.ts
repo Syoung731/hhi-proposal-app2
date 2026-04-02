@@ -40,7 +40,19 @@ function getPrisma(): PrismaClient {
     "brandBackground" in cached &&
     cached.brandBackground !== undefined &&
     "brandIcon" in cached &&
-    cached.brandIcon !== undefined
+    cached.brandIcon !== undefined &&
+    "pricingCatalogItem" in cached &&
+    cached.pricingCatalogItem !== undefined &&
+    "roomTemplate" in cached &&
+    cached.roomTemplate !== undefined &&
+    "companyContext" in cached &&
+    cached.companyContext !== undefined &&
+    "aIEstimate" in cached &&
+    cached.aIEstimate !== undefined &&
+    "priceCorrection" in cached &&
+    cached.priceCorrection !== undefined &&
+    "catalogSuggestion" in cached &&
+    cached.catalogSuggestion !== undefined
   ) {
     return cached;
   }

@@ -5,10 +5,12 @@ import type {
   DeckBranding,
   ScopeOverviewContent,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 interface LayoutProps {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 // ─── Empty-state placeholder for image slots ─────────────────────────────────
@@ -55,12 +57,12 @@ function ImagePlaceholder({ label }: { label?: string }) {
 // Left 42 %: label + large serif title + accent rule + description
 // Right 58 %: 1 or 2 images stacked with a 2 px gap
 
-function SplitPanelLayout({ slide, branding }: LayoutProps) {
+function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const imageUrls = (content.selectedPhotos ?? []).map((p) => p.url).filter(Boolean).slice(0, 2);
   const title = slide.headline ?? "Scope Overview";
   const description = content.description ?? "";
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const titleSize  = content.titleSize  ?? 1.5;
   const titleColor = content.titleColor ?? branding.textColor;
@@ -122,7 +124,7 @@ function SplitPanelLayout({ slide, branding }: LayoutProps) {
         <h2 className="font-serif" style={{ fontSize: `${2.4 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.15, marginBottom: "0.5em" }}>
           {title}
         </h2>
-        <div style={{ width: "2.5em", height: 2, background: branding.accentColor, flexShrink: 0 }} />
+        <TitleAccentRule accentColor={branding.accentColor} marginTop="0" />
       </div>
 
       {/* ── Description (absolutely positioned) ───────────────────────────── */}
@@ -154,12 +156,12 @@ function SplitPanelLayout({ slide, branding }: LayoutProps) {
 // Top 38 %: eyebrow + title + accent rule + description (left-aligned)
 // Bottom 62 %: 3–4 images in a full-bleed horizontal row
 
-function ImageRowLayout({ slide, branding }: LayoutProps) {
+function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const imageUrls = (content.selectedPhotos ?? []).map((p) => p.url).filter(Boolean).slice(0, 4);
   const title = slide.headline ?? "Scope Overview";
   const description = content.description ?? "";
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const titleSize  = content.titleSize  ?? 1.5;
   const titleColor = content.titleColor ?? branding.textColor;
@@ -214,7 +216,7 @@ function ImageRowLayout({ slide, branding }: LayoutProps) {
         <h2 className="font-serif" style={{ fontSize: `${2.2 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.15, marginBottom: "0.5em" }}>
           {title}
         </h2>
-        <div style={{ width: "2.5em", height: 2, background: branding.accentColor, flexShrink: 0 }} />
+        <TitleAccentRule accentColor={branding.accentColor} marginTop="0" />
       </div>
 
       {/* ── Description (absolutely positioned) ───────────────────────────── */}
@@ -244,12 +246,12 @@ function ImageRowLayout({ slide, branding }: LayoutProps) {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
-export function ScopeOverviewSlide({ slide, branding }: LayoutProps) {
+export function ScopeOverviewSlide({ slide, branding, hasAiBackground }: LayoutProps) {
   switch (slide.layoutKey) {
     case "image-row":
-      return <ImageRowLayout slide={slide} branding={branding} />;
+      return <ImageRowLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "split-panel":
     default:
-      return <SplitPanelLayout slide={slide} branding={branding} />;
+      return <SplitPanelLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 }

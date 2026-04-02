@@ -32,30 +32,43 @@ const SCALE_RANGE = { min: 25, max: 300 };
 const SPACING_RANGE = { min: 10, max: 600 };
 const ROTATION_RANGE = { min: 0, max: 45 };
 
-const BACKGROUND_GEN_MODES: {
-  value: BackgroundGenerationMode;
+type AiCard = "subtle" | "hero";
+
+const AI_CARDS: {
+  value: AiCard;
   label: string;
   description: string;
-  count: string;
 }[] = [
   {
-    value: "subtle-texture",
-    label: "Subtle Texture",
-    description: "Low-contrast seamless tile. Composited behind text at ~5–15% opacity.",
-    count: "3 results",
+    value: "subtle",
+    label: "Subtle",
+    description: "Clean & understated — sits behind text without competing. Best for scope, investment, and text-heavy slides.",
   },
   {
-    value: "blueprint-overlay",
-    label: "Blueprint Overlay",
-    description: "Architectural line-work tile. Technical / drafting quality, tiled at low opacity.",
-    count: "2 results",
+    value: "hero",
+    label: "Hero",
+    description: "Dramatic & bold — for covers, statements, and closing slides. Generates with text-safe zones built in.",
   },
-  {
-    value: "slide-visual",
-    label: "Slide Visual",
-    description: "Text-safe 16:9 slide backgrounds. 4 single-zone compositions + 1 full-frame concept-to-built split diptych.",
-    count: "5 results",
-  },
+];
+
+const SUBTLE_PROMPT_SUGGESTIONS = [
+  "Warm linen paper texture",
+  "Soft concrete surface",
+  "Fine sand grain, coastal",
+  "Aged parchment, warm cream",
+  "Brushed travertine stone",
+  "Cotton canvas weave",
+];
+
+const HERO_PROMPT_SUGGESTIONS = [
+  "Lowcountry luxury home, deep porches and live oaks",
+  "Coastal kitchen renovation, warm natural materials",
+  "Hilton Head marsh view at golden hour",
+  "Tabby and cypress exterior, Southern coastal style",
+  "Luxury bathroom with natural stone and warm wood",
+  "Architectural details, standing-seam roof and cedar",
+  "Blueprint to finished coastal home transformation",
+  "Palmetto trees and warm evening light on a porch",
 ];
 
 const STYLE_PRESETS: { value: BackgroundStylePreset; label: string }[] = [
@@ -82,7 +95,7 @@ type Props = {
   panelMode?: boolean;
 };
 
-type GeneratedImage = { imageUrl: string; imageKey: string; compositionSeed?: string | null };
+type GeneratedImage = { imageUrl: string; imageKey: string; compositionSeed?: string | null; actualMode?: BackgroundGenerationMode };
 
 type PanelMode = "saved" | "edit";
 
@@ -100,6 +113,7 @@ type BuilderDraft = {
   overlayScale: number;
   overlaySpacing: number;
   overlayRotation: number;
+  generationMode?: string | null;
 };
 
 type Status = "idle" | "saving" | "error";
@@ -144,11 +158,13 @@ export function BackgroundLibraryClient({
     overlayScale: DEFAULT_SCALE,
     overlaySpacing: DEFAULT_SPACING,
     overlayRotation: DEFAULT_ROTATION,
+    generationMode: null,
   });
 
   // AI generator state
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiMode, setAiMode] = useState<BackgroundGenerationMode>("subtle-texture");
+  const [aiCard, setAiCard] = useState<AiCard>("subtle");
+  const [aiAdvancedOpen, setAiAdvancedOpen] = useState(false);
   const [aiStylePreset, setAiStylePreset] = useState<BackgroundStylePreset>("architectural");
   // Reference image: uploaded to R2 first; only the key+url are kept in state.
   // No base64 ever touches the Server Action JSON payload.
@@ -259,6 +275,7 @@ export function BackgroundLibraryClient({
       overlayScale: DEFAULT_SCALE,
       overlaySpacing: DEFAULT_SPACING,
       overlayRotation: DEFAULT_ROTATION,
+      generationMode: null,
     });
   }
 
@@ -304,6 +321,7 @@ export function BackgroundLibraryClient({
       overlayScale: bg.overlayScale ?? DEFAULT_SCALE,
       overlaySpacing: bg.overlaySpacing ?? DEFAULT_SPACING,
       overlayRotation: bg.overlayRotation ?? DEFAULT_ROTATION,
+      generationMode: bg.generationMode ?? null,
     });
   }
 
@@ -350,8 +368,8 @@ export function BackgroundLibraryClient({
       overlayRotation: builderDraft.overlayRotation,
       tags,
       // Preserve generation provenance so the record knows how it was created.
-      generationMode: selectedAiKey ? aiMode : undefined,
-      stylePreset: selectedAiKey && aiMode === "slide-visual" ? aiStylePreset : undefined,
+      generationMode: selectedAiKey ? (aiResults.find(r => r.imageKey === selectedAiKey)?.actualMode ?? undefined) : undefined,
+      stylePreset: selectedAiKey && aiResults.find(r => r.imageKey === selectedAiKey)?.actualMode === "slide-visual" ? aiStylePreset : undefined,
       compositionSeed: selectedAiKey
         ? (aiResults.find(r => r.imageKey === selectedAiKey)?.compositionSeed ?? null)
         : null,
@@ -597,35 +615,69 @@ export function BackgroundLibraryClient({
     setAiGenerating(true);
     setAiError(null);
     setAiResults([]);
-    const result = await generateBackgroundImagesAction({
-      prompt: aiPrompt.trim(),
-      mode: aiMode,
-      stylePreset: aiStylePreset,
-      brandContext: {
-        accentColor: effectiveAccent,
-        textColor: effectiveText,
-        companyName: companyName || "Design-Build Company",
-      },
-      // Pass R2 key only — no binary data in the SA payload.
-      // The action fetches bytes from R2 itself and cleans up after use.
-      referenceImageKey: aiRefImageKey,
-      referenceImageMimeType: aiRefImageMimeType,
-      referenceNote: aiRefNote,
-    });
-    setAiGenerating(false);
-    // The server action deleted the temp ref image from R2 after use.
-    // Clear the client-side ref state so the next generation starts fresh.
-    setAiRefImageKey(null);
-    setAiRefImageUrl(null);
-    setAiRefImageMimeType(null);
-    setAiRefNote(null);
-    if (result.error) {
-      setAiError(result.error);
-      return;
-    }
-    if (result.images?.length) {
-      setAiResults(result.images);
-      setSelectedAiKey(null);
+
+    const brandContext = {
+      accentColor: effectiveAccent,
+      textColor: effectiveText,
+      companyName: companyName || "Design-Build Company",
+    };
+
+    if (aiCard === "subtle") {
+      // Two parallel calls — pass the ref image only to the first (texture) call
+      // since the server action deletes it from R2 after reading.
+      const [textureResult, blueprintResult] = await Promise.all([
+        generateBackgroundImagesAction({
+          prompt: aiPrompt.trim(),
+          mode: "subtle-texture",
+          brandContext,
+          referenceImageKey: aiRefImageKey,
+          referenceImageMimeType: aiRefImageMimeType,
+          referenceNote: aiRefNote,
+        }),
+        generateBackgroundImagesAction({
+          prompt: aiPrompt.trim(),
+          mode: "blueprint-overlay",
+          brandContext,
+        }),
+      ]);
+      setAiGenerating(false);
+      setAiRefImageKey(null);
+      setAiRefImageUrl(null);
+      setAiRefImageMimeType(null);
+      setAiRefNote(null);
+
+      const error = textureResult.error ?? blueprintResult.error ?? null;
+      if (error) { setAiError(error); return; }
+
+      const merged: GeneratedImage[] = [
+        ...(textureResult.images ?? []).map((img) => ({ ...img, actualMode: "subtle-texture" as BackgroundGenerationMode })),
+        ...(blueprintResult.images ?? []).map((img) => ({ ...img, actualMode: "blueprint-overlay" as BackgroundGenerationMode })),
+      ];
+      if (merged.length) {
+        setAiResults(merged);
+        setSelectedAiKey(null);
+      }
+    } else {
+      // Hero: single slide-visual call
+      const result = await generateBackgroundImagesAction({
+        prompt: aiPrompt.trim(),
+        mode: "slide-visual",
+        stylePreset: aiStylePreset,
+        brandContext,
+        referenceImageKey: aiRefImageKey,
+        referenceImageMimeType: aiRefImageMimeType,
+        referenceNote: aiRefNote,
+      });
+      setAiGenerating(false);
+      setAiRefImageKey(null);
+      setAiRefImageUrl(null);
+      setAiRefImageMimeType(null);
+      setAiRefNote(null);
+      if (result.error) { setAiError(result.error); return; }
+      if (result.images?.length) {
+        setAiResults(result.images.map((img) => ({ ...img, actualMode: "slide-visual" as BackgroundGenerationMode })));
+        setSelectedAiKey(null);
+      }
     }
   }
 
@@ -661,8 +713,9 @@ export function BackgroundLibraryClient({
     // Default overlay settings vary by mode.
     // slide-visual: full opacity, non-tiling (large spacing acts as no-repeat)
     // others: low opacity tile with spacing
-    const isSlideVisual = aiMode === "slide-visual";
-    const modeSlug = aiMode === "slide-visual" ? "slide-visual" : aiMode === "blueprint-overlay" ? "blueprint" : "texture";
+    const actualMode = img.actualMode ?? "subtle-texture";
+    const isSlideVisual = actualMode === "slide-visual";
+    const modeSlug = actualMode === "slide-visual" ? "slide-visual" : actualMode === "blueprint-overlay" ? "blueprint" : "texture";
 
     setBuilderDraft((prev) => {
       const next: BuilderDraft = {
@@ -794,205 +847,197 @@ export function BackgroundLibraryClient({
 
           {/* AI generator card */}
           <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  AI Background Generator
-                </h2>
-                <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                  Choose a mode, describe what you want, then generate.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => { void handleGenerateBackground(); }}
-                disabled={aiGenerating}
-                className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-3 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                {aiGenerating ? "Generating…" : "Generate with AI"}
-              </button>
-            </div>
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              AI Background Generator
+            </h2>
 
-            {/* Generation mode selector */}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Mode</p>
-              <div className="grid grid-cols-1 gap-1.5">
-                {BACKGROUND_GEN_MODES.map((opt) => (
+            {/* Two large selectable cards */}
+            <div className="grid grid-cols-2 gap-2">
+              {AI_CARDS.map((card) => {
+                const isActive = aiCard === card.value;
+                return (
                   <button
-                    key={opt.value}
+                    key={card.value}
                     type="button"
-                    onClick={() => setAiMode(opt.value)}
-                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition ${
-                      aiMode === opt.value
+                    onClick={() => setAiCard(card.value)}
+                    className={`flex flex-col gap-1 rounded-xl border p-3 text-left transition ${
+                      isActive
                         ? "border-zinc-900 bg-zinc-900 dark:border-zinc-100 dark:bg-zinc-100"
                         : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500"
                     }`}
                   >
-                    <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-full border-2 ${
-                      aiMode === opt.value
-                        ? "border-white bg-white dark:border-zinc-900 dark:bg-zinc-900"
-                        : "border-zinc-400 bg-transparent dark:border-zinc-500"
-                    }`} />
-                    <span className="min-w-0">
-                      <span className={`block text-[11px] font-semibold leading-tight ${
-                        aiMode === opt.value ? "text-white dark:text-zinc-900" : "text-zinc-900 dark:text-zinc-100"
-                      }`}>
-                        {opt.label}
-                        <span className={`ml-1.5 font-normal opacity-60`}>{opt.count}</span>
-                      </span>
-                      <span className={`block text-[10px] leading-snug mt-0.5 ${
-                        aiMode === opt.value ? "text-zinc-300 dark:text-zinc-600" : "text-zinc-500 dark:text-zinc-400"
-                      }`}>
-                        {opt.description}
-                      </span>
+                    <span className={`text-sm font-bold leading-tight ${isActive ? "text-white dark:text-zinc-900" : "text-zinc-900 dark:text-zinc-100"}`}>
+                      {card.label}
+                    </span>
+                    <span className={`text-[10px] leading-snug ${isActive ? "text-zinc-300 dark:text-zinc-600" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      {card.description}
                     </span>
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
 
-            {/* Style preset — only visible for slide-visual */}
-            {aiMode === "slide-visual" && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Visual Mood</p>
-                <select
-                  value={aiStylePreset}
-                  onChange={(e) => setAiStylePreset(e.target.value as BackgroundStylePreset)}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
-                >
-                  {STYLE_PRESETS.map((p) => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                  Brand colors ({effectiveAccent}, {effectiveText}) are automatically injected.
-                </p>
-              </div>
-            )}
-
-            {/* Description */}
+            {/* Prompt input */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                {aiMode === "slide-visual"
-                  ? "Describe material, texture, or architectural cues…"
-                  : "Describe the texture or pattern…"}
-              </label>
-              {aiMode === "slide-visual" && (
-                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                  Describe materials or architectural elements — not a full scene. The AI will generate 4 background variants (left-weighted, right-weighted, bottom fade, corner).
-                </p>
-              )}
               <textarea
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
                 rows={2}
                 className="w-full max-h-[80px] resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
                 placeholder={
-                  aiMode === "subtle-texture"
-                    ? "e.g. Soft paper grain, muted linen weave, warm concrete…"
-                    : aiMode === "blueprint-overlay"
-                    ? "e.g. Floor plan fragments, drafting grid, construction detail callouts…"
-                    : "e.g. Warm stone surface, linear wood grain, geometric steel framing…"
+                  aiCard === "subtle"
+                    ? "e.g. Soft paper grain, muted linen weave..."
+                    : "e.g. Luxury modern home, warm natural materials..."
                 }
               />
             </div>
 
-            {/* Optional reference image */}
-            <details className="group">
-              <summary className="cursor-pointer text-[11px] font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 select-none list-none flex items-center gap-1">
-                <span className="group-open:hidden">▶</span>
-                <span className="hidden group-open:inline">▼</span>
-                Optional: reference image
-              </summary>
-              <div className="mt-2 space-y-2 pl-4">
-                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                  Upload an image to guide — not copy — the output. Choose what to borrow from it.
-                </p>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  disabled={aiRefUploading}
-                  className="block w-full text-[11px] text-zinc-600 dark:text-zinc-400 file:mr-2 file:rounded file:border-0 file:bg-zinc-100 file:px-2 file:py-1 file:text-[11px] file:font-medium file:text-zinc-700 disabled:opacity-50 dark:file:bg-zinc-800 dark:file:text-zinc-200"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) {
-                      setAiRefImageKey(null);
-                      setAiRefImageUrl(null);
-                      setAiRefImageMimeType(null);
-                      setAiRefUploadError(null);
-                      return;
-                    }
-                    // Upload to R2 immediately so the SA payload stays key-only.
-                    setAiRefUploading(true);
-                    setAiRefUploadError(null);
-                    setAiRefImageKey(null);
-                    setAiRefImageUrl(null);
-                    const fd = new FormData();
-                    fd.set("file", file);
-                    const result = await uploadReferenceImageAction(fd);
-                    setAiRefUploading(false);
-                    if (!result.ok) {
-                      setAiRefUploadError(result.error);
-                      return;
-                    }
-                    setAiRefImageKey(result.key);
-                    setAiRefImageUrl(result.url);
-                    setAiRefImageMimeType(file.type);
-                  }}
-                />
-                {/* Upload progress / error */}
-                {aiRefUploading && (
-                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                    Uploading…
-                  </p>
-                )}
-                {aiRefUploadError && (
-                  <p className="text-[10px] text-red-600 dark:text-red-400">
-                    {aiRefUploadError}
-                  </p>
-                )}
-                {/* Thumbnail preview + aspect note selector */}
-                {aiRefImageUrl && !aiRefUploading && (
-                  <div className="space-y-1.5">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={aiRefImageUrl}
-                      alt="Reference image preview"
-                      className="h-16 w-full rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
-                    />
-                    <p className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-                      What to borrow from it:
+            {/* Prompt suggestion chips */}
+            <div className="flex flex-wrap gap-2">
+              {(aiCard === "subtle" ? SUBTLE_PROMPT_SUGGESTIONS : HERO_PROMPT_SUGGESTIONS).map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setAiPrompt(suggestion)}
+                  className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+
+            {/* Advanced options — collapsible */}
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={() => setAiAdvancedOpen((v) => !v)}
+                className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+              >
+                <span>Advanced options</span>
+                <span className="text-[10px]">{aiAdvancedOpen ? "▲" : "▼"}</span>
+              </button>
+              {aiAdvancedOpen && (
+                <div className="space-y-3 border-t border-zinc-200 p-3 dark:border-zinc-700">
+                  {/* Visual Mood — only for Hero */}
+                  {aiCard === "hero" && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Visual Mood</p>
+                      <select
+                        value={aiStylePreset}
+                        onChange={(e) => setAiStylePreset(e.target.value as BackgroundStylePreset)}
+                        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
+                      >
+                        {STYLE_PRESETS.map((p) => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Reference image upload */}
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">Reference image (optional)</p>
+                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                      Upload an image to guide — not copy — the output. Choose what to borrow from it.
                     </p>
-                    <select
-                      value={aiRefNote ?? ""}
-                      onChange={(e) =>
-                        setAiRefNote((e.target.value || null) as typeof aiRefNote)
-                      }
-                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
-                    >
-                      <option value="">Choose…</option>
-                      {REFERENCE_NOTES.map((n) => (
-                        <option key={n.value} value={n.value}>{n.label}</option>
-                      ))}
-                    </select>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      disabled={aiRefUploading}
+                      className="block w-full text-[11px] text-zinc-600 dark:text-zinc-400 file:mr-2 file:rounded file:border-0 file:bg-zinc-100 file:px-2 file:py-1 file:text-[11px] file:font-medium file:text-zinc-700 disabled:opacity-50 dark:file:bg-zinc-800 dark:file:text-zinc-200"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) {
+                          setAiRefImageKey(null);
+                          setAiRefImageUrl(null);
+                          setAiRefImageMimeType(null);
+                          setAiRefUploadError(null);
+                          return;
+                        }
+                        setAiRefUploading(true);
+                        setAiRefUploadError(null);
+                        setAiRefImageKey(null);
+                        setAiRefImageUrl(null);
+                        const fd = new FormData();
+                        fd.set("file", file);
+                        const result = await uploadReferenceImageAction(fd);
+                        setAiRefUploading(false);
+                        if (!result.ok) {
+                          setAiRefUploadError(result.error);
+                          return;
+                        }
+                        setAiRefImageKey(result.key);
+                        setAiRefImageUrl(result.url);
+                        setAiRefImageMimeType(file.type);
+                      }}
+                    />
+                    {aiRefUploading && (
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">Uploading…</p>
+                    )}
+                    {aiRefUploadError && (
+                      <p className="text-[10px] text-red-600 dark:text-red-400">{aiRefUploadError}</p>
+                    )}
+                    {aiRefImageUrl && !aiRefUploading && (
+                      <div className="space-y-1.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={aiRefImageUrl}
+                          alt="Reference image preview"
+                          className="h-16 w-full rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
+                        />
+                        <p className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">What to borrow from it:</p>
+                        <select
+                          value={aiRefNote ?? ""}
+                          onChange={(e) => setAiRefNote((e.target.value || null) as typeof aiRefNote)}
+                          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-600"
+                        >
+                          <option value="">Choose…</option>
+                          {REFERENCE_NOTES.map((n) => (
+                            <option key={n.value} value={n.value}>{n.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </details>
+                </div>
+              )}
+            </div>
+
+            {/* Generate button */}
+            <button
+              type="button"
+              onClick={() => { void handleGenerateBackground(); }}
+              disabled={aiGenerating}
+              className="w-full inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {aiGenerating ? "Generating…" : "Generate"}
+            </button>
 
             {aiError && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
                 {aiError}
               </p>
             )}
+
+            {/* Results grid with badges */}
             {aiResults.length > 0 && (
               <div className="space-y-2 pointer-events-auto relative z-10">
                 <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                  AI Results — click a card to edit
+                  Results — click a card to edit
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   {aiResults.slice(0, 6).map((img, idx) => {
                     const isSelected = selectedAiKey === img.imageKey;
+                    const badge = img.actualMode === "subtle-texture"
+                      ? "Texture"
+                      : img.actualMode === "blueprint-overlay"
+                      ? "Blueprint"
+                      : img.compositionSeed === "left-weighted" ? "Left open"
+                      : img.compositionSeed === "right-weighted" ? "Right open"
+                      : img.compositionSeed === "bottom-fade" ? "Top open"
+                      : img.compositionSeed === "corner" ? "Corner"
+                      : img.compositionSeed === "split-diptych" ? "Split"
+                      : `Result ${idx + 1}`;
                     return (
                       <button
                         key={img.imageKey + idx}
@@ -1005,6 +1050,7 @@ export function BackgroundLibraryClient({
                         }`}
                       >
                         <div className="relative aspect-square w-full bg-zinc-200 dark:bg-zinc-700">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={img.imageUrl}
                             alt=""
@@ -1015,11 +1061,11 @@ export function BackgroundLibraryClient({
                               Selected
                             </span>
                           )}
-                        </div>
-                        <div className="mx-1 mb-1 flex items-center justify-between gap-1">
-                          <span className="text-[11px] text-zinc-600 dark:text-zinc-300">
-                            Result {idx + 1}
+                          <span className="absolute right-1.5 top-1.5 inline-flex items-center rounded bg-zinc-100/90 px-1.5 py-0.5 text-[9px] font-medium text-zinc-600 dark:bg-zinc-900/90 dark:text-zinc-300">
+                            {badge}
                           </span>
+                        </div>
+                        <div className="mx-1 mb-1 flex items-center justify-end gap-1">
                           <span className="inline-flex items-center rounded border border-zinc-300 bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800">
                             Edit this
                           </span>
@@ -1709,12 +1755,14 @@ export function BackgroundLibraryClient({
                     builderDraft.overlayMode === "icon" && selectedIcon?.imageUrl
                       ? selectedIcon.imageUrl
                       : null,
+                  generationMode: builderDraft.generationMode ?? null,
                 }}
                 minHeight={PREVIEW_MIN_HEIGHT}
               >
                 {builderDraft.overlayMode === "none" &&
                   !builderDraft.overlayImageUrl &&
-                  !builderDraft.overlayIconId && (
+                  !builderDraft.overlayIconId &&
+                  !builderDraft.generationMode && (
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                       <span className="text-sm text-zinc-400 dark:text-zinc-500">
                         Base color only. Add an icon or generate a texture.

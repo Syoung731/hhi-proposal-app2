@@ -1,4 +1,5 @@
 import * as React from "react";
+import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
 
 type BackgroundPreviewRecipe = {
   baseColorHex: string;
@@ -8,6 +9,8 @@ type BackgroundPreviewRecipe = {
   overlaySpacing: number;
   overlayRotation: number;
   overlayIconImageUrl: string | null;
+  /** generationMode from BrandBackground — enables CSS texture preview. */
+  generationMode?: string | null;
 };
 
 type BackgroundPreviewSurfaceProps = {
@@ -47,6 +50,12 @@ export function BackgroundPreviewSurface({
   // overlays are always intended as tiling patterns.
   const isCoverMode = tileSizePx >= COVER_MODE_SPACING_THRESHOLD;
 
+  // When there's no image/icon overlay, render CSS texture from generationMode.
+  const hasCssTexture = !overlayImageUrl && !iconImageUrl && !!recipe.generationMode;
+  const cssTextureStyle = hasCssTexture
+    ? getBrandBackgroundStyles({ baseColorHex: base, generationMode: recipe.generationMode ?? null })
+    : null;
+
   return (
     <div
       className={
@@ -54,7 +63,8 @@ export function BackgroundPreviewSurface({
         (className ?? "")
       }
       style={{
-        backgroundColor: base,
+        // CSS texture overrides plain backgroundColor when generationMode is present.
+        ...(cssTextureStyle ?? { backgroundColor: base }),
         ...(minHeight ? { minHeight } : {}),
       }}
     >
@@ -101,4 +111,3 @@ export function BackgroundPreviewSurface({
     </div>
   );
 }
-

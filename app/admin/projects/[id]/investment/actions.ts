@@ -5,14 +5,31 @@ import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 
-/** Ensure exactly one InvestmentLineItem per bucket (Base, Alternates, Allowances); recompute rollups from sections. */
+/**
+ * Pure DB helper — no revalidatePath, safe to call from server components
+ * and other server-side code that runs during render.
+ * Ensures rollup rows exist for this project without any cache side effects.
+ */
+export async function ensureInvestmentLineItemsForBucketsDB(
+  projectId: string
+): Promise<{ error?: string }> {
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  if (!project) return { error: "Project not found" };
+  await recomputeInvestmentRollups(projectId);
+  return {};
+}
+
+/**
+ * Server-action wrapper — calls the DB helper then revalidates the cache.
+ * Must only be invoked from client-initiated actions (form actions, button
+ * handlers), never from within a server component render path.
+ */
 export async function ensureInvestmentLineItemsForBuckets(
   projectId: string
 ): Promise<{ error?: string }> {
   await requireAdmin();
-  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
-  if (!project) return { error: "Project not found" };
-  await recomputeInvestmentRollups(projectId);
+  const result = await ensureInvestmentLineItemsForBucketsDB(projectId);
+  if (result.error) return result;
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};

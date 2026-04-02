@@ -32,10 +32,14 @@ import { LibraryMediaPicker } from "@/app/admin/settings/photo-library/library-m
 import type { LibraryMediaItem } from "@/app/admin/settings/photo-library/types";
 import type { BrandBackgroundForUI } from "@/app/admin/settings/settings-tabs";
 import { analyzeBackgroundTextZoneAction } from "@/app/admin/settings/branding/backgrounds/actions";
+import { SlideAIRegenerate } from "./SlideAIRegenerate";
+import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
 
 interface Props {
   slide: ProposalSlide | null;
   branding: DeckBranding;
+  /** Project ID — passed to SlideAIRegenerate for the API call. */
+  projectId: string;
   onUpdate: (updated: ProposalSlide) => void;
   onDuplicate: (id: string) => void;
   onRemove: (id: string) => void;
@@ -48,6 +52,17 @@ interface Props {
   onBackgroundChange?: (backgroundId: string | null) => void;
   /** Callback when user edits the text zone. */
   onTextZoneChange?: (zone: TextZoneSetting | null) => void;
+  /**
+   * Callback for AI-generated background URL.
+   * Must bypass updateSlide to avoid triggering isUserModified.
+   * Pass null to clear the current AI background.
+   */
+  onAiBackgroundChange?: (url: string | null) => void;
+  /**
+   * Clears isUserModified on the investment slide and re-runs the full
+   * server sync so fresh line items are pulled from the Investment tab.
+   */
+  onResyncInvestment?: () => void;
 }
 
 // ─── Small UI primitives ─────────────────────────────────────────────────────
@@ -734,18 +749,126 @@ function ObjectiveInspector({
 
 function InvestmentInspector({
   slide,
+  onUpdate,
+  onResyncInvestment,
 }: {
   slide: ProposalSlide;
+  onUpdate: (s: ProposalSlide) => void;
+  onResyncInvestment?: () => void;
 }) {
   const content = (slide.content ?? {}) as InvestmentContent;
+  const itemCount = (content.lineItems ?? []).length;
+
+  function updateContent(patch: Partial<InvestmentContent>) {
+    onUpdate({ ...slide, content: { ...content, ...patch }, isUserModified: true });
+  }
+
+  // Controlled retainerAmount: display as formatted string, store as number
+  const [retainerRaw, setRetainerRaw] = useState(
+    content.retainerAmount != null ? String(content.retainerAmount) : ""
+  );
+  // Keep local retainerRaw in sync if slide content changes externally
+  useEffect(() => {
+    setRetainerRaw(content.retainerAmount != null ? String(content.retainerAmount) : "");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slide.id]);
+
+  const [resyncing, setResyncing] = useState(false);
+
+  async function handleResync() {
+    if (!onResyncInvestment) return;
+    setResyncing(true);
+    await onResyncInvestment();
+    setResyncing(false);
+  }
 
   return (
     <>
-      <SectionLabel>Content</SectionLabel>
-      <p style={{ fontSize: 11, color: "#9CA3AF" }}>
-        {(content.lineItems ?? []).length} line items. Edit from the Investment
-        tab — line item editing inside the deck inspector is coming in Phase 2.
-      </p>
+      {/* Auto-sync notice */}
+      <div
+        style={{
+          background: "#F0F9FF",
+          border: "1px solid #BAE6FD",
+          borderRadius: 4,
+          padding: "7px 9px",
+          marginBottom: 12,
+        }}
+      >
+        <p style={{ fontSize: 10, color: "#0369A1", lineHeight: 1.5, fontWeight: 500 }}>
+          {itemCount > 0
+            ? `${itemCount} line item${itemCount !== 1 ? "s" : ""} synced from the Investment tab.`
+            : "No line items synced yet. Add items in the Investment tab."}
+        </p>
+        <p style={{ fontSize: 10, color: "#0284C7", lineHeight: 1.5, marginTop: 2 }}>
+          To add or edit line items, go to the{" "}
+          <strong>Investment tab</strong> and mark them "Include in totals".
+        </p>
+      </div>
+
+      {/* Re-sync button */}
+      <button
+        onClick={handleResync}
+        disabled={resyncing}
+        style={{
+          fontSize: 11,
+          padding: "5px 10px",
+          borderRadius: 4,
+          border: "1px solid #D1D5DB",
+          background: resyncing ? "#F3F4F6" : "#fff",
+          color: resyncing ? "#9CA3AF" : "#374151",
+          cursor: resyncing ? "not-allowed" : "pointer",
+          marginBottom: 16,
+          width: "100%",
+        }}
+      >
+        {resyncing ? "Syncing…" : "↺ Re-sync from Investment Tab"}
+      </button>
+
+      <Divider />
+
+      <SectionLabel>Retainer</SectionLabel>
+
+      <FieldGroup label="Retainer Label">
+        <TextInput
+          value={content.retainerLabel ?? ""}
+          onChange={(v) => updateContent({ retainerLabel: v || null })}
+          placeholder="Design / Feasibility Retainer"
+        />
+      </FieldGroup>
+
+      <FieldGroup label="Retainer Amount (number, e.g. 15000)">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={retainerRaw}
+          onChange={(e) => setRetainerRaw(e.target.value)}
+          onBlur={() => {
+            const stripped = retainerRaw.replace(/[^0-9.]/g, "");
+            const n = parseFloat(stripped);
+            const parsed = Number.isFinite(n) && n > 0 ? n : null;
+            updateContent({ retainerAmount: parsed });
+            setRetainerRaw(parsed != null ? String(parsed) : "");
+          }}
+          placeholder="e.g. 15000"
+          className="w-full rounded"
+          style={{
+            fontSize: 12,
+            padding: "5px 8px",
+            border: "1px solid #D1D5DB",
+            color: "#111827",
+            background: "#fff",
+            outline: "none",
+          }}
+        />
+      </FieldGroup>
+
+      <FieldGroup label="Retainer Description">
+        <TextInput
+          value={content.retainerDescription ?? ""}
+          onChange={(v) => updateContent({ retainerDescription: v || null })}
+          placeholder="Think of this as an insurance policy…"
+        />
+      </FieldGroup>
     </>
   );
 }
@@ -2506,7 +2629,9 @@ function BackgroundSection({
               style={{
                 width: "100%",
                 height: "100%",
-                background: selectedBg?.baseColorHex ?? "#F3F4F6",
+                ...(selectedBg
+                  ? (getBrandBackgroundStyles(selectedBg) as React.CSSProperties)
+                  : { background: "#F3F4F6" }),
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -2624,7 +2749,9 @@ function BackgroundSection({
                         borderRadius: 2,
                         overflow: "hidden",
                         flexShrink: 0,
-                        background: bg.baseColorHex ?? "#E5E7EB",
+                        ...(!bg.previewImageUrl
+                          ? (getBrandBackgroundStyles(bg) as React.CSSProperties)
+                          : { background: bg.baseColorHex ?? "#E5E7EB" }),
                       }}
                     >
                       {bg.previewImageUrl && (
@@ -2884,6 +3011,7 @@ function BackgroundSection({
 export function InspectorPanel({
   slide,
   branding,
+  projectId,
   onUpdate,
   onDuplicate,
   onRemove,
@@ -2892,6 +3020,8 @@ export function InspectorPanel({
   brandBackgrounds = [],
   onBackgroundChange,
   onTextZoneChange,
+  onAiBackgroundChange,
+  onResyncInvestment,
 }: Props) {
   if (!slide) {
     return (
@@ -3012,7 +3142,7 @@ export function InspectorPanel({
         <ObjectiveInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
       {slide.type === "investment" && (
-        <InvestmentInspector slide={slide} />
+        <InvestmentInspector slide={slide} onUpdate={onUpdate} onResyncInvestment={onResyncInvestment} />
       )}
       {slide.type === "why-us" && (
         <WhyUsInspector slide={slide} branding={branding} onUpdate={onUpdate} />
@@ -3070,6 +3200,21 @@ export function InspectorPanel({
       </div>
 
       <Divider />
+
+      {/* AI Background */}
+      {onAiBackgroundChange && (
+        <>
+          <SlideAIRegenerate
+            slideType={slide.type}
+            slideId={slide.id}
+            projectId={projectId}
+            currentAiBackground={slide.aiBackground ?? null}
+            onAccept={(url) => onAiBackgroundChange(url)}
+            onDiscard={() => {/* no-op: discard just closes the preview */}}
+          />
+          <Divider />
+        </>
+      )}
 
       {/* Actions */}
       <SectionLabel>Actions</SectionLabel>

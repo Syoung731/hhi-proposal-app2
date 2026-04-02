@@ -7,6 +7,12 @@ datasource db {
   provider = "postgresql"
 }
 
+enum RoomPricingTier {
+  PROFILE
+  AI_ESTIMATE
+  MANUAL
+}
+
 model User {
   id          String   @id @default(cuid())
   clerkUserId String   @unique
@@ -158,6 +164,9 @@ model Room {
   unitRate             Float?
   unitQuantity         Float?
   unitQuantityManualOverride Boolean @default(false)
+  roomTemplateId   String?
+  pricingTier      RoomPricingTier  @default(PROFILE)
+  isProjectOverhead Boolean         @default(false)
   // Section pricing (Low/Target/High)
   unitRateLow          Float?
   unitRateTarget       Float?
@@ -173,15 +182,18 @@ model Room {
   roomType                  RoomType?           @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
   stylePreset               StylePreset?        @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
   sectionType               SectionType?        @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
+  roomTemplate              RoomTemplate?       @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([projectId, bucket])
   @@index([projectId, sortOrder])
+  @@index([projectId, isProjectOverhead])
   @@index([roomTypeId])
   @@index([stylePresetId])
   @@index([sectionTypeId])
   @@index([origin])
   @@index([estimateUnit])
+  @@index([roomTemplateId])
 }
 
 /// Optional finer-grained measurement segments for a Room/Section
@@ -824,4 +836,200 @@ model DeckSlide {
   @@index([deckId, type])
   @@index([sectionId])
   @@index([backgroundId])
+}
+
+// ---------------------------------------------------------------------------
+// AI Pricing / Catalog
+// ---------------------------------------------------------------------------
+
+model PricingCatalogItem {
+  id             String              @id @default(cuid())
+  jobtreadId     String              @unique
+  name           String
+  description    String?
+  costCode       String?
+  costType       String?
+  unitCost       Float?
+  unitPrice      Float?
+  unit           String              @default("EA")
+  trade          String?
+  active         Boolean             @default(true)
+  lastSyncedAt   DateTime            @default(now())
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  roomTemplateItems RoomTemplateItem[]
+  estimateLineItems EstimateLineItem[]
+
+  @@index([trade])
+  @@index([active])
+  @@index([name])
+}
+
+model RoomTemplate {
+  id               String                   @id @default(cuid())
+  jobtreadId       String?                  @unique
+  name             String
+  displayName      String?
+  active           Boolean                  @default(true)
+  isProjectOverhead Boolean                 @default(false)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  tradeGroups      RoomTemplateTradeGroup[]
+  aiEstimates      AIEstimate[]
+  rooms            Room[]
+
+  @@index([active])
+}
+
+model RoomTemplateTradeGroup {
+  id              String             @id @default(cuid())
+  roomTemplateId  String
+  name            String
+  jobtreadGroupId String?
+  sortOrder       Int                @default(0)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  roomTemplate    RoomTemplate       @relation(fields: [roomTemplateId], references: [id], onDelete: Cascade)
+  items           RoomTemplateItem[]
+
+  @@index([roomTemplateId])
+}
+
+model RoomTemplateItem {
+  id              String                @id @default(cuid())
+  tradeGroupId    String
+  catalogItemId   String?
+  jobtreadItemId  String?
+  name            String
+  costCode        String?
+  costType        String?
+  sortOrder       Int                   @default(0)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  tradeGroup      RoomTemplateTradeGroup @relation(fields: [tradeGroupId], references: [id], onDelete: Cascade)
+  catalogItem     PricingCatalogItem?    @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  @@index([tradeGroupId])
+  @@index([catalogItemId])
+}
+
+// ---------------------------------------------------------------------------
+// AI Estimates
+// ---------------------------------------------------------------------------
+
+model AIEstimate {
+  id               String              @id @default(cuid())
+  projectId        String
+  sectionId        String
+  roomTemplateId   String?
+  status           String              @default("draft")
+  totalCost        Float?
+  totalPrice       Float?
+  promptTokens     Int?
+  completionTokens Int?
+  rawResponse      String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  roomTemplate     RoomTemplate?       @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
+  lineItems        EstimateLineItem[]
+  priceCorrections PriceCorrection[]
+
+  @@index([projectId])
+  @@index([sectionId])
+  @@index([roomTemplateId])
+  @@index([status])
+}
+
+model EstimateLineItem {
+  id              String              @id @default(cuid())
+  estimateId      String
+  catalogItemId   String?
+  tradeGroup      String
+  name            String
+  description     String?
+  quantity        Float               @default(1)
+  unit            String              @default("EA")
+  unitCost        Float               @default(0)
+  unitPrice       Float               @default(0)
+  totalCost       Float               @default(0)
+  totalPrice      Float               @default(0)
+  totalPriceLow   Float               @default(0)
+  totalPriceHigh  Float               @default(0)
+  source          String              @default("AI_PRICED")
+  confidence      Float?
+  notes           String?
+  sortOrder       Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  estimate        AIEstimate          @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  catalogItem     PricingCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  priceCorrections PriceCorrection[]
+
+  @@index([estimateId])
+  @@index([catalogItemId])
+}
+
+model PriceCorrection {
+  id              String           @id @default(cuid())
+  estimateId      String
+  lineItemId      String
+  field           String
+  originalValue   Float
+  correctedValue  Float
+  catalogItemName String?
+  tradeGroup      String?
+  roomTemplateId  String?
+  notes           String?
+  createdAt       DateTime         @default(now())
+  estimate        AIEstimate       @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  lineItem        EstimateLineItem @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+  @@index([lineItemId])
+  @@index([catalogItemName])
+  @@index([tradeGroup])
+  @@index([roomTemplateId])
+}
+
+// ---------------------------------------------------------------------------
+// Company Context (AI estimation context)
+// ---------------------------------------------------------------------------
+
+model CompanyContext {
+  id                    String   @id @default(cuid())
+  market                String   @default("Hilton Head Island, SC")
+  marketNotes           String?
+  clientProfile         String?
+  defaultFinishTier     String   @default("high-end")
+  standardInclusions    String?
+  markupStructure       String?
+  notes                 String?
+  estimationAssumptions String?
+  priceRangeLowPct      Float?   @default(-10)
+  priceRangeHighPct     Float?   @default(10)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Catalog Suggestions
+// ---------------------------------------------------------------------------
+
+model CatalogSuggestion {
+  id              String    @id @default(cuid())
+  itemName        String    @unique
+  tradeGroup      String?
+  suggestedUnit   String?
+  avgUnitPrice    Float?
+  avgUnitCost     Float?
+  occurrenceCount Int       @default(1)
+  status          String    @default("pending")
+  resolvedAt      DateTime?
+  catalogItemId   String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([occurrenceCount])
 }

@@ -5,10 +5,12 @@ import type {
   DeckBranding,
   ScopeBreakdownContent,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -40,7 +42,7 @@ function NoRooms() {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function ScopeBreakdownSlide({ slide, branding }: Props) {
+export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
 
   const title =
@@ -53,7 +55,7 @@ export function ScopeBreakdownSlide({ slide, branding }: Props) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}
     >
       {/* Subtle dot-grid watermark */}
       <svg
@@ -95,25 +97,32 @@ export function ScopeBreakdownSlide({ slide, branding }: Props) {
       >
         {/* ── Header ───────────────────────────────────────────────────── */}
         <div style={{ flexShrink: 0, marginBottom: "3%" }}>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em",
+                fontWeight: 600,
+                letterSpacing: "0.13em",
+                color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h2
             className="font-serif"
             style={{
-              fontSize: "2.0em",
+              fontSize: "2.8em",
               fontWeight: 800,
               color: branding.textColor,
-              lineHeight: 1.15,
+              lineHeight: 1.1,
             }}
           >
             {title}
           </h2>
-          <div
-            style={{
-              height: 2,
-              width: "2.5em",
-              background: branding.accentColor,
-              marginTop: "0.5em",
-            }}
-          />
+          <TitleAccentRule accentColor={branding.accentColor} />
           {introText && (
             <p
               style={{

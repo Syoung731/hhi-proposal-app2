@@ -8,6 +8,7 @@ import type {
   WhyUsTestimonial,
   WhyUsLayoutKey,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 // ─── Stub testimonials ─────────────────────────────────────────────────────────
 // Used by testimonials-split when no real reviews are wired yet.
@@ -42,6 +43,7 @@ const STUB_TESTIMONIALS: WhyUsTestimonial[] = [
 interface LayoutProps {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 function getVisiblePillars(content: WhyUsContent): WhyUsPillarItem[] {
@@ -146,7 +148,7 @@ function PillarCard({
   );
 }
 
-function PillarsGridLayout({ slide, branding }: LayoutProps) {
+function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
@@ -169,7 +171,7 @@ function PillarsGridLayout({ slide, branding }: LayoutProps) {
   });
 
   return (
-    <div className="relative w-full h-full" style={{ background: "#FAFAF8", overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
       {/* Dashed grid watermark */}
       <svg
         style={{
@@ -209,15 +211,25 @@ function PillarsGridLayout({ slide, branding }: LayoutProps) {
       >
         {/* Header — left-aligned */}
         <div style={{ textAlign: "left", marginBottom: "4%" }}>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h2
             className="font-serif"
-            style={{ fontSize: "2.9em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
+            style={{ fontSize: "3.6em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
           >
             {sectionTitle}
           </h2>
-          <div
-            style={{ height: 2, width: "2.5em", background: branding.accentColor, marginTop: "0.5em" }}
-          />
+          <TitleAccentRule accentColor={branding.accentColor} />
         </div>
 
         {/* Pillar row */}
@@ -239,7 +251,7 @@ function PillarsGridLayout({ slide, branding }: LayoutProps) {
 // Text-forward. Centered headline. Soft warm-gray cards. Accent rule per card.
 // Optional testimonial quote band at bottom when content.testimonials is set.
 
-function EditorialCardsLayout({ slide, branding }: LayoutProps) {
+function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
@@ -251,7 +263,7 @@ function EditorialCardsLayout({ slide, branding }: LayoutProps) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}
     >
       {/* Dot-grid texture */}
       <svg
@@ -286,20 +298,25 @@ function EditorialCardsLayout({ slide, branding }: LayoutProps) {
       >
         {/* Centered headline */}
         <div style={{ textAlign: "center", marginBottom: hasTestimonial ? "3.5%" : "4.5%" }}>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h2
             className="font-serif"
-            style={{ fontSize: "2.4em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
+            style={{ fontSize: "3.2em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
           >
             {sectionTitle}
           </h2>
-          <div
-            style={{
-              height: 2,
-              width: "2.5em",
-              background: branding.accentColor,
-              margin: "0.6em auto 0",
-            }}
-          />
+          <TitleAccentRule accentColor={branding.accentColor} marginTop="0.6em" marginBottom="0" width="2.5em" />
         </div>
 
         {/* Cards row */}
@@ -431,7 +448,7 @@ function EditorialCardsLayout({ slide, branding }: LayoutProps) {
 // ─── Layout 3: stacked-list ────────────────────────────────────────────────────
 // Vertical rows. Icon left, title + body right. Row dividers. Polished hierarchy.
 
-function StackedListLayout({ slide, branding }: LayoutProps) {
+function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
@@ -439,7 +456,7 @@ function StackedListLayout({ slide, branding }: LayoutProps) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: "#FFFFFF", overflow: "hidden" }}
+      style={{ background: hasAiBackground ? "transparent" : "#FFFFFF", overflow: "hidden" }}
     >
       {/* Faint vertical accent guide — gives the layout a quiet structure line */}
       <div
@@ -468,25 +485,23 @@ function StackedListLayout({ slide, branding }: LayoutProps) {
         <div style={{ marginBottom: "3.5%" }}>
           <p
             style={{
-              fontSize: "0.58em",
+              fontSize: "0.65em",
               fontWeight: 600,
-              letterSpacing: "0.12em",
+              letterSpacing: "0.13em",
               textTransform: "uppercase",
               color: branding.accentColor,
-              marginBottom: "0.4em",
+              marginBottom: "0.35em",
             }}
           >
             Why Choose Us
           </p>
           <h2
             className="font-serif"
-            style={{ fontSize: "2.4em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
+            style={{ fontSize: "3.2em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
           >
             {sectionTitle}
           </h2>
-          <div
-            style={{ height: 2, width: "2.5em", background: branding.accentColor, marginTop: "0.5em" }}
-          />
+          <TitleAccentRule accentColor={branding.accentColor} />
         </div>
 
         {/* Stacked rows */}
@@ -583,7 +598,7 @@ function StackedListLayout({ slide, branding }: LayoutProps) {
 // Two-column. Left: client quote cards. Right: dark panel with pillar highlights.
 // Uses content.testimonials when wired; falls back to STUB_TESTIMONIALS.
 
-function TestimonialsSplitLayout({ slide, branding }: LayoutProps) {
+function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
@@ -599,7 +614,7 @@ function TestimonialsSplitLayout({ slide, branding }: LayoutProps) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}
     >
       {/* Dark right-column panel */}
       <div
@@ -626,10 +641,22 @@ function TestimonialsSplitLayout({ slide, branding }: LayoutProps) {
       >
         {/* Full-width headline */}
         <div style={{ padding: "0 6%", marginBottom: "3%" }}>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h2
             className="font-serif"
             style={{
-              fontSize: "2.2em",
+              fontSize: "3.0em",
               fontWeight: 800,
               color: branding.textColor,
               lineHeight: 1.15,
@@ -637,9 +664,7 @@ function TestimonialsSplitLayout({ slide, branding }: LayoutProps) {
           >
             {sectionTitle}
           </h2>
-          <div
-            style={{ height: 2, width: "2.5em", background: branding.accentColor, marginTop: "0.5em" }}
-          />
+          <TitleAccentRule accentColor={branding.accentColor} />
         </div>
 
         {/* Two-column body */}
@@ -794,18 +819,19 @@ function TestimonialsSplitLayout({ slide, branding }: LayoutProps) {
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
-export function WhyUsSlide({ slide, branding }: Props) {
+export function WhyUsSlide({ slide, branding, hasAiBackground }: Props) {
   switch (slide.layoutKey as WhyUsLayoutKey) {
     case "editorial-cards":
-      return <EditorialCardsLayout slide={slide} branding={branding} />;
+      return <EditorialCardsLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "stacked-list":
-      return <StackedListLayout slide={slide} branding={branding} />;
+      return <StackedListLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "testimonials-split":
-      return <TestimonialsSplitLayout slide={slide} branding={branding} />;
+      return <TestimonialsSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "pillars-grid":
     default:
-      return <PillarsGridLayout slide={slide} branding={branding} />;
+      return <PillarsGridLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 }

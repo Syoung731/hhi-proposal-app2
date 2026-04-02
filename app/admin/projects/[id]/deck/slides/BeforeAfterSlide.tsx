@@ -5,12 +5,14 @@ import type {
   DeckBranding,
   BeforeAfterContent,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 interface LayoutProps {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 /** Small pill label: "BEFORE" or "AFTER" */
@@ -73,15 +75,15 @@ function ImagePlaceholder({ label }: { label: string }) {
 // ─── Layout 1: side-by-side ───────────────────────────────────────────────────
 // Left: before image. Right: after image. Room name at top, caption at bottom.
 
-function SideBySideLayout({ slide, branding }: LayoutProps) {
+function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as BeforeAfterContent;
   const roomName = content.roomName ?? slide.headline ?? "Room Overview";
   const caption = content.caption ?? null;
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
   const resolvedTitleColor   = content.headingColor ?? branding.textColor;
   const resolvedCaptionColor = content.captionColor ?? "#9CA3AF";
   const accentLineColor = hasBg ? `${resolvedTitleColor}55` : `${branding.accentColor}30`;
-  const headingEm   = `${content.headingFontSize ?? 1.5}em`;
+  const headingEm   = `${content.headingFontSize ?? 2.5}em`;
   const captionEmSz = `${content.captionFontSize ?? 1.5}em`;
 
   return (
@@ -248,7 +250,7 @@ function SideBySideLayout({ slide, branding }: LayoutProps) {
             height: `${content.logoSize ?? 4.0}em`,
             objectFit: "contain",
             opacity: 0.7,
-            zIndex: 10,
+            zIndex: 100,
             pointerEvents: "none",
           }}
         />
@@ -261,12 +263,12 @@ function SideBySideLayout({ slide, branding }: LayoutProps) {
 // Hero after image fills the right 65%. Left editorial panel with room name.
 // Before image shown as a small inset within the left panel.
 
-function AfterEmphasisLayout({ slide, branding }: LayoutProps) {
+function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as BeforeAfterContent;
   const roomName = content.roomName ?? slide.headline ?? "Room Overview";
   const caption = content.caption ?? null;
-  const hasBg = !!slide.backgroundId;
-  const headingEm   = `${content.headingFontSize ?? 1.5}em`;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  const headingEm   = `${content.headingFontSize ?? 2.5}em`;
   const captionEmSz = `${content.captionFontSize ?? 1.5}em`;
   const resolvedTitleColor   = content.headingColor ?? "#F8F7F4";
   const resolvedCaptionColor = content.captionColor ?? "rgba(255,255,255,0.55)";
@@ -321,11 +323,12 @@ function AfterEmphasisLayout({ slide, branding }: LayoutProps) {
               fontWeight: 800,
               color: resolvedTitleColor,
               lineHeight: 1.2,
-              marginBottom: caption ? "0.8em" : 0,
+              marginBottom: "0.4em",
             }}
           >
             {roomName}
           </h2>
+          <TitleAccentRule accentColor={branding.accentColor} marginBottom={caption ? "0.8em" : "0"} />
           {caption && (
             <p
               style={{
@@ -461,7 +464,7 @@ function AfterEmphasisLayout({ slide, branding }: LayoutProps) {
             height: `${content.logoSize ?? 4.0}em`,
             objectFit: "contain",
             opacity: 0.7,
-            zIndex: 10,
+            zIndex: 100,
             pointerEvents: "none",
           }}
         />
@@ -472,12 +475,12 @@ function AfterEmphasisLayout({ slide, branding }: LayoutProps) {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
-export function BeforeAfterSlide({ slide, branding }: LayoutProps) {
+export function BeforeAfterSlide({ slide, branding, hasAiBackground }: LayoutProps) {
   switch (slide.layoutKey) {
     case "after-emphasis":
-      return <AfterEmphasisLayout slide={slide} branding={branding} />;
+      return <AfterEmphasisLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "side-by-side":
     default:
-      return <SideBySideLayout slide={slide} branding={branding} />;
+      return <SideBySideLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 }

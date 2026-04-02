@@ -23,6 +23,7 @@ export const SETTINGS_TABS: { slug: string; label: string }[] = [
   { slug: "value-pillars", label: "Value Pillars" },
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
+  { slug: "ai-pricing", label: "AI Pricing" },
   { slug: "dev-integrations", label: "DEV Integrations" },
 ];
 

@@ -144,6 +144,8 @@ export function ProjectTabs({
               unitQuantity: r.unitQuantity ?? null,
               unitQuantityManualOverride: r.unitQuantityManualOverride ?? false,
               bucket: r.bucket,
+              pricingTier: r.pricingTier,
+              isProjectOverhead: r.isProjectOverhead,
               totalLow: r.totalLow ?? null,
               totalTarget: r.totalTarget ?? null,
               totalHigh: r.totalHigh ?? null,

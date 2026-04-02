@@ -11,7 +11,6 @@ import type {
   WhyUsPillarItem,
   RoomWithMedia,
   WhyUsContent,
-  InvestmentContent,
   ObjectiveContent,
   TextZoneSuggestion,
 } from "@/app/lib/deck/types";
@@ -202,19 +201,14 @@ export default async function DeckEditorPage({ params }: PageProps) {
     // Non-fatal: pillar fetch failure just means an empty grid
   }
 
-  // ── Proposal config (objective text, commitments) + Investment line items ────
-  // Both are fetched in parallel before getDeckForProject so the injections
-  // below can backfill blank seeded slides on first load.
-  const [proposalRow, rawLineItems] = await Promise.all([
-    prisma.proposal.findUnique({
-      where: { projectId: id },
-      select: { publicLayoutConfig: true },
-    }).catch(() => null),
-    prisma.investmentLineItem.findMany({
-      where: { projectId: id, includeInTotals: true },
-      orderBy: { sortOrder: "asc" },
-    }).catch(() => []),
-  ]);
+  // ── Proposal config (objective text, commitments) ────────────────────────────
+  // Fetched before getDeckForProject so the objective slide injection below
+  // can backfill blank seeded slides on first load.
+  // Investment line items are fetched inside db.ts syncInvestmentSlide.
+  const proposalRow = await prisma.proposal.findUnique({
+    where: { projectId: id },
+    select: { publicLayoutConfig: true },
+  }).catch(() => null);
 
   // Extract the objective page config from the presentation JSON blob.
   // Path: Proposal.publicLayoutConfig → pages.objective (ObjectivePageConfig).
@@ -300,28 +294,6 @@ export default async function DeckEditorPage({ params }: PageProps) {
       statementText,
       bullets,
     };
-  }
-
-  // ── Investment slide hydration ────────────────────────────────────────────────
-  // Source: project InvestmentLineItem rows (the Project Investment tab).
-  // Prefers overrideLow/High when set; falls back to rangeLow/High.
-  // Applied every load when isUserModified !== true.  Once the user edits the
-  // slide in the deck inspector, isUserModified = true and this is skipped.
-  if (rawLineItems.length > 0) {
-    for (const slide of slides) {
-      if (slide.type !== "investment" || slide.isUserModified) continue;
-      const content = (slide.content ?? {}) as InvestmentContent;
-      slide.content = {
-        ...content,
-        lineItems: rawLineItems.map((item) => ({
-          id: item.id,
-          label: item.label,
-          rangeLow: (item.overrideLow ?? item.rangeLow) ?? null,
-          rangeHigh: (item.overrideHigh ?? item.rangeHigh) ?? null,
-          isCope: false,
-        })),
-      };
-    }
   }
 
   return (

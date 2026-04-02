@@ -7,6 +7,7 @@ import { rebuildPricingStaging } from '@/app/lib/jobtread/pricing-staging';
 import { runPricingStagingDiagnostic, runDuplicationDiagnostic } from '@/app/lib/jobtread/pricing-staging-diagnostic';
 import { runForcedPaveSourceDiagnostic, runRichJobTreadBudgetFilterDiagnostic, runDirectJobTreadBudgetForJob, type DirectJobTreadBudgetStats } from '@/app/integrations/jobtread-pricing';
 import type { SectionCategory, PricingBasis, MeasurementMode, EstimateUnit } from '@/app/generated/prisma';
+import { logDevError, logDevSyncRun, updateDevSyncRun } from '@/src/lib/dev-context';
 
 export async function rebuildPricingStagingAction(): Promise<{
   ok: boolean;
@@ -15,9 +16,55 @@ export async function rebuildPricingStagingAction(): Promise<{
   tradesCount: number;
 }> {
   await requireAdmin();
-  const result = await rebuildPricingStaging();
-  revalidatePath('/admin/settings/jobtread-pricing');
-  return { ok: true, ...result };
+  const route = '/admin/settings/jobtread-pricing';
+  const env = process.env.NODE_ENV === 'production' ? 'production' : 'local';
+  const syncRunId = await logDevSyncRun({
+    // batch-oriented rebuild path (not a single job sync)
+    jobId: null,
+    status: 'running',
+    route,
+    summary: 'pricing staging rebuild batch run started',
+  });
+
+  try {
+    const result = await rebuildPricingStaging();
+    if (syncRunId != null) {
+      const c = result.classificationSummary;
+      await updateDevSyncRun(syncRunId, {
+        status: 'success',
+        route,
+        summary:
+          `pricing staging rebuild batch run success; ` +
+          `buildJobsFound=${c.buildJobsFound}, ` +
+          `buildJobsIncluded=${c.buildJobsIncluded}, ` +
+          `jobsSynced=${c.jobsSynced}, ` +
+          `syncedBudgetRowsWritten=${c.syncedBudgetRowsWritten}, ` +
+          `unchangedCount=${c.unchangedCount}`,
+      });
+    }
+    revalidatePath('/admin/settings/jobtread-pricing');
+    return { ok: true, ...result };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (syncRunId != null) {
+      await updateDevSyncRun(syncRunId, {
+        status: 'failed',
+        route,
+        errorMessage: message,
+        summary: 'pricing staging rebuild batch run failed',
+      });
+    }
+    await logDevError({
+      source: 'server',
+      severity: 'error',
+      message,
+      route,
+      component: 'rebuildPricingStagingAction',
+      env,
+      stack: e instanceof Error ? e.stack ?? null : null,
+    });
+    throw e;
+  }
 }
 
 /** Dev-only: run one-job staging diagnostic (22PG3RyGrDnQ). Output is server log only. */

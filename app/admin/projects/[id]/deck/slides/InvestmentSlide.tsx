@@ -6,10 +6,12 @@ import type {
   InvestmentContent,
   InvestmentLineItem,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 function formatRange(low?: number | null, high?: number | null): string {
@@ -25,53 +27,90 @@ function formatRange(low?: number | null, high?: number | null): string {
   return "—";
 }
 
+/** Returns the display-ready low value: uses override when isOverride=true. */
+function effectiveLow(item: InvestmentLineItem): number | null {
+  return item.isOverride ? (item.overrideLow ?? null) : (item.rangeLow ?? null);
+}
+
+/** Returns the display-ready high value: uses override when isOverride=true. */
+function effectiveHigh(item: InvestmentLineItem): number | null {
+  return item.isOverride ? (item.overrideHigh ?? null) : (item.rangeHigh ?? null);
+}
+
 function sumRange(
   items: InvestmentLineItem[],
-  key: "rangeLow" | "rangeHigh"
+  which: "low" | "high"
 ): number {
-  return items.reduce((acc, item) => acc + (item[key] ?? 0), 0);
+  return items.reduce((acc, item) => {
+    const v = which === "low" ? effectiveLow(item) : effectiveHigh(item);
+    return acc + (v ?? 0);
+  }, 0);
 }
 
 // ─── table-callout layout ────────────────────────────────────────────────────
 // Matches the Tierra Schaffer / Oyster Bay "Projected Investment" slides:
 // White/off-white bg, serif title + orange underline, bordered table,
 // retainer callout box, large bold total line in accent color, footer.
-function TableCalloutLayout({ slide, branding }: Props) {
+function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as InvestmentContent;
   const items = content.lineItems ?? [];
-  const totalLow = sumRange(items, "rangeLow");
-  const totalHigh = sumRange(items, "rangeHigh");
+  const totalLow = sumRange(items, "low");
+  const totalHigh = sumRange(items, "high");
 
   return (
     <div
       className="relative w-full h-full flex flex-col"
       style={{
-        background: "#FAFAF8",
+        background: hasAiBackground ? "transparent" : "#FAFAF8",
         padding: "6% 7% 5% 7%",
       }}
     >
       {/* Heading */}
       <div className="flex-shrink-0" style={{ marginBottom: "3%" }}>
+        {slide.subheadline && (
+          <p
+            className="uppercase tracking-widest"
+            style={{
+              fontSize: "0.65em",
+              fontWeight: 600,
+              letterSpacing: "0.13em",
+              color: branding.accentColor,
+              marginBottom: "0.35em",
+            }}
+          >
+            {slide.subheadline}
+          </p>
+        )}
         <h1
           className="font-serif"
           style={{
-            fontSize: "2em",
+            fontSize: "2.8em",
             fontWeight: 700,
             color: branding.textColor,
-            marginBottom: "0.35em",
           }}
         >
           {slide.headline || "Projected Investment"}
         </h1>
-        {/* Accent underline */}
-        <div
-          style={{
-            height: 2,
-            width: "8em",
-            background: branding.accentColor,
-          }}
-        />
+        <TitleAccentRule accentColor={branding.accentColor} />
       </div>
+
+      {/* Empty state placeholder */}
+      {items.length === 0 && (
+        <div
+          className="flex-shrink-0"
+          style={{
+            border: "1px dashed #D1D5DB",
+            borderRadius: 4,
+            padding: "4% 5%",
+            textAlign: "center",
+            marginBottom: "3%",
+          }}
+        >
+          <p style={{ fontSize: "0.72em", color: "#9CA3AF", fontStyle: "italic", lineHeight: 1.5 }}>
+            Add investment line items in the Investment tab to populate this slide.
+          </p>
+        </div>
+      )}
 
       {/* Table */}
       {items.length > 0 && (
@@ -137,7 +176,7 @@ function TableCalloutLayout({ slide, branding }: Props) {
                   textAlign: "right",
                 }}
               >
-                {formatRange(item.rangeLow, item.rangeHigh)}
+                {formatRange(effectiveLow(item), effectiveHigh(item))}
               </span>
             </div>
           ))}
@@ -159,9 +198,9 @@ function TableCalloutLayout({ slide, branding }: Props) {
             <strong>{content.retainerLabel}:</strong>{" "}
             {formatRange(content.retainerAmount, null).replace("–", "")}
           </p>
-          {content.disclaimer && (
+          {(content.retainerDescription || content.disclaimer) && (
             <p style={{ fontSize: "0.62em", color: "#6B7280", marginTop: "0.3em" }}>
-              {content.disclaimer}
+              {content.retainerDescription || content.disclaimer}
             </p>
           )}
         </div>
@@ -203,10 +242,10 @@ function TableCalloutLayout({ slide, branding }: Props) {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
-export function InvestmentSlide({ slide, branding }: Props) {
+export function InvestmentSlide({ slide, branding, hasAiBackground }: Props) {
   switch (slide.layoutKey) {
     case "table-callout":
     default:
-      return <TableCalloutLayout slide={slide} branding={branding} />;
+      return <TableCalloutLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 }

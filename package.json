@@ -16,12 +16,14 @@
     "dev-context:serve": "node node_modules/tsx/dist/cli.mjs hhi-dev-context/scripts/run-server.ts",
     "dev-context:collect-git": "node node_modules/tsx/dist/cli.mjs hhi-dev-context/scripts/collect-git.ts",
     "dev-context:verify": "node node_modules/tsx/dist/cli.mjs scripts/dev-context-verify.ts",
-    "dev-context:mcp": "node node_modules/tsx/dist/cli.mjs hhi-dev-context-mcp/scripts/run-server.ts"
+    "dev-context:mcp": "node node_modules/tsx/dist/cli.mjs hhi-dev-context-mcp/scripts/run-server.ts",
+    "seed:hero-backgrounds": "npx tsx scripts/seed-hero-backgrounds.ts"
   },
   "prisma": {
     "seed": "node node_modules/tsx/dist/cli.mjs prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.81.0",
     "@aws-sdk/client-s3": "^3.700.0",
     "@aws-sdk/s3-request-presigner": "^3.700.0",
     "@clerk/nextjs": "^6.9.0",

@@ -74,6 +74,75 @@ npm run dev
 | `npm run db:migrate`  | Run migrations     |
 | `npm run db:seed`     | Seed database      |
 | `npm run db:studio`   | Prisma Studio      |
+| `npm run dev-context:verify` | Fetch `hhi-dev-context` `/summary` (and pricing route health) |
+
+## Local dev context (hhi-dev-context)
+
+For local debugging, the app integrates with `hhi-dev-context` over local HTTP:
+- write events to `POST /ingest/*` (errors/logs/task runs/sync runs/route health)
+- read state from `GET /snapshot`, `/summary`, etc.
+
+`sql.js` (and SQLite storage) stays isolated inside the standalone `hhi-dev-context` service; the Next.js app never imports it.
+
+### Enable / disable
+
+- Default: enabled in non-production (`NODE_ENV !== "production"`).
+- Override with `HHI_DEV_CONTEXT_ENABLED`:
+  - `true` to enable
+  - `false` to disable
+
+### Base URL
+
+- Override with `HHI_DEV_CONTEXT_BASE_URL` (default: `http://127.0.0.1:3999`)
+
+### What’s instrumented
+
+- Task runs:
+  - `npm run build` → task name `build`
+  - `npm run lint` → task name `lint`
+  - `npm run dev` → task name `dev-server`
+- Pricing / JobTread:
+  - `app/admin/settings/jobtread-pricing/page.tsx` → route health for `/admin/settings/jobtread-pricing`
+  - `app/api/admin/jobtread/sync-budget/route.ts` → route health for `/api/admin/jobtread/sync-budget`
+  - `app/api/admin/integrations/jobtread/test/route.ts` → route health for `/api/admin/integrations/jobtread/test`
+  - `app/lib/jobtread/sync-budget.ts` → JobTread sync runs + failures
+
+### Verify end-to-end
+
+1. Start the app:
+   ```bash
+   npm run dev
+   ```
+   (this also starts the local `hhi-dev-context` HTTP server)
+2. Run:
+   ```bash
+   npm run dev-context:verify
+   ```
+3. Optionally visit `/admin/settings/jobtread-pricing` and/or trigger a JobTread sync, then re-run the verify command.
+
+Expected `/summary` shape (example):
+```json
+{
+  "branch": "proposal-v2",
+  "commit_hash": "8bc8e16",
+  "latest_task_statuses": {
+    "dev-server": { "status": "running", "summary": null, "ended_at": null }
+  },
+  "latest_sync_run": {
+    "id": 12,
+    "job_id": "22PJXd2cjdhN",
+    "status": "success",
+    "started_at": "2026-03-19T12:00:00.000Z",
+    "finished_at": "2026-03-19T12:00:15.000Z",
+    "summary": "jobtread ...",
+    "error_message": null,
+    "created_at": "2026-03-19T12:00:00.000Z"
+  },
+  "route_health": [
+    { "route": "/admin/settings/jobtread-pricing", "status": "ok", "response_time_ms": 120, "active_job_id": null, "notes": "..." }
+  ]
+}
+```
 
 ## Env vars (see `.env.example`)
 
@@ -82,3 +151,4 @@ npm run dev
 - `ADMIN_EMAILS` or `ADMIN_USER_IDS` – Admin allowlist
 - `R2_*` or S3 equivalents – Object storage
 - Optional: Playwright-related vars for PDF export
+- Optional: `HHI_DEV_CONTEXT_ENABLED`, `HHI_DEV_CONTEXT_BASE_URL`

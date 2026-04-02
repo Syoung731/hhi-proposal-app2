@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { ensureCopeRoom } from "@/app/lib/ensure-cope-room";
 import { ProjectStatus } from "@/app/generated/prisma";
 
 function slugify(title: string): string {
@@ -32,6 +33,7 @@ export async function createProjectAction(formData: FormData) {
       title,
     },
   });
+  await ensureCopeRoom(project.id);
   revalidatePath("/admin/projects");
   redirect(`/admin/projects/${project.id}`);
 }

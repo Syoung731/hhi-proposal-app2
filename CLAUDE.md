@@ -71,6 +71,14 @@ Sections tab display AND the investment rollup. Never duplicate this math.
 - Use conventional commit messages: feat:, fix:, refactor:, chore:
 - Do NOT push to remote unless explicitly asked
 - Do NOT create branches unless explicitly asked
+- Work directly on the current branch — do NOT create worktrees or new branches
+- All work happens on proposal-v2 unless explicitly told otherwise
+
+## Prisma Rules
+- NEVER run `npx prisma db pull` or `npx prisma db pull --force`. This overwrites the hand-crafted schema.prisma with an auto-generated version that loses @updatedAt, onDelete behaviors, comments, relation names, and field ordering.
+- To verify database connectivity, use: `npx prisma migrate status`
+- To verify schema is in sync: `npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-migrations prisma/migrations`
+- Only use `npx prisma migrate dev` for migrations and `npx prisma generate` for client generation.
 
 ## Code Quality Rules
 - Run tsc --noEmit after every set of changes — zero errors required

@@ -11,6 +11,7 @@ import {
 } from "@/app/lib/section-unit-quantity";
 import { computeSectionTotals } from "@/app/lib/section-totals";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
+import { ensureCopeRoom } from "@/app/lib/ensure-cope-room";
 import {
   extractRoomsFromTranscript,
   rewriteRoomScopeNarrative,
@@ -138,6 +139,17 @@ export async function createRoomAction(projectId: string, formData: FormData): P
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return { error: "Project not found" };
   const name = (formData.get("name") as string)?.trim() ?? "";
+
+  // Prevent manual duplication of the COPE room
+  const nameLC = name.toLowerCase();
+  if (nameLC.includes("cope") || nameLC.includes("cost of project execution")) {
+    const existingCope = await prisma.room.findFirst({
+      where: { projectId, isProjectOverhead: true },
+    });
+    if (existingCope) {
+      return { error: "A COPE room already exists for this project." };
+    }
+  }
   const scopeNarrative = (formData.get("scopeNarrative") as string)?.trim() ?? "";
   const maxOrder = await prisma.room
     .aggregate({ where: { projectId }, _max: { sortOrder: true } })
@@ -454,6 +466,9 @@ export async function deleteRoomAction(projectId: string, roomId: string): Promi
   await requireAdmin();
   const room = await prisma.room.findFirst({ where: { id: roomId, projectId } });
   if (!room) return { error: "Room not found" };
+  if (room.isProjectOverhead) {
+    return { error: "Cannot delete the COPE room. It is required for project overhead." };
+  }
   await prisma.room.delete({ where: { id: roomId } });
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
@@ -673,6 +688,8 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
     }
     unmatchedRooms = [...byName.entries()].map(([name, roomIds]) => ({ name, roomIds }));
   }
+
+  await ensureCopeRoom(projectId);
 
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -1392,6 +1409,7 @@ export async function updateRoomsSectionType(
   if (project) {
     revalidatePath(`/admin/projects/${project.projectId}`);
     revalidatePath(`/admin/projects/${project.projectId}/preview`);
+    await recomputeInvestmentRollups(project.projectId);
   }
   return {};
 }
@@ -1456,6 +1474,51 @@ async function getOrCreateSectionTypeForName(
 }
 
 /** Quick-create a Pricing Profile (SectionType) with name, pricing basis, and optional target price. */
+export async function updateRoomManualPriceAction(
+  projectId: string,
+  roomId: string,
+  low: number | null,
+  high: number | null
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  try {
+    const target = low != null && high != null ? Math.round((low + high) / 2) : low ?? high ?? null;
+    await prisma.room.update({
+      where: { id: roomId },
+      data: {
+        totalLow: low,
+        totalTarget: target,
+        totalHigh: high,
+        pricingTier: "MANUAL",
+      },
+    });
+    await recomputeInvestmentRollups(projectId);
+    revalidatePath(`/admin/projects/${projectId}`);
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to update manual price" };
+  }
+}
+
+export async function updateRoomPricingTierAction(
+  projectId: string,
+  roomId: string,
+  pricingTier: "PROFILE" | "AI_ESTIMATE" | "MANUAL"
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  try {
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { pricingTier },
+    });
+    await recomputeInvestmentRollups(projectId);
+    revalidatePath(`/admin/projects/${projectId}`);
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to update pricing tier" };
+  }
+}
+
 export async function createQuickSectionTypeAction(
   name: string,
   exterior: boolean,

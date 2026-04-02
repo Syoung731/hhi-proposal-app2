@@ -28,21 +28,43 @@ export function SettingsNav() {
             const isJobTreadPricingActive =
               pathname === jobtreadPricingHref ||
               pathname.startsWith(jobtreadPricingHref + "/");
-            const jobtreadLinkClass =
+            const subLinkClass = (active: boolean) =>
               "block w-full rounded-lg py-2.5 pl-7 pr-3 text-left text-sm transition-colors " +
-              (isJobTreadPricingActive
+              (active
                 ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
                 : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100");
+            const aiPricingSubTabs = [
+              { href: "/admin/settings/ai-pricing", label: "Catalog" },
+              { href: "/admin/settings/ai-pricing/templates", label: "Room Templates" },
+              { href: "/admin/settings/ai-pricing/context", label: "Company Context" },
+              { href: "/admin/settings/ai-pricing/suggestions", label: "Suggestions" },
+              { href: "/admin/settings/ai-pricing/stats", label: "Stats" },
+            ];
             return (
               <div key={slug}>
                 <Link href={href} className={linkClass}>
                   {label}
                 </Link>
                 {slug === "pricing-profiles" && (
-                  <Link href={jobtreadPricingHref} className={jobtreadLinkClass}>
+                  <Link href={jobtreadPricingHref} className={subLinkClass(isJobTreadPricingActive)}>
                     JobTread Pricing
                   </Link>
                 )}
+                {slug === "ai-pricing" &&
+                  aiPricingSubTabs.map((sub) => {
+                    const subActive =
+                      pathname === sub.href ||
+                      pathname.startsWith(sub.href + "/");
+                    return (
+                      <Link
+                        key={sub.href}
+                        href={sub.href}
+                        className={subLinkClass(subActive)}
+                      >
+                        {sub.label}
+                      </Link>
+                    );
+                  })}
               </div>
             );
           })}

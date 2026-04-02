@@ -6,6 +6,7 @@ import {
   updateIntegrationTestStatus,
   PROVIDER_JOBTREAD,
 } from "@/app/lib/integrations/service";
+import { logDevError, logDevRouteHealth } from "@/src/lib/dev-context";
 
 /** Safe error message for API response (no secrets, no stack). */
 function toSafeError(e: unknown): string {
@@ -35,6 +36,10 @@ function parseTestResponse(json: unknown): { currentGrantId: string; version: st
  * Runs a minimal JobTread query to verify connectivity. Updates integration lastTestedAt/lastStatus/lastMessage.
  */
 export async function GET() {
+  const route = "/api/admin/integrations/jobtread/test";
+  const env = process.env.NODE_ENV === "production" ? "production" : "local";
+  const t0 = Date.now();
+
   try {
     await requireAdmin();
   } catch (e) {
@@ -54,12 +59,22 @@ export async function GET() {
     );
 
     if (!data) {
+      const dt = Date.now() - t0;
+      await logDevRouteHealth(route, "warn", {
+        responseTimeMs: dt,
+        notes: "JobTread test returned an unexpected payload shape",
+      });
       return NextResponse.json({
         ok: true,
         data: { currentGrantId: "", version: "" },
       });
     }
 
+    const dt = Date.now() - t0;
+    await logDevRouteHealth(route, "ok", {
+      responseTimeMs: dt,
+      notes: "JobTread integration connectivity test succeeded",
+    });
     return NextResponse.json({
       ok: true,
       data: {
@@ -74,6 +89,20 @@ export async function GET() {
       "error",
       safeMessage
     ).catch(() => {});
+
+    const dt = Date.now() - t0;
+    await logDevError({
+      source: "server",
+      severity: "error",
+      message: safeMessage,
+      route,
+      component: "GET /api/admin/integrations/jobtread/test",
+      env,
+    });
+    await logDevRouteHealth(route, "error", {
+      responseTimeMs: dt,
+      notes: "JobTread integration test failed",
+    });
 
     return NextResponse.json(
       { ok: false, error: safeMessage },

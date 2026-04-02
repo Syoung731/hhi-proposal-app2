@@ -286,6 +286,40 @@ export async function saveIntegrationsAction(
 }
 
 // ---------------------------------------------------------------------------
+// Anthropic (Claude AI) integration
+// ---------------------------------------------------------------------------
+
+import {
+  getOrCreateAnthropicIntegration,
+  saveAnthropicApiKey,
+  testAnthropicConnection,
+} from "@/app/integrations/anthropic";
+
+export async function getAnthropicIntegrationAction() {
+  await requireAdmin();
+  return getOrCreateAnthropicIntegration();
+}
+
+export async function saveAnthropicApiKeyAction(formData: FormData): Promise<{ error?: string }> {
+  await requireAdmin();
+  const apiKey = (formData.get("anthropicApiKey") as string)?.trim() ?? "";
+  if (!apiKey) return { error: "API key is required" };
+  try {
+    await saveAnthropicApiKey(apiKey);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to save" };
+  }
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/settings/integrations");
+  return {};
+}
+
+export async function testAnthropicConnectionAction(): Promise<{ ok: boolean; model?: string; error?: string }> {
+  await requireAdmin();
+  return testAnthropicConnection();
+}
+
+// ---------------------------------------------------------------------------
 // JobTread integration (Grant Key, base URL, test connection)
 // ---------------------------------------------------------------------------
 

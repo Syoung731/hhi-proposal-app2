@@ -144,15 +144,35 @@ export interface ObjectiveContent {
 export interface InvestmentLineItem {
   id: string;
   label: string;
+  /** Bucket category: "BASE" | "ALTERNATE" | "ALLOWANCE" */
+  bucket?: string | null;
+  /** Source range from the cost estimator (low end). */
   rangeLow?: number | null;
+  rangeTarget?: number | null;
+  /** Source range from the cost estimator (high end). */
   rangeHigh?: number | null;
-  isCope?: boolean; // Cost of Project Execution — light row style
+  /** Proposal-specific override values — used when isOverride=true. */
+  overrideLow?: number | null;
+  overrideTarget?: number | null;
+  overrideHigh?: number | null;
+  /**
+   * When true, display overrideLow/overrideHigh instead of rangeLow/rangeHigh.
+   * Allows the proposal to show rounded/negotiated figures without editing the source.
+   */
+  isOverride?: boolean;
+  includeInTotals?: boolean;
+  sortOrder?: number;
+  /** @deprecated Not rendered — kept for backward compatibility. */
+  isCope?: boolean;
 }
 
 export interface InvestmentContent {
   lineItems?: InvestmentLineItem[];
   retainerLabel?: string | null;
   retainerAmount?: number | null;
+  /** Short description shown below the retainer label in the callout box. */
+  retainerDescription?: string | null;
+  /** @deprecated Use retainerDescription instead. */
   disclaimer?: string | null;
   address?: string | null;
 }
@@ -504,6 +524,16 @@ export interface ProposalSlide {
    * When null/undefined the renderer falls back to its built-in layout.
    */
   textZone?: TextZoneSetting | null;
+  /**
+   * AI-generated background image URL stored in R2.
+   * Rendered as the absolute bottom layer (CSS background-image on the slide
+   * container) — below backgroundId/textZone system and slide content.
+   *
+   * Set only via the "✦ Regenerate with AI" flow in the inspector after the
+   * user accepts the preview. Never set by the auto-sync engine or updateSlide,
+   * so it intentionally does NOT affect isUserModified.
+   */
+  aiBackground?: string | null;
 }
 
 // ─── Deck ────────────────────────────────────────────────────────────────────

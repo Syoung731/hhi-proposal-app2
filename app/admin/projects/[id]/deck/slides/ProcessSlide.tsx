@@ -1,10 +1,12 @@
 "use client";
 
 import type { ProposalSlide, DeckBranding, ProcessContent, ProcessStage } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 // ─── Default content ──────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ const DEFAULT_BOTTOM =
 
 // ─── Three-stages layout ──────────────────────────────────────────────────────
 
-export function ProcessSlide({ slide, branding }: Props) {
+export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
   const c = (slide.content ?? {}) as ProcessContent;
   const stages = c.stages && c.stages.length > 0 ? c.stages : DEFAULT_STAGES;
   const bottomStatement = c.bottomStatement ?? DEFAULT_BOTTOM;
@@ -50,7 +52,7 @@ export function ProcessSlide({ slide, branding }: Props) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: "#F5F4F0", overflow: "hidden" }}
+      style={{ background: hasAiBackground ? "transparent" : "#F5F4F0", overflow: "hidden" }}
     >
       {/* Dot grid watermark */}
       <svg
@@ -84,23 +86,31 @@ export function ProcessSlide({ slide, branding }: Props) {
         }}
       >
         {/* Title row */}
-        <div style={{ flexShrink: 0, marginBottom: "4%" }}>
+        <div style={{ flexShrink: 0, marginBottom: "3%" }}>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em",
+                fontWeight: 600,
+                letterSpacing: "0.13em",
+                color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h2
             className="font-serif"
             style={{
-              fontSize: "1.45em", fontWeight: 800,
-              color: branding.textColor, lineHeight: 1.15,
+              fontSize: "2.4em", fontWeight: 800,
+              color: branding.textColor, lineHeight: 1.1,
             }}
           >
             {title}
           </h2>
-          <div
-            style={{
-              height: 3, width: "3.5em",
-              background: branding.accentColor,
-              marginTop: "0.5em", borderRadius: 2,
-            }}
-          />
+          <TitleAccentRule accentColor={branding.accentColor} />
         </div>
 
         {/* Stage columns */}

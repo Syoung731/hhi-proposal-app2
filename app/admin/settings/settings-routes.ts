@@ -15,6 +15,7 @@ export const SETTINGS_TAB_SLUGS = [
   "value-pillars",
   "employees",
   "integrations",
+  "ai-pricing",
   "dev-integrations",
 ] as const;
 

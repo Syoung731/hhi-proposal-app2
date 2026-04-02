@@ -12,6 +12,7 @@ import type { TextZoneSuggestion } from "@/app/lib/deck/types";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
+const IMAGEN_4_MODEL = process.env.GEMINI_IMAGE_GEN_MODEL ?? "imagen-4.0-fast-generate-001";
 
 // ─── Generation mode types ────────────────────────────────────────────────────
 
@@ -91,25 +92,25 @@ Technical requirements:
 // Each string is injected directly into the prompt as a behavior directive.
 const SLIDE_MODE_BEHAVIOR: Record<BackgroundStylePreset, string> = {
   architectural:
-    "Architectural massing and structural edges dominate. Strong physical depth and form. Clean modern building elements — concrete planes, steel frames, glass reveals, slab edges. No graphic abstraction, no soft glow, no fading center.",
+    "Coastal architectural forms dominate. Lowcountry design language — deep porches, raised foundations, standing-seam metal roofs, tabby walls, board-and-batten siding, exposed rafters. Strong physical depth with warm natural light. Palmetto and live oak framing. Hilton Head Island residential character — not urban, not modern minimalist. No concrete brutalism, no steel frames.",
   editorial:
-    "Graphic composition dominates over physical structures. Bold contrast between flat light and dark planes. Sharp edges, asymmetric layout. Must feel like a designed magazine spread — not a render, not a photo. Avoid all realistic architectural depth.",
+    "Magazine-quality coastal editorial composition. Bold contrast between warm sunlight and deep shade. Golden hour warmth on natural materials — cypress, cedar, oyster shell tabby, aged brick. Must feel like a Veranda or Coastal Living magazine spread. Warm tones, editorial lighting, Southern luxury feel. Not cold, not urban, not minimalist.",
   technical:
-    "Blueprint linework dominates the composition. Lines must be crisp, visible, and structurally organized — grid overlays, section-cut geometry, dimensional notation, drafting fragments. Minimal material presence behind the lines. Precise and technical. No soft fades that obscure line clarity.",
+    "Architectural drafting and blueprint linework dominate. Residential floor plans, elevation drawings, and construction details for coastal homes — raised foundations, hurricane-rated framing, porch sections. Lines are crisp and structurally organized. Warm drafting paper tones. Technical but residential in character — not commercial, not industrial.",
   "warm-luxury":
-    "Material texture dominates. A single luxury surface — warm stone, wood grain, or linen — fills the active zone as a macro close-up abstraction. Warm, refined, natural tones. Soft but controlled directional light raking across the surface. No glow effects, no atmospheric blur. Calm, minimal, premium.",
+    "Luxury coastal material texture dominates. A single premium surface — honed travertine, warm cypress wood grain, aged tabby shell, handmade ceramic tile, or natural linen — fills the active zone as a macro close-up. Warm golden-hour light raking across the surface. Tones of sand, driftwood, warm white, and sea glass. Refined Lowcountry luxury feel. No cold surfaces, no concrete, no industrial materials.",
 };
 
 // Per-seed composition direction (plain language injected into prompt).
 const SLIDE_COMPOSITION_DIRECTION: Record<Exclude<SlideCompositionSeed, "split-diptych">, string> = {
   "left-weighted":
-    "Visual mass anchored hard to the left 30% of the frame. The remaining right 70% is a clean, uninterrupted, near-uniform field for text overlay. Strong left-heavy hierarchy — the right side must contain nothing.",
+    "Visual mass anchored hard to the left 30% of the frame. The remaining right 70% is a clean, uninterrupted, near-uniform field, left open and uninterrupted. Strong left-heavy hierarchy — the right side must contain nothing.",
   "right-weighted":
-    "Visual mass anchored hard to the right 30% of the frame. The remaining left 70% is a clean, uninterrupted, near-uniform field for text overlay. Strong right-heavy hierarchy — the left side must contain nothing.",
+    "Visual mass anchored hard to the right 30% of the frame. The remaining left 70% is a clean, uninterrupted, near-uniform field, left open and uninterrupted. Strong right-heavy hierarchy — the left side must contain nothing.",
   "bottom-fade":
-    "Visual weight grounded at the bottom 25% of the frame, dissolving upward. The upper 75% is a clean, open, near-uniform field for title and body copy. Bottom-heavy hierarchy only — nothing creeps into the upper zone.",
+    "Visual weight grounded at the bottom 25% of the frame, dissolving upward. The upper 75% is a clean, open, near-uniform field for content placement. Bottom-heavy hierarchy only — nothing creeps into the upper zone.",
   corner:
-    "Single visual anchor in the lower-left corner only — approximately 20% of the frame. All remaining area is open, clean, and text-safe. The corner element must read as a legible architectural form or material fragment, not a gradient blob.",
+    "Single visual anchor in the lower-left corner only — approximately 20% of the frame. All remaining area is open, clean, and clear and open. The corner element must read as a legible architectural form or material fragment, not a gradient blob.",
 };
 
 type SlideCompositionSeed = "left-weighted" | "right-weighted" | "bottom-fade" | "corner" | "split-diptych";
@@ -128,11 +129,11 @@ function buildSlideVisualPrompt(
   const behavior = SLIDE_MODE_BEHAVIOR[stylePreset];
   const direction = SLIDE_COMPOSITION_DIRECTION[compositionSeed];
   const cue = userPrompt.trim()
-    || "luxury residential design-build — craft, precision, and architectural transformation";
+    || "luxury coastal renovation on Hilton Head Island — Lowcountry architecture, warm natural materials, golden hour light, palmetto and live oak landscaping";
 
   // Single clean prompt following the BASE COMPOSITION RULE:
   // dominant element → transition → empty text field.
-  return `16:9 presentation slide background for a luxury design-build company. ${behavior} ${direction} The dominant visual element occupies the active zone only; the transition into the text field is controlled and directional — no radial gradients, no centered glow, no washed-out middle. The text field is completely empty: no objects, linework, shadows, or texture of any kind. Composition subject (interpret as material and architectural language — not a literal scene): ${cue}. Brand accent ${brand.accentColor} used as a subtle material highlight only. Deep tone ${brand.textColor} anchors structural edge or shadow mass. Negative space is warm off-white or cream. No rooms, environments, or scenes. No people, logos, text, or watermarks. Single 16:9 landscape image, 1792×1024px minimum, PNG.`;
+  return `16:9 presentation slide background. Purely visual, no branding. ${behavior} ${direction} The dominant visual element occupies the active zone only; the transition into the empty field is controlled and directional — no radial gradients, no centered glow, no washed-out middle. The empty field is completely clear: no objects, linework, shadows, or texture of any kind. Composition subject (interpret as material and architectural language — not a literal scene): ${cue}. A warm orange accent tone used as a subtle material highlight only. Deep near-black tone anchors structural edge or shadow mass. Negative space is warm off-white or cream. No rooms, environments, or scenes. No people, no logos, no text of any kind, no watermarks, no signage, no written characters. ABSOLUTE RULE: This image must contain ZERO text of any kind. No letters, words, numbers, labels, captions, titles, signs, watermarks, hex codes, annotations, or placeholder text. If any readable character appears anywhere in the image, the entire image is invalid. The image is purely visual — architecture, materials, and light only. Single 16:9 landscape image, 1792×1024px minimum, PNG.`;
 }
 
 function buildSplitDiptychPrompt(
@@ -140,7 +141,7 @@ function buildSplitDiptychPrompt(
   brand: { accentColor: string; textColor: string; companyName: string }
 ): string {
   const cue = userPrompt.trim()
-    || "architectural blueprint sketch transitioning to a luxury finished home";
+    || "architectural blueprint sketch transitioning to a finished Lowcountry luxury home with deep porches, warm materials, and coastal landscaping";
 
   return `16:9 presentation slide background divided into three horizontal zones. This is a full-frame narrative diptych — high contrast between zones is required and correct.
 
@@ -149,13 +150,13 @@ LEFT ZONE (left 44%): A dense, detailed architectural pencil-sketch or ink-drawi
 CENTER ZONE (middle 12–16%): A dramatic near-black vertical void with irregular, torn or fractured edges where it meets the left and right zones. The darkness peaks at the centerline. The left boundary of the void should look like a ragged tear — organic, energetic. This is the highest-contrast element in the image. Smooth soft gradient edges here are incorrect — the boundary must have graphic force.
 
 RIGHT ZONE (right 44%): ${cue.toLowerCase().includes("home") || cue.toLowerCase().includes("house") || cue.toLowerCase().includes("residen") || cue.toLowerCase().includes("built")
-    ? `A photorealistic luxury residential exterior — premium finished home with warm golden-hour light, large windows, stone or wood cladding, manicured landscaping. Rich warm tones, architectural photography quality. This zone must look like a beautiful finished home, not an abstract surface.`
+    ? `A photorealistic luxury Lowcountry coastal home — Hilton Head Island style with deep covered porches, standing-seam metal roof, natural cedar or cypress siding, tabby accents, palmetto and live oak landscaping, warm golden-hour light. Southern coastal luxury, not modern minimalist.`
     : `A richly rendered warm luxury material surface — honed travertine, warm wood grain, or premium stone — treated as a photographic close-up with warm directional light. Rich, warm, and detailed.`
   }
 
-TOP 16%: Text-safe header strip — completely clean, near-uniform, low contrast. No detail, no linework, no edge may enter.
+TOP 16%: Clear header strip — completely clean, near-uniform, low contrast. No detail, no linework, no edge may enter.
 
-Composition cue: ${cue}. Brand accent ${brand.accentColor} as subtle highlight in the right zone only. No people, logos, text labels, or watermarks. Single 16:9 landscape image, 1792×1024px minimum, PNG.`;
+Composition cue: ${cue}. A warm orange accent as subtle highlight in the right zone only. No people, no logos, no text of any kind, no watermarks, no signage, no written characters. ABSOLUTE RULE: This image must contain ZERO text of any kind. No letters, words, numbers, labels, captions, titles, signs, watermarks, hex codes, annotations, or placeholder text. If any readable character appears anywhere in the image, the entire image is invalid. The image is purely visual — architecture, materials, and light only. Single 16:9 landscape image, 1792×1024px minimum, PNG.`;
 }
 
 function buildPrompts(
@@ -301,8 +302,8 @@ export async function generateBackgroundImagesAction(
   const mode = input.mode ?? "subtle-texture";
   const stylePreset = input.stylePreset ?? "architectural";
   const brand = {
-    accentColor: input.brandContext?.accentColor?.trim() || "#E07B3F",
-    textColor:   input.brandContext?.textColor?.trim()   || "#1A2B3C",
+    accentColor: input.brandContext?.accentColor?.trim() || "#F47216",
+    textColor:   input.brandContext?.textColor?.trim()   || "#1B1B1B",
     companyName: input.brandContext?.companyName?.trim() || "Design-Build Company",
   };
 
@@ -433,12 +434,58 @@ export async function generateBackgroundImagesAction(
     return { imageUrl: publicUrl, imageKey: fileKey };
   };
 
+  // Imagen 4 generator for slide-visual mode — uses generateImages() with a native
+  // 16:9 aspect ratio instead of relying on prompt text for dimensions.
+  // Reference images (if any) are included as text-only guidance since Imagen 4's
+  // generateImages endpoint does not accept inline image data.
+  const generateOneImagen4 = async (promptText: string): Promise<{ imageUrl: string; imageKey: string } | null> => {
+    // Extract text instruction parts from refPrefix — inlineData cannot be forwarded.
+    const refTextParts = (refPrefix as unknown[])
+      .filter((p): p is { text: string } => typeof (p as { text?: unknown }).text === "string")
+      .map((p) => p.text);
+    const fullPrompt = refTextParts.length > 0
+      ? `${refTextParts.join("\n\n")}\n\n${promptText}`
+      : promptText;
+
+    let imgResponse: Awaited<ReturnType<typeof ai.models.generateImages>>;
+    try {
+      imgResponse = await ai.models.generateImages({
+        model: IMAGEN_4_MODEL,
+        prompt: fullPrompt,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config: { numberOfImages: 1, outputMimeType: "image/png", aspectRatio: "16:9" } as any,
+      });
+    } catch (e) {
+      throw new Error(`Imagen 4 image generation failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    const generated = (imgResponse as { generatedImages?: unknown[] })?.generatedImages;
+    if (!generated?.length) {
+      throw new Error("Imagen 4 returned no generated images.");
+    }
+
+    const imageData = (
+      generated[0] as { image?: { imageBytes?: string; mimeType?: string } }
+    )?.image;
+    if (!imageData?.imageBytes) {
+      throw new Error(
+        "Imagen 4 returned an image record with no imageBytes — the prompt may have been blocked."
+      );
+    }
+
+    const img4Bytes = Buffer.from(imageData.imageBytes, "base64");
+    const img4MimeType = imageData.mimeType ?? "image/png";
+    const img4Key = `brand-backgrounds/global/${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+    const { publicUrl: img4Url, fileKey: img4FileKey } = await uploadBuffer(img4Key, img4Bytes, img4MimeType);
+    return { imageUrl: img4Url, imageKey: img4FileKey };
+  };
+
   const results: GeneratedImage[] = [];
   const errors: string[] = [];
 
   const settled = await Promise.all(
     prompts.map((p) =>
-      generateOne(p).catch((e) => {
+      (mode === "slide-visual" ? generateOneImagen4 : generateOne)(p).catch((e) => {
         errors.push(e instanceof Error ? e.message : String(e));
         return null;
       })
@@ -581,6 +628,42 @@ async function generateAndStoreBackgroundPreview(
     },
   });
   if (!bg) return null;
+
+  // For slide-visual mode the overlay is a full-bleed cover image, not a tile.
+  // The 9999px spacing convention used on save would make the SVG preview show
+  // only a single pixel.  Resize the original generated image directly instead.
+  if (bg.generationMode === "slide-visual" && bg.overlayImageKey) {
+    try {
+      const originalBytes = await readObjectToBuffer(bg.overlayImageKey);
+      const resized = await sharp(originalBytes)
+        .resize(PREVIEW_WIDTH, PREVIEW_HEIGHT, { fit: "cover" })
+        .png()
+        .toBuffer();
+
+      const previewKey = `brand-backgrounds/previews/${bg.slug}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}.png`;
+      const { publicUrl: previewUrl, fileKey: previewFileKey } = await uploadBuffer(
+        previewKey,
+        resized,
+        "image/png"
+      );
+
+      const oldPreviewKey = bg.previewImageKey ?? null;
+      const updated = await prisma.brandBackground.update({
+        where: { id: bg.id },
+        data: { previewImageUrl: previewUrl, previewImageKey: previewFileKey },
+      });
+
+      if (oldPreviewKey && oldPreviewKey !== previewFileKey) {
+        deleteR2Objects([oldPreviewKey]).catch(() => {});
+      }
+
+      return updated;
+    } catch {
+      // Fall through to the SVG path if the original image can't be fetched or resized.
+    }
+  }
 
   // Resolve the overlay image.
   // Prefer the explicit overlay image; fall back to the icon PNG.

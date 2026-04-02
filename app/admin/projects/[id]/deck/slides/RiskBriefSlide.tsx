@@ -6,10 +6,12 @@ import type {
   DeckBranding,
   RiskBriefContent,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 // ─── Shared defaults ──────────────────────────────────────────────────────────
@@ -30,6 +32,7 @@ const DEFAULT_RIGHT_BULLETS = [
 
 function TwoColumnLayout({
   title,
+  eyebrow,
   leftHeader,
   rightHeader,
   leftBullets,
@@ -46,6 +49,7 @@ function TwoColumnLayout({
   rightBoxColor,
 }: {
   title: string;
+  eyebrow?: string | null;
   leftHeader: string;
   rightHeader: string;
   leftBullets: string[];
@@ -94,13 +98,25 @@ function TwoColumnLayout({
       >
         {/* Title */}
         <div style={{ flexShrink: 0, marginBottom: "4%" }}>
+          {eyebrow && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {eyebrow}
+            </p>
+          )}
           <h2
             className="font-serif"
-            style={{ fontSize: `${1.55 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.2, maxWidth: "75%", textShadow: titleShadow }}
+            style={{ fontSize: `${2.3 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.1, maxWidth: "75%", textShadow: titleShadow }}
           >
             {title}
           </h2>
-          <div style={{ height: 2, width: "3em", background: branding.accentColor, marginTop: "0.55em" }} />
+          <TitleAccentRule accentColor={branding.accentColor} />
         </div>
 
         {/* Two-column body */}
@@ -226,6 +242,7 @@ function TwoColumnLayout({
 
 function ComparisonTableLayout({
   title,
+  eyebrow,
   leftColHeader,
   rightColHeader,
   leftBullets,
@@ -243,6 +260,7 @@ function ComparisonTableLayout({
   rightBoxColor,
 }: {
   title: string;
+  eyebrow?: string | null;
   leftColHeader: string;
   rightColHeader: string;
   leftBullets: string[];
@@ -305,13 +323,25 @@ function ComparisonTableLayout({
       >
         {/* Title */}
         <div style={{ flexShrink: 0, marginBottom: "3.5%" }}>
+          {eyebrow && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {eyebrow}
+            </p>
+          )}
           <h2
             className="font-serif"
-            style={{ fontSize: `${1.5 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.2, maxWidth: "80%", textShadow: titleShadow }}
+            style={{ fontSize: `${2.3 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.2, maxWidth: "80%", textShadow: titleShadow }}
           >
             {title}
           </h2>
-          <div style={{ height: 3, width: "3.2em", background: branding.accentColor, marginTop: "0.5em", borderRadius: 2 }} />
+          <TitleAccentRule accentColor={branding.accentColor} />
         </div>
 
         {/* Comparison table */}
@@ -501,10 +531,10 @@ function makeOutlineShadow(color: string | null | undefined): string | undefined
   return `-1px -1px 0 ${color}, 1px -1px 0 ${color}, -1px 1px 0 ${color}, 1px 1px 0 ${color}, 0 -1px 0 ${color}, 0 1px 0 ${color}`;
 }
 
-export function RiskBriefSlide({ slide, branding }: Props) {
+export function RiskBriefSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as RiskBriefContent;
   const layoutKey = slide.layoutKey as string;
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const titleSize        = content.titleSize        ?? 1.5;
   const titleColor       = content.titleColor       ?? (layoutKey === "comparison-table" ? "#FFFFFF" : branding.textColor);
@@ -555,6 +585,7 @@ export function RiskBriefSlide({ slide, branding }: Props) {
       <ComparisonTableLayout
         {...sharedProps}
         title={title}
+        eyebrow={slide.subheadline}
         leftColHeader={content.leftHeader || "Traditional Contracting"}
         rightColHeader={content.rightHeader || "HHI Design-Build"}
         rowLabels={rowLabels}
@@ -566,6 +597,7 @@ export function RiskBriefSlide({ slide, branding }: Props) {
     <TwoColumnLayout
       {...sharedProps}
       title={title}
+      eyebrow={slide.subheadline}
       leftHeader={content.leftHeader || "Why Remodels Go Wrong"}
       rightHeader={content.rightHeader || "How We Prevent That"}
     />

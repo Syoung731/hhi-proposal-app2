@@ -16,10 +16,14 @@ import {
   updateRoomsRoomType,
   updateRoomsSectionType,
   updateRoomSubAreasAction,
+  updateRoomPricingTierAction,
+  updateRoomManualPriceAction,
 } from "./actions";
 import { updateProjectStylePresetAction } from "../overview/actions";
 import { getRoomTypes } from "@/app/admin/settings/actions";
 import { NewRoomTypesModal } from "./new-room-types-modal";
+import { AIEstimatePanel } from "./ai-estimate-panel";
+import { BulkAiEstimateModal } from "./bulk-ai-estimate-modal";
 import { formatInchesToFeetInches, parseFeetInchesToInches } from "@/app/lib/dimensions";
 import { getEffectiveMeasurementMode, computeUnitQuantity } from "@/app/lib/section-unit-quantity";
 import { getEstimateUnitLabel } from "@/app/lib/estimate-unit-labels";
@@ -336,6 +340,229 @@ function SectionPriceRangePill({ result }: { result: SectionPriceRangeResult }) 
   );
 }
 
+/** Inline pill content for SectionPriceRange (text only, no wrapper). */
+function profilePillText(result: SectionPriceRangeResult): string {
+  if (result == null) return "—";
+  if (result.kind === "needDimensions") return "Set dimensions";
+  if (result.kind === "target") return formatMoneyWhole(result.value);
+  return result.low === result.high
+    ? formatMoneyWhole(result.low)
+    : `${formatMoneyWhole(result.low)} – ${formatMoneyWhole(result.high)}`;
+}
+
+function ManualPricePopup({
+  projectId,
+  roomId,
+  initialLow,
+  initialHigh,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  roomId: string;
+  initialLow: number | null;
+  initialHigh: number | null;
+  onClose: () => void;
+  onSaved: (low: number | null, high: number | null) => void;
+}) {
+  const [lowStr, setLowStr] = useState(initialLow != null ? String(initialLow) : "");
+  const [highStr, setHighStr] = useState(initialHigh != null ? String(initialHigh) : "");
+  const [saving, setSaving] = useState(false);
+
+  function parseDollars(s: string): number | null {
+    const cleaned = s.replace(/[$,\s]/g, "");
+    if (!cleaned) return null;
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : Math.round(n);
+  }
+
+  async function handleSave() {
+    const low = parseDollars(lowStr);
+    const high = parseDollars(highStr);
+    setSaving(true);
+    await updateRoomManualPriceAction(projectId, roomId, low, high);
+    setSaving(false);
+    onSaved(low, high);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="w-72 rounded-lg border border-zinc-200 bg-white p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold text-zinc-900 mb-3">Manual Price Override</h3>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex-1">
+            <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Low</label>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400">$</span>
+              <input
+                type="text"
+                value={lowStr}
+                onChange={(e) => setLowStr(e.target.value)}
+                placeholder="0"
+                className="w-full rounded border border-zinc-300 pl-5 pr-2 py-1.5 text-sm tabular-nums text-right"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onClose(); }}
+              />
+            </div>
+          </div>
+          <span className="text-zinc-300 mt-5">–</span>
+          <div className="flex-1">
+            <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1">High</label>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400">$</span>
+              <input
+                type="text"
+                value={highStr}
+                onChange={(e) => setHighStr(e.target.value)}
+                placeholder="0"
+                className="w-full rounded border border-zinc-300 pl-5 pr-2 py-1.5 text-sm tabular-nums text-right"
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onClose(); }}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-50">Cancel</button>
+          <button type="button" onClick={handleSave} disabled={saving} className="rounded bg-zinc-900 px-3 py-1 text-xs text-white hover:bg-zinc-800 disabled:opacity-50">
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PricingTierSelector({
+  projectId,
+  room,
+  profileResult,
+  refreshKey,
+  onTierChanged,
+}: {
+  projectId: string;
+  room: { id: string; pricingTier?: "PROFILE" | "AI_ESTIMATE" | "MANUAL"; totalLow?: number | null; totalTarget?: number | null; totalHigh?: number | null };
+  profileResult: SectionPriceRangeResult;
+  refreshKey?: number;
+  onTierChanged?: () => void;
+}) {
+  const [tier, setTier] = useState<"PROFILE" | "AI_ESTIMATE" | "MANUAL">(room.pricingTier ?? "PROFILE");
+  const [estimate, setEstimate] = useState<{ totalPrice: number; rangeLow: number; rangeHigh: number } | null>(null);
+  const [showManualPopup, setShowManualPopup] = useState(false);
+  const [manualLow, setManualLow] = useState<number | null>(room.totalLow != null ? Math.round(room.totalLow) : null);
+  const [manualHigh, setManualHigh] = useState<number | null>(room.totalHigh != null ? Math.round(room.totalHigh) : null);
+
+  useEffect(() => { setTier(room.pricingTier ?? "PROFILE"); }, [room.pricingTier]);
+
+  // Fetch estimate data for AI tier display
+  useEffect(() => {
+    fetch(`/api/ai-estimate?projectId=${projectId}&sectionId=${room.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.estimate) {
+          const est = data.estimate;
+          const lineItems = est.lineItems ?? [];
+          let low = lineItems.reduce((s: number, i: { totalPriceLow?: number; totalPrice: number }) => s + (i.totalPriceLow ?? 0), 0);
+          let high = lineItems.reduce((s: number, i: { totalPriceHigh?: number; totalPrice: number }) => s + (i.totalPriceHigh ?? 0), 0);
+          if ((low <= 0 || high <= 0 || low === high) && est.totalPrice > 0) {
+            low = Math.round(est.totalPrice * 0.9);
+            high = Math.round(est.totalPrice * 1.1);
+          }
+          setEstimate({ totalPrice: est.totalPrice, rangeLow: low, rangeHigh: high });
+        }
+      })
+      .catch(() => {});
+  }, [projectId, room.id, refreshKey]);
+
+  async function handleChange(newTier: "PROFILE" | "AI_ESTIMATE" | "MANUAL") {
+    if (newTier === "MANUAL") {
+      setShowManualPopup(true);
+      return;
+    }
+    setTier(newTier);
+    await updateRoomPricingTierAction(projectId, room.id, newTier);
+    onTierChanged?.();
+  }
+
+  const profileText = profilePillText(profileResult);
+  const aiHasRange = estimate && estimate.rangeLow > 0 && estimate.rangeHigh > 0 && estimate.rangeLow !== estimate.rangeHigh;
+  const aiText = estimate
+    ? aiHasRange
+      ? `${formatMoneyWhole(estimate.rangeLow)} – ${formatMoneyWhole(estimate.rangeHigh)}`
+      : formatMoneyWhole(estimate.totalPrice)
+    : "—";
+
+  const hasManualValues = manualLow != null && manualHigh != null && (manualLow > 0 || manualHigh > 0);
+  const manualText = hasManualValues
+    ? manualLow !== manualHigh
+      ? `${formatMoneyWhole(manualLow!)} – ${formatMoneyWhole(manualHigh!)}`
+      : formatMoneyWhole(manualLow!)
+    : "";
+
+  const tiers: { key: "PROFILE" | "AI_ESTIMATE" | "MANUAL"; label: string; value: string; color: string; activeColor: string; available: boolean }[] = [
+    { key: "PROFILE", label: "SQFT Pricing", value: profileText, color: "text-blue-600 border-blue-200 bg-blue-50", activeColor: "ring-2 ring-blue-400 border-blue-400 bg-blue-100", available: profileResult != null },
+    { key: "AI_ESTIMATE", label: "AI Estimate", value: aiText, color: "text-amber-700 border-amber-200 bg-amber-50", activeColor: "ring-2 ring-amber-400 border-amber-400 bg-amber-100", available: estimate != null },
+    { key: "MANUAL", label: "Manual", value: manualText, color: "text-zinc-600 border-zinc-200 bg-zinc-50", activeColor: "ring-2 ring-zinc-400 border-zinc-400 bg-zinc-100", available: true },
+  ];
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      {tiers.map((t) => {
+        const isActive = tier === t.key;
+        const dimmed = !isActive && !t.available;
+        const isManual = t.key === "MANUAL";
+        return (
+          <label
+            key={t.key}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium cursor-pointer transition-all select-none ${
+              isActive ? t.activeColor : t.color
+            } ${dimmed ? "opacity-40 cursor-not-allowed" : ""} ${!isActive ? "opacity-60 hover:opacity-90" : ""}`}
+          >
+            <input
+              type="radio"
+              name={`tier-${room.id}`}
+              value={t.key}
+              checked={isActive}
+              onChange={() => handleChange(t.key)}
+              disabled={dimmed}
+              className="h-3 w-3 accent-current"
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-wide">{t.label}{t.value ? ":" : ""}</span>
+            {t.value && <span className="tabular-nums">{t.value}</span>}
+            {isManual && isActive && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowManualPopup(true); }}
+                className="ml-0.5 text-[10px] text-zinc-500 hover:text-zinc-700 underline"
+              >
+                edit
+              </button>
+            )}
+          </label>
+        );
+      })}
+      {showManualPopup && (
+        <ManualPricePopup
+          projectId={projectId}
+          roomId={room.id}
+          initialLow={manualLow}
+          initialHigh={manualHigh}
+          onClose={() => setShowManualPopup(false)}
+          onSaved={(low, high) => {
+            setManualLow(low);
+            setManualHigh(high);
+            setTier("MANUAL");
+            onTierChanged?.();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 type Room = {
   id: string;
   name: string;
@@ -362,6 +589,8 @@ type Room = {
   unitQuantity?: number | null;
   unitQuantityManualOverride?: boolean;
   bucket?: "BASE" | "ALTERNATE" | "ALLOWANCE";
+  pricingTier?: "PROFILE" | "AI_ESTIMATE" | "MANUAL";
+  isProjectOverhead?: boolean;
   totalLow?: number | null;
   totalTarget?: number | null;
   totalHigh?: number | null;
@@ -383,6 +612,26 @@ type Room = {
 type RoomTypeOption = { id: string; name: string };
 type StylePresetOption = { id: string; name: string };
 type SectionTypeOption = { id: string; name: string; category: string; defaultMeasurementMode: string; defaultEstimateUnit: string; customUnitLabel: string | null };
+type RoomTemplateOption = { id: string; name: string; displayName?: string | null; active: boolean };
+
+/** Auto-match a room name to a template name. */
+function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): string | null {
+  const lower = roomName.toLowerCase();
+  const rules: [string[], string][] = [
+    [["kitchen"], "kitchen"],
+    [["bath", "bathroom"], "bath"],
+    [["laundry"], "laundry"],
+    [["closet"], "closet"],
+    [["cope", "admin"], "cope"],
+  ];
+  for (const [keywords, match] of rules) {
+    if (keywords.some((kw) => lower.includes(kw))) {
+      const t = templates.find((t) => t.name.toLowerCase().includes(match));
+      if (t) return t.id;
+    }
+  }
+  return null;
+}
 
 type Props = {
   projectId: string;
@@ -821,6 +1070,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [updating, setUpdating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showUpdateScopesConfirm, setShowUpdateScopesConfirm] = useState(false);
+  const [showBulkEstimateModal, setShowBulkEstimateModal] = useState(false);
+  const [estimateRefreshKey, setEstimateRefreshKey] = useState(0);
   const [rewritingRoomId, setRewritingRoomId] = useState<string | null>(null);
   const [unmatchedRooms, setUnmatchedRooms] = useState<UnmatchedRoomItem[] | null>(null);
   const [activeRoomTypes, setActiveRoomTypes] = useState<RoomTypeOption[]>([]);
@@ -829,12 +1080,30 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [updatingProjectStylePreset, setUpdatingProjectStylePreset] = useState(false);
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [merging, setMerging] = useState(false);
+  const [roomTemplates, setRoomTemplates] = useState<RoomTemplateOption[]>([]);
+  const [selectedTemplates, setSelectedTemplates] = useState<Record<string, string | null>>({});
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
     getRoomTypes().then((list) => {
       setActiveRoomTypes((list ?? []).filter((r) => r.active).map((r) => ({ id: r.id, name: r.name })));
     });
+    // Fetch room templates
+    fetch("/api/settings/templates/imported")
+      .then((r) => r.json())
+      .then((data) => {
+        const templates: RoomTemplateOption[] = (data.templates ?? [])
+          .filter((t: RoomTemplateOption) => t.active)
+          .map((t: RoomTemplateOption) => ({ id: t.id, name: t.name, displayName: t.displayName, active: t.active }));
+        setRoomTemplates(templates);
+        // Auto-match templates for rooms
+        const matches: Record<string, string | null> = {};
+        for (const room of initialRooms) {
+          matches[room.id] = autoMatchTemplate(room.name, templates);
+        }
+        setSelectedTemplates((prev) => ({ ...matches, ...prev }));
+      })
+      .catch(() => {});
   }, []);
   useEffect(() => {
     setRooms([...initialRooms].sort((a, b) => a.sortOrder - b.sortOrder));
@@ -1061,6 +1330,14 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           >
             {merging ? "Merging…" : "Merge selected"}
           </button>
+          <button
+            type="button"
+            onClick={() => setShowBulkEstimateModal(true)}
+            disabled={!rooms.length}
+            className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+          >
+            Generate AI Estimates
+          </button>
           <span className="ml-2 text-sm text-zinc-500 dark:text-zinc-400">
             Style Preset (applies to all sections):
           </span>
@@ -1123,14 +1400,37 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           onClose={() => setUnmatchedRooms(null)}
         />
       )}
+      {showBulkEstimateModal && (
+        <BulkAiEstimateModal
+          projectId={projectId}
+          rooms={rooms.filter((r) => !r.isProjectOverhead).map((r) => ({ id: r.id, name: r.name, scopeNarrative: r.scopeNarrative }))}
+          roomTemplates={roomTemplates}
+          selectedTemplates={selectedTemplates}
+          onClose={() => { setShowBulkEstimateModal(false); setEstimateRefreshKey((k) => k + 1); router.refresh(); }}
+        />
+      )}
       {statusMessage && (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           {statusMessage}
         </p>
       )}
+      {/* COPE room card — always first, not sortable */}
+      {rooms.filter((r) => r.isProjectOverhead).map((room) => (
+        <CopeRoomCard
+          key={room.id}
+          projectId={projectId}
+          room={room}
+          roomTemplates={roomTemplates}
+          selectedTemplateId={selectedTemplates[room.id] ?? null}
+          onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
+          estimateRefreshKey={estimateRefreshKey}
+          otherRoomsHaveEstimates={rooms.some((r) => !r.isProjectOverhead && r.pricingTier === "AI_ESTIMATE")}
+          onEstimateGenerated={() => { setEstimateRefreshKey((k) => k + 1); router.refresh(); }}
+        />
+      ))}
       {!mounted || editingId ? (
         <div className="space-y-2">
-            {rooms.map((room) => (
+            {rooms.filter((r) => !r.isProjectOverhead).map((room) => (
             <StaticRoomCard
               key={room.id}
               projectId={projectId}
@@ -1156,6 +1456,10 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               onCancelEdit={() => setEditingId(null)}
               onDelete={() => handleDelete(room.id)}
               onRewriteScope={() => handleRewriteScope(room.id)}
+              roomTemplates={roomTemplates}
+              selectedTemplateId={selectedTemplates[room.id] ?? null}
+              onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
+              estimateRefreshKey={estimateRefreshKey}
             />
           ))}
         </div>
@@ -1166,11 +1470,11 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={rooms.map((r) => r.id)}
+            items={rooms.filter((r) => !r.isProjectOverhead).map((r) => r.id)}
             strategy={verticalListSortingStrategy}
           >
             <div className="space-y-2">
-              {rooms.map((room) => (
+              {rooms.filter((r) => !r.isProjectOverhead).map((room) => (
                 <SortableRoomCard
                   key={room.id}
                   projectId={projectId}
@@ -1196,12 +1500,137 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   onCancelEdit={() => setEditingId(null)}
                   onDelete={() => handleDelete(room.id)}
                   onRewriteScope={() => handleRewriteScope(room.id)}
+                  roomTemplates={roomTemplates}
+                  selectedTemplateId={selectedTemplates[room.id] ?? null}
+                  onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
+                  estimateRefreshKey={estimateRefreshKey}
                 />
               ))}
             </div>
           </SortableContext>
         </DndContext>
       )}
+    </div>
+  );
+}
+
+function CopeRoomCard({
+  projectId,
+  room,
+  roomTemplates,
+  selectedTemplateId,
+  onTemplateChange,
+  estimateRefreshKey,
+  otherRoomsHaveEstimates,
+  onEstimateGenerated,
+}: {
+  projectId: string;
+  room: Room;
+  roomTemplates: RoomTemplateOption[];
+  selectedTemplateId: string | null;
+  onTemplateChange: (roomId: string, templateId: string | null) => void;
+  estimateRefreshKey?: number;
+  otherRoomsHaveEstimates: boolean;
+  onEstimateGenerated: () => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleGenerateCope() {
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/cope-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      onEstimateGenerated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate COPE estimate");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const copeTemplate = roomTemplates.find((t) => t.name.toLowerCase().includes("cope"));
+
+  return (
+    <div className="mb-2 rounded-lg border border-slate-300 bg-slate-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
+      <div className="flex gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              PROJECT OVERHEAD
+            </span>
+          </div>
+          <h3 className="mt-1 font-medium text-zinc-900 dark:text-zinc-100">
+            {room.name}
+          </h3>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
+            {room.scopeNarrative || "—"}
+          </p>
+          {/* Room Template — locked to COPE */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">Room Template:</span>
+            <select
+              value={copeTemplate?.id ?? selectedTemplateId ?? ""}
+              disabled
+              className="rounded border border-zinc-300 bg-zinc-100 px-2 py-1 text-xs text-zinc-500 cursor-not-allowed dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+              aria-label="Room Template (locked)"
+            >
+              <option value={copeTemplate?.id ?? ""}>{copeTemplate?.displayName || copeTemplate?.name || "COPE"}</option>
+            </select>
+          </div>
+          {/* COPE Estimate Button */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleGenerateCope}
+              disabled={generating || !otherRoomsHaveEstimates}
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium shadow-sm ${
+                generating
+                  ? "bg-amber-500 text-white cursor-wait"
+                  : !otherRoomsHaveEstimates
+                    ? "bg-zinc-200 text-zinc-400 cursor-not-allowed"
+                    : "bg-amber-600 text-white hover:bg-amber-700"
+              }`}
+              title={!otherRoomsHaveEstimates ? "Generate room estimates first" : undefined}
+            >
+              {generating ? "Calculating project overhead..." : "Generate COPE Estimate"}
+            </button>
+          </div>
+          {error && (
+            <p className="mt-1 text-xs text-red-600">{error}</p>
+          )}
+          {/* Reuse the AI Estimate Panel for display */}
+          <AIEstimatePanel
+            projectId={projectId}
+            roomId={room.id}
+            roomName={room.name}
+            scopeNarrative={room.scopeNarrative}
+            squareFootage={null}
+            selectedTemplateId={copeTemplate?.id ?? selectedTemplateId}
+            templates={roomTemplates}
+            refreshKey={estimateRefreshKey}
+          />
+        </div>
+        <div className="shrink-0 flex flex-col gap-2 items-stretch">
+          {/* No delete button — COPE is required */}
+          <button
+            type="button"
+            disabled
+            className="w-36 rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-400 cursor-not-allowed"
+            title="Required for every project"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1227,6 +1656,10 @@ function StaticRoomCard({
   onCancelEdit,
   onDelete,
   onRewriteScope,
+  roomTemplates,
+  selectedTemplateId,
+  onTemplateChange,
+  estimateRefreshKey,
 }: {
   projectId: string;
   room: Room;
@@ -1248,6 +1681,10 @@ function StaticRoomCard({
   onCancelEdit: () => void;
   onDelete: () => void;
   onRewriteScope: () => void;
+  roomTemplates: RoomTemplateOption[];
+  selectedTemplateId: string | null;
+  onTemplateChange: (roomId: string, templateId: string | null) => void;
+  estimateRefreshKey?: number;
 }) {
   const effectiveMode = getEffectiveMeasurementMode(room, (room.sectionType?.defaultMeasurementMode ?? null) as MeasurementMode | null);
   return (
@@ -1306,7 +1743,6 @@ function StaticRoomCard({
                   </option>
                 ))}
               </select>
-              <SectionPriceRangePill result={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)} />
               <span className="text-sm text-zinc-500 dark:text-zinc-400">
                 Sq Ft: {(() => {
                   const sf = getCombinedSqFt(room);
@@ -1314,6 +1750,14 @@ function StaticRoomCard({
                 })()}
               </span>
             </div>
+            {/* Three-tier pricing selector */}
+            <PricingTierSelector
+              projectId={projectId}
+              room={room}
+              profileResult={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)}
+              refreshKey={estimateRefreshKey}
+              onTierChanged={onDimensionsSaved}
+            />
             <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
               {room.scopeNarrative || "—"}
             </p>
@@ -1338,7 +1782,33 @@ function StaticRoomCard({
               </div>
             )}
             <RoomSubAreasEditor projectId={projectId} room={room} onSaved={onDimensionsSaved} />
-            <AdvancedSectionOptions projectId={projectId} room={room} onSaved={onDimensionsSaved} />
+            {/* Room Template Selector + AI Estimate */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Room Template:</span>
+              <select
+                value={selectedTemplateId ?? ""}
+                onChange={(e) => onTemplateChange(room.id, e.target.value || null)}
+                className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+                aria-label="Room Template"
+              >
+                <option value="">Select template...</option>
+                {roomTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.displayName || t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <AIEstimatePanel
+              projectId={projectId}
+              roomId={room.id}
+              roomName={room.name}
+              scopeNarrative={room.scopeNarrative}
+              squareFootage={getCombinedSqFt(room)}
+              selectedTemplateId={selectedTemplateId}
+              templates={roomTemplates}
+              refreshKey={estimateRefreshKey}
+            />
           </div>
           <div className="shrink-0 flex flex-col gap-2 items-stretch">
             <button
@@ -1370,78 +1840,6 @@ function StaticRoomCard({
   );
 }
 
-function AdvancedSectionOptions({
-  projectId,
-  room,
-  onSaved,
-}: {
-  projectId: string;
-  room: Room;
-  onSaved: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [bucket, setBucket] = useState<"BASE" | "ALTERNATE" | "ALLOWANCE">(room.bucket ?? "BASE");
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    setBucket(room.bucket ?? "BASE");
-  }, [room.id, room.bucket]);
-  const handleBucketChange = useCallback(
-    async (newBucket: "BASE" | "ALTERNATE" | "ALLOWANCE") => {
-      setBucket(newBucket);
-      setSaving(true);
-      const formData = new FormData();
-      formData.set("name", room.name);
-      formData.set("scopeNarrative", room.scopeNarrative ?? "");
-      formData.set("bucket", newBucket);
-      formData.set("estPricePerSqFt", room.estPricePerSqFt != null ? String(room.estPricePerSqFt) : "");
-      formData.set("lengthIn", formatInchesToFeetInches(room.lengthIn ?? null));
-      formData.set("widthIn", formatInchesToFeetInches(room.widthIn ?? null));
-      formData.set("ceilingHeightIn", formatInchesToFeetInches(room.ceilingHeightIn ?? null));
-      formData.set("sectionTypeId", room.sectionTypeId ?? "");
-      formData.set("origin", room.origin ?? "MANUAL");
-      formData.set("measurementMode", room.measurementMode ?? "");
-      formData.set("areaSqFt", room.areaSqFt != null ? String(room.areaSqFt) : "");
-      formData.set("quantity", room.quantity != null ? String(room.quantity) : "");
-      formData.set("estimateUnit", room.estimateUnit ?? "");
-      formData.set("customUnitLabel", room.customUnitLabel ?? "");
-      formData.set("unitQuantityManualOverride", room.unitQuantityManualOverride ? "true" : "false");
-      formData.set("unitQuantityOverride", room.unitQuantity != null ? String(room.unitQuantity) : "");
-      await updateRoomAction(projectId, room.id, formData);
-      setSaving(false);
-      onSaved();
-    },
-    [projectId, room, onSaved]
-  );
-  return (
-    <div className="mt-2">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
-      >
-        {open ? "▼ Advanced" : "▶ Advanced"}
-      </button>
-      {open && (
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">Bucket:</span>
-          <select
-            value={bucket}
-            onChange={(e) => handleBucketChange(e.target.value as "BASE" | "ALTERNATE" | "ALLOWANCE")}
-            disabled={saving}
-            className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-            aria-label="Bucket"
-          >
-            <option value="BASE">Base</option>
-            <option value="ALTERNATE">Alternate</option>
-            <option value="ALLOWANCE">Allowance</option>
-          </select>
-          {saving && <span className="text-xs text-zinc-500">Saving…</span>}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function SortableRoomCard({
   projectId,
   room,
@@ -1463,6 +1861,10 @@ function SortableRoomCard({
   onRewriteScope,
   selected,
   onToggleSelected,
+  roomTemplates,
+  selectedTemplateId,
+  onTemplateChange,
+  estimateRefreshKey,
 }: {
   projectId: string;
   room: Room;
@@ -1484,6 +1886,10 @@ function SortableRoomCard({
   onRewriteScope: () => void;
   selected: boolean;
   onToggleSelected: () => void;
+  roomTemplates: RoomTemplateOption[];
+  selectedTemplateId: string | null;
+  onTemplateChange: (roomId: string, templateId: string | null) => void;
+  estimateRefreshKey?: number;
 }) {
   const {
     attributes,
@@ -1581,7 +1987,6 @@ function SortableRoomCard({
                     </option>
                   ))}
                 </select>
-                <SectionPriceRangePill result={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)} />
                 <span className="text-sm text-zinc-500 dark:text-zinc-400">
                   Sq Ft: {(() => {
                     const sf = getCombinedSqFt(room);
@@ -1589,6 +1994,14 @@ function SortableRoomCard({
                   })()}
                 </span>
               </div>
+              {/* Three-tier pricing selector */}
+              <PricingTierSelector
+                projectId={projectId}
+                room={room}
+                profileResult={getSectionPriceRangeDisplay(room, roomTypeLowPct, roomTypeHighPct)}
+                refreshKey={estimateRefreshKey}
+                onTierChanged={onDimensionsSaved}
+              />
               <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
                 {room.scopeNarrative || "—"}
               </p>
@@ -1613,7 +2026,33 @@ function SortableRoomCard({
                 </div>
               )}
               <RoomSubAreasEditor projectId={projectId} room={room} onSaved={onDimensionsSaved} />
-              <AdvancedSectionOptions projectId={projectId} room={room} onSaved={onDimensionsSaved} />
+                {/* Room Template Selector + AI Estimate */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">Room Template:</span>
+                <select
+                  value={selectedTemplateId ?? ""}
+                  onChange={(e) => onTemplateChange(room.id, e.target.value || null)}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+                  aria-label="Room Template"
+                >
+                  <option value="">Select template...</option>
+                  {roomTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.displayName || t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <AIEstimatePanel
+                projectId={projectId}
+                roomId={room.id}
+                roomName={room.name}
+                scopeNarrative={room.scopeNarrative}
+                squareFootage={getCombinedSqFt(room)}
+                selectedTemplateId={selectedTemplateId}
+                templates={roomTemplates}
+                refreshKey={estimateRefreshKey}
+                />
             </div>
           </div>
           <div className="shrink-0 flex flex-col gap-2 items-stretch">
@@ -2173,19 +2612,6 @@ function RoomForm({
             </button>
             {advancedOpen && (
               <div className="mt-2 space-y-2 rounded border border-zinc-200 p-3 dark:border-zinc-700">
-                <div>
-                  <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Bucket</label>
-                  <select
-                    value={bucketOverride}
-                    onChange={(e) => setBucketOverride(e.target.value as "BASE" | "ALTERNATE" | "ALLOWANCE")}
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                    aria-label="Bucket"
-                  >
-                    <option value="BASE">Base</option>
-                    <option value="ALTERNATE">Alternate</option>
-                    <option value="ALLOWANCE">Allowance</option>
-                  </select>
-                </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Unit rate Low ($)</label>

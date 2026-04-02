@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/app/lib/auth";
 import { syncJobBudget } from "@/app/lib/jobtread/sync-budget";
+import { logDevError, logDevRouteHealth } from "@/src/lib/dev-context";
 
 /** POST body: { jobId: string } */
 type SyncBody = { jobId?: unknown };
@@ -18,6 +19,10 @@ function parseBody(body: unknown): string | null {
  * Sync one JobTread job budget into canonical SyncedBudgetJob + SyncedBudgetRow. Admin-only.
  */
 export async function POST(request: Request) {
+  const route = "/api/admin/jobtread/sync-budget";
+  const env = process.env.NODE_ENV === "production" ? "production" : "local";
+  const t0 = Date.now();
+
   try {
     await requireAdmin();
   } catch (e) {
@@ -45,6 +50,15 @@ export async function POST(request: Request) {
 
   try {
     const result = await syncJobBudget(jobId);
+
+    const dt = Date.now() - t0;
+    const routeStatus = result.status === "success" ? "ok" : result.status === "warning" ? "warn" : "error";
+    await logDevRouteHealth(route, routeStatus, {
+      responseTimeMs: dt,
+      activeJobId: jobId,
+      notes: result.message ?? null,
+    });
+
     if (result.status === "error") {
       return NextResponse.json(
         {
@@ -54,6 +68,7 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
+
     return NextResponse.json({
       ok: true,
       jobId,
@@ -64,6 +79,24 @@ export async function POST(request: Request) {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "An unexpected error occurred.";
+
+    const dt = Date.now() - t0;
+    await logDevError({
+      source: "server",
+      severity: "error",
+      message,
+      route,
+      component: "POST /api/admin/jobtread/sync-budget",
+      jobId,
+      env,
+      stack: e instanceof Error ? e.stack ?? null : null,
+    });
+    await logDevRouteHealth(route, "error", {
+      responseTimeMs: dt,
+      activeJobId: jobId,
+      notes: "sync-budget route threw",
+    });
+
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }
 }

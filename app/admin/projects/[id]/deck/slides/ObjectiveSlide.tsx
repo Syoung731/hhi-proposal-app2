@@ -5,10 +5,12 @@ import type {
   DeckBranding,
   ObjectiveContent,
 } from "@/app/lib/deck/types";
+import { TitleAccentRule } from "./shared/TitleAccentRule";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
+  hasAiBackground?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -156,21 +158,34 @@ function TextContent({
           )}
         </p>
       ) : (
-        <h1
-          className="font-serif"
-          style={{
-            fontSize: `${2.4 * headlineEm}em`, fontWeight: 800,
-            color: headlineColor, lineHeight: 1.1,
-            marginBottom: "2%", textShadow: headlineShadow,
-          }}
-        >
-          {slide.headline || "Project Objective"}
-          {slide.subheadline && <span style={{ display: "block" }}>{slide.subheadline}</span>}
-        </h1>
+        <>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
+          <h1
+            className="font-serif"
+            style={{
+              fontSize: `${3.2 * headlineEm}em`, fontWeight: 800,
+              color: headlineColor, lineHeight: 1.1,
+              marginBottom: "2%", textShadow: headlineShadow,
+            }}
+          >
+            {slide.headline || "Project Objective"}
+          </h1>
+        </>
       )}
 
       {/* Accent rule */}
-      <div style={{ height: 2, width: "4em", background: branding.accentColor, marginBottom: "3%", flexShrink: 0 }} />
+      <TitleAccentRule accentColor={branding.accentColor} marginBottom="3%" />
 
       {/* Statement */}
       {showStatement && content.statementText && (
@@ -254,9 +269,9 @@ function positionedBlock(
 }
 
 // ─── 1. Statement-Left ────────────────────────────────────────────────────────
-function StatementLeftLayout({ slide, branding }: Props) {
+function StatementLeftLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const headlineEm    = content.headlineSize    ?? 1.0;
   const headlineColor = content.headlineColor   ?? branding.textColor;
@@ -304,9 +319,9 @@ function StatementLeftLayout({ slide, branding }: Props) {
 }
 
 // ─── 2. Dark-Statement ────────────────────────────────────────────────────────
-function DarkStatementLayout({ slide, branding }: Props) {
+function DarkStatementLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
   const proofPoints = (content.bullets ?? []).filter(Boolean);
 
   const headlineEm    = content.headlineSize    ?? 1.0;
@@ -393,9 +408,9 @@ function DarkStatementLayout({ slide, branding }: Props) {
 }
 
 // ─── 3. Executive-Summary ─────────────────────────────────────────────────────
-function ExecutiveSummaryLayout({ slide, branding }: Props) {
+function ExecutiveSummaryLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const headlineEm    = content.headlineSize    ?? 1.0;
   const headlineColor = content.headlineColor   ?? branding.textColor;
@@ -430,19 +445,30 @@ function ExecutiveSummaryLayout({ slide, branding }: Props) {
       {/* Left text block */}
       {positionedBlock(textX, textY, `${textWidth}%`, showCard, cardBg,
         <>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h1
             className="font-serif"
             style={{
-              fontSize: `${2.1 * headlineEm}em`, fontWeight: 800,
+              fontSize: `${3.0 * headlineEm}em`, fontWeight: 800,
               color: headlineColor, lineHeight: 1.1,
               marginBottom: "2%", textShadow: headlineShadow,
             }}
           >
             {slide.headline || "Executive Summary"}
-            {slide.subheadline && <span style={{ display: "block" }}>{slide.subheadline}</span>}
           </h1>
 
-          <div style={{ height: 2, width: "4.5em", background: branding.accentColor, marginBottom: "3%", flexShrink: 0 }} />
+          <TitleAccentRule accentColor={branding.accentColor} marginBottom="3%" />
 
           {content.statementText && (
             <div style={{ borderLeft: `3px solid ${branding.accentColor}`, paddingLeft: "1em", marginBottom: hasColumns ? "4%" : "3%" }}>
@@ -486,9 +512,9 @@ function ExecutiveSummaryLayout({ slide, branding }: Props) {
 }
 
 // ─── 4. Blueprint-Overlay ─────────────────────────────────────────────────────
-function BlueprintOverlayLayout({ slide, branding }: Props) {
+function BlueprintOverlayLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
-  const hasBg = !!slide.backgroundId;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const headlineEm    = content.headlineSize    ?? 1.0;
   const headlineColor = content.headlineColor   ?? branding.textColor;
@@ -517,19 +543,30 @@ function BlueprintOverlayLayout({ slide, branding }: Props) {
 
       {positionedBlock(textX, textY, `${textWidth}%`, showCard, cardBg,
         <>
+          {slide.subheadline && (
+            <p
+              className="uppercase tracking-widest"
+              style={{
+                fontSize: "0.65em", fontWeight: 600,
+                letterSpacing: "0.13em", color: branding.accentColor,
+                marginBottom: "0.35em",
+              }}
+            >
+              {slide.subheadline}
+            </p>
+          )}
           <h1
             className="font-serif"
             style={{
-              fontSize: `${2.4 * headlineEm}em`, fontWeight: 800,
+              fontSize: `${3.2 * headlineEm}em`, fontWeight: 800,
               color: headlineColor, lineHeight: 1.08,
               marginBottom: "1.5%", textShadow: headlineShadow,
             }}
           >
             {slide.headline || "Project Objective"}
-            {slide.subheadline && <span style={{ display: "block" }}>{slide.subheadline}</span>}
           </h1>
 
-          <div style={{ height: 2, background: branding.accentColor, width: "100%", marginBottom: "3%", flexShrink: 0 }} />
+          <TitleAccentRule accentColor={branding.accentColor} marginBottom="3%" />
 
           {content.statementText && (
             <p
@@ -575,16 +612,16 @@ function BlueprintOverlayLayout({ slide, branding }: Props) {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
-export function ObjectiveSlide({ slide, branding }: Props) {
+export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {
   switch (slide.layoutKey) {
     case "dark-statement":
-      return <DarkStatementLayout slide={slide} branding={branding} />;
+      return <DarkStatementLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "executive-summary":
-      return <ExecutiveSummaryLayout slide={slide} branding={branding} />;
+      return <ExecutiveSummaryLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "blueprint-overlay":
-      return <BlueprintOverlayLayout slide={slide} branding={branding} />;
+      return <BlueprintOverlayLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "statement-left":
     default:
-      return <StatementLeftLayout slide={slide} branding={branding} />;
+      return <StatementLeftLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 }
