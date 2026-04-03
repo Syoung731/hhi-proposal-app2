@@ -70,6 +70,20 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // Flag estimate as stale if scope changed via review answers
+      if (updatedNarrative !== room.scopeNarrative) {
+        const hasEstimate = await prisma.aIEstimate.findFirst({
+          where: { sectionId: roomId },
+          select: { id: true },
+        });
+        if (hasEstimate) {
+          await prisma.room.update({
+            where: { id: roomId },
+            data: { estimateStaleReason: "Scope updated after estimate" },
+          });
+        }
+      }
+
       return NextResponse.json({ success: true });
     } else {
       // Project-level

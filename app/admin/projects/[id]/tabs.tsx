@@ -154,6 +154,7 @@ export function ProjectTabs({
               unitRateTarget: r.unitRateTarget ?? null,
               unitRateHigh: r.unitRateHigh ?? null,
               scopeQA: r.scopeQA ?? null,
+              estimateStaleReason: r.estimateStaleReason ?? null,
               subAreas: (r.subAreas ?? []).map((sa) => ({
                 id: sa.id,
                 name: sa.name,

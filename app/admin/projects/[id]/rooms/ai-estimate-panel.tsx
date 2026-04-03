@@ -520,6 +520,7 @@ export function AIEstimatePanel({
   selectedTemplateId,
   templates,
   refreshKey,
+  estimateStaleReason,
 }: {
   projectId: string;
   roomId: string;
@@ -529,6 +530,7 @@ export function AIEstimatePanel({
   selectedTemplateId: string | null;
   templates: RoomTemplate[];
   refreshKey?: number;
+  estimateStaleReason?: string | null;
 }) {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [loading, setLoading] = useState(false);
@@ -775,6 +777,11 @@ export function AIEstimatePanel({
           <div className="text-[11px] text-zinc-500 leading-tight mt-0.5">
             {hasRange && <>Target: {fmtMoneyWhole(estimate.totalPrice ?? 0)} · </>}
             {sourceCounts.total} items · {timeAgo(estimate.createdAt)}
+            {estimateStaleReason && (
+              <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-700 font-medium">
+                — Stale
+              </span>
+            )}
           </div>
           {/* Line 3: Source breakdown */}
           <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">

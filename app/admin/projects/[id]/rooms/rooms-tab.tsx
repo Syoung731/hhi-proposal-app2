@@ -600,6 +600,7 @@ type Room = {
   unitRateTarget?: number | null;
   unitRateHigh?: number | null;
   scopeQA?: unknown;
+  estimateStaleReason?: string | null;
   subAreas?: {
     id: string;
     name: string;
@@ -739,12 +740,28 @@ function RoomDimensionsRow({
       formData.set("lengthIn", newLength);
       formData.set("widthIn", newWidth);
       formData.set("ceilingHeightIn", newCeiling);
+      // Preserve all existing room fields so updateRoomAction doesn't reset them
+      formData.set("sectionTypeId", room.sectionTypeId ?? "");
+      formData.set("origin", room.origin ?? "MANUAL");
+      formData.set("bucket", room.bucket ?? "BASE");
+      formData.set("measurementMode", room.measurementMode ?? "");
+      formData.set("areaSqFt", room.areaSqFt != null ? String(room.areaSqFt) : "");
+      formData.set("quantity", room.quantity != null ? String(room.quantity) : "");
+      formData.set("estimateUnit", room.estimateUnit ?? "");
+      formData.set("customUnitLabel", room.customUnitLabel ?? "");
+      formData.set("unitQuantityManualOverride", room.unitQuantityManualOverride ? "true" : "false");
+      if (room.unitQuantityManualOverride && room.unitQuantity != null) {
+        formData.set("unitQuantityOverride", String(room.unitQuantity));
+      }
+      if (room.unitRateLow != null) formData.set("unitRateLow", String(room.unitRateLow));
+      if (room.unitRateTarget != null) formData.set("unitRateTarget", String(room.unitRateTarget));
+      if (room.unitRateHigh != null) formData.set("unitRateHigh", String(room.unitRateHigh));
       setSaving(true);
       await updateRoomAction(projectId, room.id, formData);
       setSaving(false);
       onSaved();
     },
-    [projectId, room.id, room.name, room.scopeNarrative, room.estPricePerSqFt, onSaved]
+    [projectId, room, onSaved]
   );
 
   function handleBlur(
@@ -1689,6 +1706,11 @@ function CopeRoomCard({
             <p className="mt-1 text-xs text-red-600">{error}</p>
           )}
           {/* Reuse the AI Estimate Panel for display */}
+          {room.estimateStaleReason && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1.5 rounded mt-2">
+              ⚠️ {room.estimateStaleReason}
+            </div>
+          )}
           <AIEstimatePanel
             projectId={projectId}
             roomId={room.id}
@@ -1698,6 +1720,7 @@ function CopeRoomCard({
             selectedTemplateId={copeTemplate?.id ?? selectedTemplateId}
             templates={roomTemplates}
             refreshKey={estimateRefreshKey}
+            estimateStaleReason={room.estimateStaleReason}
           />
         </div>
         <div className="shrink-0 flex flex-col gap-2 items-stretch">
@@ -1895,6 +1918,11 @@ function StaticRoomCard({
                 {room.scopeQA ? "Review Questions" : "Review & Estimate"}
               </button>
             </div>
+            {room.estimateStaleReason && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1.5 rounded mt-2">
+                ⚠️ {room.estimateStaleReason} — Click &apos;Review &amp; Estimate&apos; to regenerate
+              </div>
+            )}
             <AIEstimatePanel
               projectId={projectId}
               roomId={room.id}
@@ -1904,6 +1932,7 @@ function StaticRoomCard({
               selectedTemplateId={selectedTemplateId}
               templates={roomTemplates}
               refreshKey={estimateRefreshKey}
+              estimateStaleReason={room.estimateStaleReason}
             />
           </div>
           <div className="shrink-0 flex flex-col gap-2 items-stretch">
@@ -2154,6 +2183,11 @@ function SortableRoomCard({
                   {room.scopeQA ? "Review Questions" : "Review & Estimate"}
                 </button>
               </div>
+              {room.estimateStaleReason && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1.5 rounded mt-2">
+                  ⚠️ {room.estimateStaleReason} — Click &apos;Review &amp; Estimate&apos; to regenerate
+                </div>
+              )}
               <AIEstimatePanel
                 projectId={projectId}
                 roomId={room.id}
@@ -2163,6 +2197,7 @@ function SortableRoomCard({
                 selectedTemplateId={selectedTemplateId}
                 templates={roomTemplates}
                 refreshKey={estimateRefreshKey}
+                estimateStaleReason={room.estimateStaleReason}
                 />
             </div>
           </div>

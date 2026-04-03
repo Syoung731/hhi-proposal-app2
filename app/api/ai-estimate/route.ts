@@ -193,6 +193,12 @@ export async function POST(request: NextRequest) {
       include: { lineItems: true },
     });
 
+    // Clear stale reason now that a fresh estimate has been generated
+    await prisma.room.update({
+      where: { id: sectionId },
+      data: { estimateStaleReason: null },
+    });
+
     // Track AI-priced items as catalog suggestions
     const aiPricedItems = estimate.lineItems.filter((li) => li.source === "AI_PRICED");
     for (const item of aiPricedItems) {

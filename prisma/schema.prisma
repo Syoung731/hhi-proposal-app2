@@ -178,6 +178,7 @@ model Room {
   totalHigh            Float?
   pricingNotes         String?
   scopeQA              Json?
+  estimateStaleReason  String?
   bucket               SectionBucket           @default(BASE)
   media                     Media[]
   subAreas                 RoomSubArea[]

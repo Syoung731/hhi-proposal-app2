@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { Prisma } from "@/app/generated/prisma";
 import { normalizeRoomName } from "@/app/lib/room-utils";
 import { parseFeetInchesToInches } from "@/app/lib/dimensions";
 import {
@@ -433,6 +434,31 @@ export async function updateRoomAction(
     where: { id: roomId },
     data,
   });
+
+  // Flag estimate as stale if scope or dimensions changed
+  const scopeChanged = scopeNarrative !== (room.scopeNarrative ?? "");
+  const dimsChanged =
+    lengthIn !== room.lengthIn ||
+    widthIn !== room.widthIn ||
+    ceilingHeightIn !== room.ceilingHeightIn;
+  if (scopeChanged || dimsChanged) {
+    const hasEstimate = await prisma.aIEstimate.findFirst({
+      where: { sectionId: roomId },
+      select: { id: true },
+    });
+    if (hasEstimate) {
+      const reason = scopeChanged && dimsChanged
+        ? "Scope and dimensions changed after estimate"
+        : scopeChanged
+          ? "Scope updated after estimate"
+          : "Dimensions changed after estimate";
+      await prisma.room.update({
+        where: { id: roomId },
+        data: { estimateStaleReason: reason },
+      });
+    }
+  }
+
   // After updating main room dimensions, recompute total area from any included sub-areas.
   await recomputeRoomAreaFromSubAreas(roomId);
   await recomputeInvestmentRollups(projectId);
@@ -1163,13 +1189,21 @@ export async function mergeRoomsWithAiAction(
         .reduce((a, b) => a + b, 0);
       const combinedArea = baseArea + extraArea;
 
+      // Clean up AI estimates from all merged rooms (sectionId has no FK cascade)
+      const allMergedIds = rooms.map((r) => r.id);
+      await tx.aIEstimate.deleteMany({
+        where: { sectionId: { in: allMergedIds } },
+      });
+
       await tx.room.update({
         where: { id: target.id },
         data: {
           name: mergedName || target.name,
           scopeNarrative: mergedScope,
-          scopeSource: "AI",
+          scopeSource: "MANUAL",
           scopeUpdatedAt: now,
+          scopeQA: Prisma.DbNull, // Clear Q&A to force fresh review after merge
+          estimateStaleReason: "Rooms merged — scope and dimensions changed. Regenerate estimate.",
           // Keep primary room's dimensions; only adjust areaSqFt
           areaSqFt: combinedArea > 0 ? Math.round(combinedArea * 100) / 100 : target.areaSqFt,
           totalLow,
@@ -1334,6 +1368,18 @@ export async function updateRoomSubAreasAction(
       }
     }
   });
+
+  // Flag estimate as stale when sub-areas change (affects dimensions/area)
+  const hasEstimate = await prisma.aIEstimate.findFirst({
+    where: { sectionId: roomId },
+    select: { id: true },
+  });
+  if (hasEstimate) {
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { estimateStaleReason: "Sub-areas modified after estimate" },
+    });
+  }
 
   await recomputeRoomAreaFromSubAreas(roomId);
   await recomputeInvestmentRollups(projectId);
