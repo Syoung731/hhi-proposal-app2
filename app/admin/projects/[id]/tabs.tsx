@@ -153,6 +153,7 @@ export function ProjectTabs({
               unitRateLow: r.unitRateLow ?? null,
               unitRateTarget: r.unitRateTarget ?? null,
               unitRateHigh: r.unitRateHigh ?? null,
+              scopeQA: r.scopeQA ?? null,
               subAreas: (r.subAreas ?? []).map((sa) => ({
                 id: sa.id,
                 name: sa.name,
@@ -163,6 +164,7 @@ export function ProjectTabs({
                 sortOrder: sa.sortOrder,
               })),
             }))}
+            projectQA={project.projectQA ?? null}
             stylePresets={stylePresets}
             sectionTypes={sectionTypes}
           />

@@ -271,6 +271,16 @@ function calcDimensions(
 
 // ---------- User prompt builder ----------
 
+export interface ScopeQAQuestion {
+  question: string;
+  answer: unknown;
+  unit?: string | null;
+}
+
+export interface ScopeQAData {
+  questions?: ScopeQAQuestion[];
+}
+
 export function buildUserPrompt(
   roomTemplate: RoomTemplateWithDetails,
   companyContext: CompanyContext,
@@ -280,6 +290,7 @@ export function buildUserPrompt(
   roomDimensions?: RoomDimensions,
   correctionHistory?: string | null,
   roomMetrics?: EffectiveRoomMetrics | null,
+  scopeQA?: ScopeQAData | null,
 ): string {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
@@ -348,7 +359,7 @@ PRE-CALCULATED VALUES — USE THESE EXACT NUMBERS:
   - Ceiling area: ${roomMetrics.effectiveSqFt} SF
   - Total drywall (walls + ceiling, full gut): ${(roomMetrics.wallSF ?? 0) + roomMetrics.effectiveSqFt} SF
   - Baseboard/trim perimeter: ${roomMetrics.effectivePerimeterLF} LF` : ""}
-
+${buildClarificationsSection(scopeQA)}
 ## Scope of Work
 ${scopeNarrative}
 ${correctionHistory ? `\n${correctionHistory}\n` : ""}
@@ -394,6 +405,30 @@ Return ONLY this JSON structure:
     }
   ]
 }`;
+}
+
+// ---------- Scope QA clarifications helper ----------
+
+function buildClarificationsSection(scopeQA?: ScopeQAData | null): string {
+  if (!scopeQA?.questions?.length) return "";
+
+  const answered = scopeQA.questions.filter(
+    (q) => q.answer != null && q.answer !== "",
+  );
+  if (answered.length === 0) return "";
+
+  const lines = answered.map((q) => {
+    const unit = q.unit ? ` ${q.unit}` : "";
+    const answer =
+      typeof q.answer === "boolean" ? (q.answer ? "Yes" : "No") : q.answer;
+    return `- ${q.question}: ${answer}${unit}`;
+  });
+
+  return `
+## Scope Clarifications (confirmed by estimator)
+These answers were confirmed before estimating. Use them as facts, not assumptions:
+${lines.join("\n")}
+`;
 }
 
 export { SYSTEM_PROMPT };

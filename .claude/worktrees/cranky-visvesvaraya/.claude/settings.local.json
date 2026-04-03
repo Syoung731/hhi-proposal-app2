@@ -82,7 +82,16 @@
       "Bash(find C:/Users/syoun/Desktop/hhi-proposal-app2/app/admin/settings -type f -name *.tsx -o -name *.ts)",
       "Bash(find C:/Users/syoun/Desktop/hhi-proposal-app2/app/api -name route.*)",
       "Bash(pushd /c/Users/syoun/Desktop/hhi-proposal-app2)",
-      "Bash(npx --prefix /c/Users/syoun/Desktop/hhi-proposal-app2 tsc --noEmit --project /c/Users/syoun/Desktop/hhi-proposal-app2/tsconfig.json)"
+      "Bash(npx --prefix /c/Users/syoun/Desktop/hhi-proposal-app2 tsc --noEmit --project /c/Users/syoun/Desktop/hhi-proposal-app2/tsconfig.json)",
+      "Bash(grep -n \"recomputeInvestmentRollups\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/rooms/actions.ts)",
+      "Bash(find /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id] -name \"page.tsx\" -o -name \"layout.tsx\")",
+      "Bash(grep -n \"recomputeInvestmentRollups\\\\|prisma.$transaction\\\\|investmentLineItem\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/investment/actions.ts)",
+      "Bash(grep -r EstimatePriceBadge C:UserssyounDesktophhi-proposal-app2app --include=*.tsx --include=*.ts)",
+      "Bash(grep -c \"onReviewProject\" app/admin/projects/[id]/rooms/rooms-tab.tsx)",
+      "Bash(git -C /c/Users/syoun/Desktop/hhi-proposal-app2 rev-parse --show-toplevel)",
+      "Bash(grep -c \"onReviewScope\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/rooms/rooms-tab.tsx)",
+      "Bash(grep -c \"Review & Estimate\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/rooms/rooms-tab.tsx)",
+      "Bash(grep -n \"scopeQA\\\\|projectQA\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/tabs.tsx)"
     ]
   }
 }

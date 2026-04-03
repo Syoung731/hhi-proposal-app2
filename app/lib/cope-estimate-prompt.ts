@@ -164,10 +164,15 @@ Return the same JSON format as room estimates (the parser expects this exact str
 
 // ---------- User prompt builder ----------
 
+export interface ProjectQAData {
+  questions?: Array<{ question: string; answer: unknown; unit?: string | null }>;
+}
+
 export function buildCopeUserPrompt(
   aggregateData: ProjectAggregateData,
   copeTemplate: RoomTemplateWithDetails,
   companyContext: CompanyContext,
+  projectQA?: ProjectQAData | null,
 ): string {
   // Room summary
   const roomSummary = aggregateData.rooms
@@ -237,7 +242,7 @@ ${roomSummary}
 ## Trade Summary (across all room estimates)
 ${tradeSummary}
 
-## Scope Characteristics
+${buildProjectClarificationsSection(projectQA)}## Scope Characteristics
 - Structural work (framing): ${aggregateData.hasFraming ? "Yes" : "No"}
 - Plumbing work: ${plumbingNote}
 - Electrical work: ${aggregateData.hasElectrical ? "Yes" : "No"}
@@ -252,4 +257,19 @@ ${catalogSection}
 
 ## Required JSON Output Format
 Return ONLY the JSON structure shown in the system prompt. Include ALL trade groups from the COPE template. Calculate quantities and prices for each item based on the aggregate project data and the calculation rules.`;
+}
+
+function buildProjectClarificationsSection(projectQA?: ProjectQAData | null): string {
+  if (!projectQA?.questions?.length) return "";
+  const answered = projectQA.questions.filter((q) => q.answer != null && q.answer !== "");
+  if (answered.length === 0) return "";
+  const lines = answered.map((q) => {
+    const unit = q.unit ? ` ${q.unit}` : "";
+    const answer = typeof q.answer === "boolean" ? (q.answer ? "Yes" : "No") : q.answer;
+    return `- ${q.question}: ${answer}${unit}`;
+  });
+  return `## Project Clarifications (confirmed by estimator)
+${lines.join("\n")}
+
+`;
 }

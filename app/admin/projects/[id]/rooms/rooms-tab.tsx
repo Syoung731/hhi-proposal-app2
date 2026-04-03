@@ -25,6 +25,7 @@ import { getRoomTypes } from "@/app/admin/settings/actions";
 import { NewRoomTypesModal } from "./new-room-types-modal";
 import { AIEstimatePanel } from "./ai-estimate-panel";
 import { BulkAiEstimateModal } from "./bulk-ai-estimate-modal";
+import { ScopeReviewModal, type ReviewQuestion } from "./scope-review-modal";
 import { formatInchesToFeetInches, parseFeetInchesToInches } from "@/app/lib/dimensions";
 import { getEffectiveMeasurementMode, computeUnitQuantity } from "@/app/lib/section-unit-quantity";
 import { getEstimateUnitLabel } from "@/app/lib/estimate-unit-labels";
@@ -598,6 +599,7 @@ type Room = {
   unitRateLow?: number | null;
   unitRateTarget?: number | null;
   unitRateHigh?: number | null;
+  scopeQA?: unknown;
   subAreas?: {
     id: string;
     name: string;
@@ -639,6 +641,7 @@ type Props = {
   projectStylePresetId: string | null;
   defaultCeilingHeightFt: number;
   rooms: Room[];
+  projectQA?: unknown;
   stylePresets: StylePresetOption[];
   sectionTypes: SectionTypeOption[];
   /** Global Low % (e.g. -10). Used to compute unit low from SectionType priceTarget when override not set. */
@@ -1059,7 +1062,7 @@ function RoomSubAreasEditor({
   );
 }
 
-export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, defaultCeilingHeightFt: initialCeilingHeight, rooms: initialRooms, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
+export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, defaultCeilingHeightFt: initialCeilingHeight, rooms: initialRooms, projectQA, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [rooms, setRooms] = useState<Room[]>(() =>
@@ -1074,6 +1077,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [showUpdateScopesConfirm, setShowUpdateScopesConfirm] = useState(false);
   const [showBulkEstimateModal, setShowBulkEstimateModal] = useState(false);
   const [estimateRefreshKey, setEstimateRefreshKey] = useState(0);
+  const [reviewingRoomId, setReviewingRoomId] = useState<string | null>(null);
+  const [reviewingProject, setReviewingProject] = useState(false);
   const [rewritingRoomId, setRewritingRoomId] = useState<string | null>(null);
   const [unmatchedRooms, setUnmatchedRooms] = useState<UnmatchedRoomItem[] | null>(null);
   const [activeRoomTypes, setActiveRoomTypes] = useState<RoomTypeOption[]>([]);
@@ -1454,6 +1459,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           estimateRefreshKey={estimateRefreshKey}
           otherRoomsHaveEstimates={rooms.some((r) => !r.isProjectOverhead && r.pricingTier === "AI_ESTIMATE")}
           onEstimateGenerated={() => { setEstimateRefreshKey((k) => k + 1); router.refresh(); }}
+          onReviewProject={() => setReviewingProject(true)}
+          projectQA={projectQA}
         />
       ))}
       {!mounted || editingId ? (
@@ -1488,6 +1495,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               selectedTemplateId={selectedTemplates[room.id] ?? null}
               onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
               estimateRefreshKey={estimateRefreshKey}
+              onReviewScope={() => setReviewingRoomId(room.id)}
             />
           ))}
         </div>
@@ -1532,11 +1540,41 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   selectedTemplateId={selectedTemplates[room.id] ?? null}
                   onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
                   estimateRefreshKey={estimateRefreshKey}
+                  onReviewScope={() => setReviewingRoomId(room.id)}
                 />
               ))}
             </div>
           </SortableContext>
         </DndContext>
+      )}
+
+      {/* Scope Review Modal */}
+      {reviewingRoomId && (
+        <ScopeReviewModal
+          roomId={reviewingRoomId}
+          projectId={projectId}
+          level="room"
+          existingQA={rooms.find((r) => r.id === reviewingRoomId)?.scopeQA as { questions?: ReviewQuestion[] } | null}
+          onComplete={() => {
+            setReviewingRoomId(null);
+            setEstimateRefreshKey((k) => k + 1);
+            router.refresh();
+          }}
+          onClose={() => setReviewingRoomId(null)}
+        />
+      )}
+      {reviewingProject && (
+        <ScopeReviewModal
+          projectId={projectId}
+          level="project"
+          existingQA={projectQA as { questions?: ReviewQuestion[] } | null}
+          onComplete={() => {
+            setReviewingProject(false);
+            setEstimateRefreshKey((k) => k + 1);
+            router.refresh();
+          }}
+          onClose={() => setReviewingProject(false)}
+        />
       )}
     </div>
   );
@@ -1551,6 +1589,8 @@ function CopeRoomCard({
   estimateRefreshKey,
   otherRoomsHaveEstimates,
   onEstimateGenerated,
+  onReviewProject,
+  projectQA,
 }: {
   projectId: string;
   room: Room;
@@ -1560,6 +1600,8 @@ function CopeRoomCard({
   estimateRefreshKey?: number;
   otherRoomsHaveEstimates: boolean;
   onEstimateGenerated: () => void;
+  onReviewProject: () => void;
+  projectQA?: unknown;
 }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1614,8 +1656,19 @@ function CopeRoomCard({
               <option value={copeTemplate?.id ?? ""}>{copeTemplate?.displayName || copeTemplate?.name || "COPE"}</option>
             </select>
           </div>
-          {/* COPE Estimate Button */}
+          {/* COPE Estimate Buttons */}
           <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onReviewProject}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                projectQA
+                  ? "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700"
+              }`}
+            >
+              {projectQA ? "Review Project Questions" : "Review Project & Generate COPE"}
+            </button>
             <button
               type="button"
               onClick={handleGenerateCope}
@@ -1688,6 +1741,7 @@ function StaticRoomCard({
   selectedTemplateId,
   onTemplateChange,
   estimateRefreshKey,
+  onReviewScope,
 }: {
   projectId: string;
   room: Room;
@@ -1713,6 +1767,7 @@ function StaticRoomCard({
   selectedTemplateId: string | null;
   onTemplateChange: (roomId: string, templateId: string | null) => void;
   estimateRefreshKey?: number;
+  onReviewScope: () => void;
 }) {
   const effectiveMode = getEffectiveMeasurementMode(room, (room.sectionType?.defaultMeasurementMode ?? null) as MeasurementMode | null);
   return (
@@ -1827,6 +1882,19 @@ function StaticRoomCard({
                 ))}
               </select>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onReviewScope}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                  room.scopeQA
+                    ? "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                    : "bg-indigo-600 text-white hover:bg-indigo-700"
+                }`}
+              >
+                {room.scopeQA ? "Review Questions" : "Review & Estimate"}
+              </button>
+            </div>
             <AIEstimatePanel
               projectId={projectId}
               roomId={room.id}
@@ -1893,6 +1961,7 @@ function SortableRoomCard({
   selectedTemplateId,
   onTemplateChange,
   estimateRefreshKey,
+  onReviewScope,
 }: {
   projectId: string;
   room: Room;
@@ -1918,6 +1987,7 @@ function SortableRoomCard({
   selectedTemplateId: string | null;
   onTemplateChange: (roomId: string, templateId: string | null) => void;
   estimateRefreshKey?: number;
+  onReviewScope: () => void;
 }) {
   const {
     attributes,
@@ -2070,6 +2140,19 @@ function SortableRoomCard({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onReviewScope}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                    room.scopeQA
+                      ? "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                      : "bg-indigo-600 text-white hover:bg-indigo-700"
+                  }`}
+                >
+                  {room.scopeQA ? "Review Questions" : "Review & Estimate"}
+                </button>
               </div>
               <AIEstimatePanel
                 projectId={projectId}

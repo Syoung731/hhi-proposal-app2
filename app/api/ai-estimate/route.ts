@@ -65,10 +65,10 @@ export async function POST(request: NextRequest) {
       .map((i) => i.catalogItem)
       .filter((c): c is NonNullable<typeof c> => c !== null);
 
-    // Load room dimensions from database
+    // Load room dimensions + scopeQA from database
     const room = await prisma.room.findUnique({
       where: { id: sectionId },
-      select: { lengthFt: true, widthFt: true, ceilingHeightFt: true, lengthIn: true, widthIn: true, ceilingHeightIn: true },
+      select: { lengthFt: true, widthFt: true, ceilingHeightFt: true, lengthIn: true, widthIn: true, ceilingHeightIn: true, scopeQA: true },
     });
 
     let roomDimensions: RoomDimensions | undefined;
@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
       : null;
 
     // Build prompt
+    const scopeQA = room?.scopeQA as import("@/app/lib/ai-estimate-prompt").ScopeQAData | null;
     const userPrompt = buildUserPrompt(
       roomTemplate,
       companyContext,
@@ -107,6 +108,7 @@ export async function POST(request: NextRequest) {
       roomDimensions,
       correctionHistory,
       roomMetrics,
+      scopeQA,
     );
 
     // Call Claude API

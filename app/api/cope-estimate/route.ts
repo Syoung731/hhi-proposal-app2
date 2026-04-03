@@ -64,10 +64,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load project ceiling height for effective SF calculation
+    // Load project ceiling height + projectQA for effective SF and clarifications
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { defaultCeilingHeightFt: true },
+      select: { defaultCeilingHeightFt: true, projectQA: true },
     });
 
     // Gather aggregate project data
@@ -90,7 +90,8 @@ export async function POST(request: NextRequest) {
 
     // Build prompts
     const systemPrompt = COPE_SYSTEM_PROMPT;
-    const userPrompt = buildCopeUserPrompt(aggregateData, copeTemplate, companyContext);
+    const projectQA = project?.projectQA as import("@/app/lib/cope-estimate-prompt").ProjectQAData | null;
+    const userPrompt = buildCopeUserPrompt(aggregateData, copeTemplate, companyContext, projectQA);
 
     // Call Claude API
     const apiKey = await getAnthropicApiKey();

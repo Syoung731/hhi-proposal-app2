@@ -68,6 +68,7 @@ model Project {
   extensionPairCodes       ExtensionPairCode[]
   zillowBrowserConnections ZillowBrowserConnection[]
   defaultCeilingHeightFt   Float?               @default(9)
+  projectQA                Json?
   proposalDeck             ProposalDeck?
 
   @@index([status])
@@ -176,6 +177,7 @@ model Room {
   totalTarget          Float?
   totalHigh            Float?
   pricingNotes         String?
+  scopeQA              Json?
   bucket               SectionBucket           @default(BASE)
   media                     Media[]
   subAreas                 RoomSubArea[]

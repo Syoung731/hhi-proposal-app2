@@ -24,7 +24,21 @@ const BUCKET_LABELS: Record<SectionBucket, string> = {
 const DEFAULT_LOW_PCT = -10;
 const DEFAULT_HIGH_PCT = 10;
 
+// ── Dedup guard: collapse concurrent rollup calls for the same project ──
+const inflightRollups = new Map<string, Promise<void>>();
+
 export async function recomputeInvestmentRollups(projectId: string): Promise<void> {
+  const existing = inflightRollups.get(projectId);
+  if (existing) return existing;                // piggyback on in-flight call
+
+  const promise = _recomputeInvestmentRollups(projectId).finally(() => {
+    inflightRollups.delete(projectId);
+  });
+  inflightRollups.set(projectId, promise);
+  return promise;
+}
+
+async function _recomputeInvestmentRollups(projectId: string): Promise<void> {
   // ── 1. Fetch company-level low/high pct overrides ─────────────────────────
   const [settings, context] = await Promise.all([
     prisma.companySettings.findFirst({
@@ -227,7 +241,29 @@ export async function recomputeInvestmentRollups(projectId: string): Promise<voi
   }
 
   // Execute all writes as a batched transaction (single round-trip).
-  // This avoids the interactive transaction timeout and deadlocks that
-  // occur when multiple concurrent requests open interactive transactions.
-  await prisma.$transaction(ops);
+  // Retry on deadlock (Neon/Postgres error P2034) up to 3 times with backoff.
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await prisma.$transaction(ops);
+      return;
+    } catch (err: unknown) {
+      const isDeadlock =
+        err instanceof Error &&
+        (err.message.includes("deadlock") ||
+         err.message.includes("could not serialize") ||
+         err.message.includes("P2034"));
+      const isTimeout =
+        err instanceof Error &&
+        (err.message.includes("expired transaction") ||
+         err.message.includes("Transaction already closed"));
+
+      if ((isDeadlock || isTimeout) && attempt < MAX_RETRIES) {
+        // Exponential backoff: 200ms, 400ms
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
