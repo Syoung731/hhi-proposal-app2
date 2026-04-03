@@ -64,8 +64,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Load project ceiling height for effective SF calculation
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { defaultCeilingHeightFt: true },
+    });
+
     // Gather aggregate project data
-    const aggregateData = await getProjectAggregateData(projectId);
+    const aggregateData = await getProjectAggregateData(
+      projectId,
+      project?.defaultCeilingHeightFt,
+    );
     if (aggregateData.roomsWithEstimates === 0) {
       return NextResponse.json(
         { error: "Generate room estimates first before generating COPE." },

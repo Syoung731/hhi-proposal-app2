@@ -116,6 +116,7 @@ export function ProjectTabs({
           <RoomsTab
             projectId={project.id}
             projectStylePresetId={project.stylePresetId}
+            defaultCeilingHeightFt={project.defaultCeilingHeightFt ?? 9}
             roomTypeLowPct={roomTypeLowPct ?? -10}
             roomTypeHighPct={roomTypeHighPct ?? 10}
             rooms={project.rooms.map((r) => ({

@@ -5,6 +5,7 @@ import { SYSTEM_PROMPT, buildUserPrompt, getCorrectionHistory, type ProjectConte
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
 import { getAnthropicApiKey } from "@/app/integrations/anthropic";
 import { calcItemPriceRange } from "@/app/lib/price-range";
+import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
 
 // ---------- POST — Generate a new AI estimate ----------
 
@@ -82,6 +83,15 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Load project for default ceiling height
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { defaultCeilingHeightFt: true },
+    });
+
+    // Pre-calculate effective room metrics (SF, wall area, perimeter)
+    const roomMetrics = await getEffectiveRoomMetrics(sectionId, project?.defaultCeilingHeightFt);
+
     // Fetch correction history for this room template (feedback loop)
     const correctionHistory = roomTemplateId
       ? await getCorrectionHistory(roomTemplateId)
@@ -96,6 +106,7 @@ export async function POST(request: NextRequest) {
       projectContext,
       roomDimensions,
       correctionHistory,
+      roomMetrics,
     );
 
     // Call Claude API

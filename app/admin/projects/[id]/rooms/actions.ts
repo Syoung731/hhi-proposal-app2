@@ -1554,3 +1554,19 @@ export async function createQuickSectionTypeAction(
   revalidatePath("/admin/projects");
   return { sectionTypeId: created.id };
 }
+
+export async function updateProjectDefaultCeilingHeightAction(
+  projectId: string,
+  heightFt: number,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (heightFt < 6 || heightFt > 20) {
+    return { error: "Ceiling height must be between 6 and 20 feet." };
+  }
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { defaultCeilingHeightFt: heightFt },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+  return {};
+}

@@ -1,6 +1,10 @@
 import { prisma } from "@/app/lib/prisma";
+import { getEffectiveProjectSF } from "@/app/lib/effective-room-sf";
 
-export async function getProjectAggregateData(projectId: string) {
+export async function getProjectAggregateData(
+  projectId: string,
+  projectDefaultCeilingFt?: number | null,
+) {
   // 1. Get all NON-COPE rooms
   const rooms = await prisma.room.findMany({
     where: { projectId, isProjectOverhead: false },
@@ -54,7 +58,13 @@ export async function getProjectAggregateData(projectId: string) {
     (sum, e) => sum + (e.estimate.totalCost || 0),
     0,
   );
-  const totalAreaSqFt = rooms.reduce((sum, r) => sum + (r.areaSqFt || 0), 0);
+
+  // Use effective SF (includes sub-areas) instead of raw areaSqFt sum
+  const { totalEffectiveSqFt, roomMetrics } = await getEffectiveProjectSF(
+    projectId,
+    projectDefaultCeilingFt,
+  );
+  const totalAreaSqFt = totalEffectiveSqFt;
 
   // 6. Scope characteristic flags
   const hasFraming = "Framing" in tradeBreakdown;
@@ -74,6 +84,7 @@ export async function getProjectAggregateData(projectId: string) {
     rooms: rooms.map((r) => ({
       name: r.name,
       areaSqFt: r.areaSqFt,
+      effectiveSqFt: roomMetrics.get(r.id)?.effectiveSqFt ?? r.areaSqFt ?? 0,
       totalTarget: r.totalTarget,
       sectionType: r.sectionType?.name || null,
     })),

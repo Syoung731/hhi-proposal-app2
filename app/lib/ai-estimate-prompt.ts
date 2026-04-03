@@ -1,5 +1,6 @@
 import type { CompanyContext, PricingCatalogItem, RoomTemplate, RoomTemplateTradeGroup, RoomTemplateItem } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
+import type { EffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
 
 // ---------- Types ----------
 
@@ -91,14 +92,73 @@ PROJECT OVERHEAD EXCLUSION: Do NOT include any of the following project-level ov
 - Any item with trade prefix [ADM] that is project-wide rather than room-specific
 If a catalog item from the COPE template appears in the room template's trade groups, skip it entirely — it will be estimated at the project level.
 
-QUANTITY CALCULATION RULES:
-- FLOOR: Use the exact provided square footage. Never reduce it.
-- WALLS: Calculate from dimensions. SF = perimeter_LF x ceiling_height. A 48 SF room that is 8x6 with 9 ft ceilings has walls = 2*(8+6)*9 = 252 SF. Subtract door and window openings.
-- CEILING: Same as floor SF unless vaulted or sloped (not standard).
-- DRYWALL: If scope says gut to studs then walls + ceiling = total drywall needed. For the 48 SF bathroom: 252 SF walls + 48 SF ceiling = 300 SF drywall. NOT 40 SF.
-- TILE: Calculate from actual wall dimensions, not floor SF. Shower walls: count of walls x width x height.
-- DEMO: Match quantities to the surfaces being removed.
-- PAINT: Calculate from wall + ceiling areas minus tiled surfaces.`;
+QUANTITY CALCULATION RULES — MANDATORY:
+  The Room Details section above contains PRE-CALCULATED values for floor area, wall area, ceiling area, total drywall, and perimeter. You MUST use these exact numbers:
+
+  - FLOOR TILE / FLOORING: Use the pre-calculated floor area exactly. This already includes sub-areas (e.g., water closet). Do NOT reduce this number.
+  - WALLS / DRYWALL: Use the pre-calculated wall area. For full gut ("to studs" or "gut"), total drywall = pre-calculated wall area + ceiling area. Deduct door openings (21 SF each) and window openings (12 SF each) from the wall area for paint calculations.
+  - CEILING: Use the pre-calculated ceiling area (same as floor area).
+  - PAINT: Use the pre-calculated wall area minus tiled surfaces. Add ceiling area if ceiling is being painted.
+  - BASEBOARD / TRIM: Use the pre-calculated perimeter in LF.
+  - DEMO: Match demo quantities to the surfaces being removed. If "full gut" or "to studs", demo quantities should match the corresponding new-work quantities.
+
+  DO NOT calculate your own wall area, floor area, or perimeter. The pre-calculated values account for room dimensions, sub-areas, and ceiling height. Use them directly.
+
+  If a pre-calculated value is missing (null), then estimate based on the scope description, but explain your reasoning in the notes.
+
+FLOOR TILE SPECIAL RULE:
+  Floor tile quantity MUST equal the pre-calculated floor area UNLESS:
+  - The scope explicitly says partial flooring (e.g., "tile only in the wet area")
+  - The shower footprint is being subtracted (shower has its own floor tile)
+  If subtracting shower footprint: floor tile = room SF - shower pan SF. Show this math in notes.
+  If no exclusions apply: floor tile = room SF exactly. Do not reduce it.
+
+SHOWER TILE CALCULATIONS:
+  When the scope includes shower tile work:
+  1. Identify the shower pan dimensions from the scope or estimate the shower footprint
+  2. Shower wall tile SF = (wall1_width + wall2_width + wall3_width) x wall_height
+     - Typically 3 walls (the 4th wall has the door/glass)
+     - Wall height is usually 8 feet for shower walls (floor to ceiling) unless specified otherwise
+     - Example: 4ft x 6ft shower pan = (4 + 6 + 4) x 8 = 112 SF of wall tile
+  3. Shower floor tile SF = shower pan area (e.g., 4 x 6 = 24 SF)
+  4. ALWAYS include BOTH shower wall tile AND shower floor tile as separate line items
+  5. Show the shower dimensions and math in the notes for EVERY shower tile line item
+
+MATERIAL AND INSTALLATION PAIRING — MANDATORY:
+  For EVERY material item, there MUST be a corresponding installation item, and vice versa. Common pairs:
+  - Countertop stone material ↔ Countertop stone installation
+  - Floor tile material ↔ Floor tile installation
+  - Shower wall tile material ↔ Shower wall tile installation
+  - Shower floor tile material ↔ Shower floor tile installation (MUST be included)
+  - Cabinet material ↔ Cabinet installation
+  - Vanity light material ↔ Vanity light installation
+  - Faucet material ↔ Faucet installation
+
+  If you include a material item without an installation pair (or vice versa), the estimate is INCOMPLETE.
+
+  OUTPUT ORDER: Within each trade group, output material items IMMEDIATELY followed by their installation pair:
+    [TIL] Shower Wall Tile - Material
+    [TIL] Shower Wall Tile - Install
+    [TIL] Shower Floor Tile - Material
+    [TIL] Shower Floor Tile - Install
+
+  Do NOT group all materials together then all installations. Alternate: material, install, material, install.
+
+COUNTERTOP SPECIAL RULE:
+  If the estimate includes countertop installation (e.g., "Countertop - Stone - Install"), it MUST also include a countertop material allowance (e.g., "Countertop - Quartz - Material" or "Countertop - Stone - Material").
+  - If the catalog has a countertop material item with $0 price: tag as ALLOWANCE and estimate based on finish tier (high-end: $75-$125 per SF for quartz/granite)
+  - The material quantity should match the installation quantity (both in SF or LF)
+
+FRAMING AND STRUCTURAL ITEMS:
+  For any framing or structural line item, the notes MUST explain:
+  - What specific framing work is needed and why (reference the scope)
+  - What is being removed vs what is being added
+  - Quantities must be justified (e.g., "remove 10 LF of wall framing to reconfigure shower entry")
+
+  For joist work specifically:
+  - HHI Builders typically replaces compromised joists or sisters the entire subfloor run, not individual joists
+  - If scope mentions joist repair: include "Joist sistering/replacement" as a lump-sum or per-joist item
+  - Note in the description: "Sister or replace as needed per field conditions — quantity is an estimate"`;
 
 // ---------- Correction history for feedback loop ----------
 
@@ -219,8 +279,13 @@ export function buildUserPrompt(
   projectContext?: ProjectContext,
   roomDimensions?: RoomDimensions,
   correctionHistory?: string | null,
+  roomMetrics?: EffectiveRoomMetrics | null,
 ): string {
-  const groups = filterTradeGroupsByScope(roomTemplate.tradeGroups, scopeNarrative);
+  const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
+    ...g,
+    items: g.items.filter((item) => item.isActive !== false),
+  })).filter((g) => g.items.length > 0);
+  const groups = filterTradeGroupsByScope(activeTradeGroups, scopeNarrative);
 
   const catalogSection = groups
     .map((g) => {
@@ -239,16 +304,12 @@ export function buildUserPrompt(
     })
     .join("\n\n");
 
-  // Compute dimensions
+  // Compute dimensions (fallback if no roomMetrics)
   const dims = calcDimensions(squareFootage, roomDimensions);
   const dimLine = dims.lengthFt != null && dims.widthFt != null
     ? `${dims.lengthFt} ft x ${dims.widthFt} ft`
     : "Not provided";
-  const ceilingLine = roomDimensions?.ceilingHeightFt
-    ? `${roomDimensions.ceilingHeightFt} ft`
-    : "Not provided — assume 9 ft per standard assumptions";
-  const wallLfLine = dims.wallLinearFt != null ? `${dims.wallLinearFt} LF` : "Not available (dimensions not provided)";
-  const wallAreaLine = dims.wallAreaSf != null ? `${dims.wallAreaSf} SF` : "Not available (dimensions not provided)";
+  const roomCeilingProvided = roomDimensions?.ceilingHeightFt != null && roomDimensions.ceilingHeightFt > 0;
 
   // Estimation assumptions section
   const assumptionsSection = companyContext.estimationAssumptions
@@ -273,12 +334,20 @@ ${assumptionsSection}
 - Special Conditions: ${projectContext?.specialConditions ?? "None"}
 
 ## Room Details
-- Room Type: ${roomTemplate.displayName ?? roomTemplate.name}
-- Square Footage: ${squareFootage ?? "Not specified — estimate based on scope"}
-- Dimensions: ${dimLine}
-- Ceiling Height: ${ceilingLine}
-- Calculated Wall Linear Feet: ${wallLfLine}
-- Calculated Wall Area: ${wallAreaLine}
+Room Type: ${roomTemplate.displayName ?? roomTemplate.name}
+Square Footage: ${roomMetrics ? `${roomMetrics.effectiveSqFt} SF (base room ${roomMetrics.baseSqFt} SF + sub-areas ${roomMetrics.subAreaSqFt} SF)` : squareFootage ?? "Not specified — estimate based on scope"}
+Dimensions: ${dimLine}
+Ceiling Height: ${roomMetrics ? `${roomMetrics.ceilingHeightFt} ft${roomCeilingProvided ? "" : " (defaulted — not specified on room)"}` : roomDimensions?.ceilingHeightFt ? `${roomDimensions.ceilingHeightFt} ft` : "Not provided — assume 9 ft per standard assumptions"}
+Perimeter: ${roomMetrics ? `${roomMetrics.effectivePerimeterLF} LF (base room ${roomMetrics.basePerimeterLF} LF + sub-area perimeters)` : "Not available"}
+Wall Area: ${roomMetrics?.wallSF != null ? `${roomMetrics.wallSF} SF (perimeter ${roomMetrics.effectivePerimeterLF} LF x ceiling ${roomMetrics.ceilingHeightFt} ft)` : "Not available"}
+Ceiling Area: ${roomMetrics ? `${roomMetrics.effectiveSqFt} SF (same as floor area)` : "Not available"}
+${roomMetrics ? `
+PRE-CALCULATED VALUES — USE THESE EXACT NUMBERS:
+  - Floor area: ${roomMetrics.effectiveSqFt} SF
+  - Wall area (before door/window deductions): ${roomMetrics.wallSF ?? "N/A"} SF
+  - Ceiling area: ${roomMetrics.effectiveSqFt} SF
+  - Total drywall (walls + ceiling, full gut): ${(roomMetrics.wallSF ?? 0) + roomMetrics.effectiveSqFt} SF
+  - Baseboard/trim perimeter: ${roomMetrics.effectivePerimeterLF} LF` : ""}
 
 ## Scope of Work
 ${scopeNarrative}

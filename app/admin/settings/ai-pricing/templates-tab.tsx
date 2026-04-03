@@ -7,6 +7,7 @@ type TemplateItem = {
   name: string;
   costCode: string | null;
   costType: string | null;
+  isActive: boolean;
   catalogItem: { id: string; name: string; unitCost: number | null; unitPrice: number | null; unit: string; trade: string | null } | null;
 };
 
@@ -125,6 +126,32 @@ export function TemplatesTab() {
     }
   }
 
+  async function toggleItemActive(templateId: string, groupId: string, itemId: string, newActive: boolean) {
+    try {
+      await fetch(`/api/settings/templates/items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: newActive }),
+      });
+      setTemplates((prev) =>
+        prev.map((t) =>
+          t.id === templateId
+            ? {
+                ...t,
+                tradeGroups: t.tradeGroups.map((g) =>
+                  g.id === groupId
+                    ? { ...g, items: g.items.map((i) => (i.id === itemId ? { ...i, isActive: newActive } : i)) }
+                    : g
+                ),
+              }
+            : t
+        )
+      );
+    } catch {
+      // Silently fail
+    }
+  }
+
   function totalItemCount(t: RoomTemplate) {
     return t.tradeGroups.reduce((sum, g) => sum + g.items.length, 0);
   }
@@ -211,13 +238,20 @@ export function TemplatesTab() {
                         </p>
                         <div className="space-y-0.5 pl-3">
                           {g.items.map((item) => (
-                            <div key={item.id} className="flex items-center gap-2 text-sm">
+                            <div key={item.id} className={`flex items-center gap-2 text-sm${item.isActive === false ? " opacity-50" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={item.isActive !== false}
+                                onChange={() => toggleItemActive(t.id, g.id, item.id, !item.isActive)}
+                                className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-600"
+                                title={item.isActive !== false ? "Active — used in estimates" : "Inactive — skipped in estimates"}
+                              />
                               {item.catalogItem ? (
                                 <span className="text-green-600 dark:text-green-400" title="Matched to catalog">✓</span>
                               ) : (
                                 <span className="text-amber-500 dark:text-amber-400" title="Not matched to catalog">○</span>
                               )}
-                              <span className="text-zinc-700 dark:text-zinc-300">{item.name}</span>
+                              <span className={`text-zinc-700 dark:text-zinc-300${item.isActive === false ? " line-through" : ""}`}>{item.name}</span>
                               {!item.catalogItem && (
                                 <span className="text-xs text-amber-600 dark:text-amber-400">unmatched</span>
                               )}

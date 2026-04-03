@@ -67,6 +67,7 @@ model Project {
   proposal            Proposal?
   extensionPairCodes       ExtensionPairCode[]
   zillowBrowserConnections ZillowBrowserConnection[]
+  defaultCeilingHeightFt   Float?               @default(9)
   proposalDeck             ProposalDeck?
 
   @@index([status])
@@ -904,6 +905,7 @@ model RoomTemplateItem {
   costCode        String?
   costType        String?
   sortOrder       Int                   @default(0)
+  isActive        Boolean               @default(true)
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   tradeGroup      RoomTemplateTradeGroup @relation(fields: [tradeGroupId], references: [id], onDelete: Cascade)

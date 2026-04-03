@@ -25,6 +25,8 @@ RULES:
 3. Show ALL math in the notes field for every line item.
 4. For unit costs: catalog items have unitCost (our cost) and unitPrice (client price). The markup is already built into catalog prices — do NOT add additional markup. For estimated items, use a similar markup ratio.
 
+SKIP ITEMS: Do NOT include "Final Construction Drawings" in the COPE estimate. This item is managed outside the estimating system. If it appears in the COPE template catalog, ignore it.
+
 PERMIT FEE SCHEDULE (Town of Hilton Head Island — Miscellaneous Single Family Permits):
   Project value $0 to $1,000: permit fee = $35
   Project value $1,001 to $2,000: permit fee = $70
@@ -37,26 +39,57 @@ PERMIT FEE SCHEDULE (Town of Hilton Head Island — Miscellaneous Single Family 
     - Windows are being replaced or exterior doors are being replaced
   If Plan Review Fee applies, add it as a separate line item.
 
+  OUTPUT PERMIT LINE ITEMS AS THREE SEPARATE ITEMS:
+
+  1. "[ADM] Building Permit - Material": This is the actual government permit fee.
+     - Calculate from the fee schedule based on total project value.
+     - unitCost = the calculated fee (government fees have no markup)
+     - unitPrice = the calculated fee (same as cost — no markup on government fees)
+     - source: "ALLOWANCE"
+     - quantity: 1
+
+  2. "[ADM] Plan Review Fee": 50% of the permit fee. Only include if plan review is required.
+     - unitCost = permit fee x 0.5
+     - unitPrice = permit fee x 0.5 (no markup on government fees)
+     - source: "ALLOWANCE"
+     - quantity: 1 if required, 0 if not required
+
+  3. "[ADM] Building Permit - Labor": Labor for someone to pick up, post, and manage the permit.
+     - quantity: 2 (hours — standard for any project)
+     - unitCost: $32.50 (use supervision rate)
+     - unitPrice: $57.50 (use supervision rate)
+     - source: "ALLOWANCE"
+
+  CRITICAL: For government fees (Building Permit Material and Plan Review Fee), unitCost MUST equal unitPrice. There is NO markup on government fees. The cost IS the price.
+
 HOA FEES:
   Many Hilton Head communities require HOA architectural review. For renovation projects, estimate:
     - HOA architectural review/application fee: $200 to $500 depending on scope complexity
-    - HOA coordination staff time: 2 to 4 hours at the catalog rate ($0 catalog — estimate $75 to $100 per hour)
-  If the project is small (under $30K, 1-2 rooms), HOA fees may be minimal ($200 + 2 hours). For larger projects, use higher estimates.
+    - HOA coordination staff time: 2 hours per project (standard)
+      - This covers time to submit application, coordinate with HOA, post approvals
+      - Use the catalog rate for HOA Fees - Staff Time
+      - If catalog rate is $0, estimate $75 to $100 per hour
 
 WASTE REMOVAL:
-  - Estimate total waste volume from the aggregate demo data across all rooms
-  - Rule of thumb: 1 dumpster load (12 yard) per $8,000 to $12,000 of demo work
-  - Additional rule: 1 dumpster load per $50,000 of new construction work (for cut-offs, packaging, debris)
-  - Always round UP to the nearest whole dumpster
-  - Minimum: 1 dumpster for any renovation project
-  - Privacy screening: include 1 set (material + install) if dumpster will be visible from street or neighbors. Most Hilton Head projects need this.
-  - Use catalog prices for dumpster ($712.09 price per load) and privacy screening ($250 material + $625 install)
+  - Calculate dumpster loads based on SQUARE FOOTAGE of demo work, not dollar value:
+    - 1 dumpster load (12 yard) per 250 SF of demolition
+    - Always round UP to the nearest whole dumpster
+    - Minimum: 1 dumpster for any renovation project
+  - To determine demo SF: look at the demo line items across all room estimates. Sum the quantities of SF-based demo items (remove flooring, remove tile, remove drywall, etc.).
+  - If demo quantities are not in SF (e.g., LF or EA items), estimate the equivalent SF they represent.
+  - Always err on the side of MORE dumpsters, not fewer.
+  - Use catalog price: $712.09 per dumpster load ($498.46 cost)
+  - Privacy screening around dumpster:
+    - ONLY include if the walkthrough transcript or project scope mentions needing screening, or if the dumpster will be placed in a visible location that requires it.
+    - If NOT mentioned in scope: set quantity to 0 for BOTH material and install. Set notes to "Not included — not specified in scope. Add if dumpster placement requires screening."
+    - If included: 1 set of material + 1 set of install per dumpster location (typically 1).
+    - Use catalog prices: $250 material, $625 install.
 
 FINAL CONSTRUCTION CLEANING:
-  - Use total project area (sum of all room square footages)
-  - Add 20% for common areas, hallways, and transition zones that also need cleaning
-  - Minimum: 200 SF even for small projects
-  - Rate: use catalog rate ($1.70 per SF client price, $0.68 per SF cost)
+  - Use total project effective area (sum of all room square footages including sub-areas)
+  - This number is provided in the Project Aggregate Data as "Total Project Area"
+  - Use this exact number — do NOT add 20% or any buffer
+  - Rate: catalog rate per SF ($1.70 price, $0.68 cost)
 
 ON SITE SUPERVISION:
   - Estimate total project duration in weeks:
@@ -64,29 +97,34 @@ ON SITE SUPERVISION:
     - $50K to $150K, 3-6 rooms: 8 to 16 weeks
     - $150K to $300K, 6+ rooms: 16 to 24 weeks
     - Over $300K: 24 to 36 weeks
-  - Supervision hours: 3.5 hours per working day average, 5 days per week
-  - Total hours = estimated weeks x 5 x 3.5
+  - Supervision hours per working day: 2 hours (this is the average daily site visit, NOT a full day)
+  - Working days per week: 5
+  - Total hours = estimated weeks x 5 days x 2 hours per day
   - Rate: use catalog rate ($57.50 per hour client price, $32.50 per hour cost)
+  - Example: 12-week project = 12 x 5 x 2 = 120 supervision hours at $57.50 = $6,900
 
 CONTENT MANIPULATION:
-  - Include contents move out and reset if project involves gut renovations or 3+ rooms being worked simultaneously
-  - Estimate hours: 2 to 4 hours per room being gutted
-  - Off-site storage: include 1 to 3 months if contents need to be moved out. Duration roughly matches project duration.
-  - Rates: use catalog rates ($85.25/HR for move, $357.14/month for storage)
+  - ALWAYS include "Contents - Move out and then reset" and "Off Site Storage" line items in output.
+  - DEFAULT: Set quantity to 0 and totalPrice to $0 for BOTH items.
+  - ONLY populate with non-zero values if one of these conditions is met:
+    a) The project scope explicitly mentions moving contents, clearing rooms, or storage
+    b) The project involves gut renovation of LIVING SPACES (bedrooms, living rooms, dining rooms) where furniture must be moved
+  - Bathrooms, closets, kitchens, and laundry rooms do NOT trigger content manipulation — contents in those rooms can be managed in place.
+  - When triggered (non-zero):
+    - Move hours: 2 to 4 hours per living-space room being gutted
+    - Storage months: match estimated project duration in months
+  - When NOT triggered (zero quantity):
+    - Set quantity to 0 for both items
+    - Set unitCost and unitPrice to the catalog rates (so they're ready if the user manually adjusts quantity)
+    - Set notes to: "Not triggered — no living space gut renovation or explicit content move in scope. Adjust quantity if needed."
 
 FLOOR AND CONTENT PROTECTION:
-  - Ram Board floor covering: total project SF (all rooms being worked in)
-  - Plastic sheeting and tape: total project SF
-  - Install labor: total project SF
+  - Use total project effective area (same number as cleaning)
+  - Ram Board, plastic sheeting, and install labor all use this same SF
+  - Do NOT use a different number than cleaning
+  - Both sections MUST use the exact same square footage number. Show this number in the notes for both.
   - Use catalog rates: Ram Board $0.45/SF, Plastic $0.10/SF, Install $1.125/SF
   - Total protection cost is approximately $1.675 per SF
-
-CONSTRUCTION DRAWINGS:
-  - Include if any room involves structural changes, additions, or complex layout changes
-  - This is a $0 catalog item (ALLOWANCE) — estimate $2,000 to $5,000 based on project complexity
-  - Small cosmetic project (under $50K): may not need drawings, set to $0 or minimal
-  - Medium renovation ($50K-$150K): $2,000 to $3,000
-  - Large renovation ($150K+): $3,500 to $5,000
 
 TAG EVERY ITEM:
   - "CATALOG" = using a real catalog price where unitPrice > 0
@@ -134,10 +172,11 @@ export function buildCopeUserPrompt(
   // Room summary
   const roomSummary = aggregateData.rooms
     .map((r) => {
-      const sf = r.areaSqFt ? `${r.areaSqFt} SF` : "no SF";
+      const baseSf = r.areaSqFt ? `${r.areaSqFt} SF` : "no SF";
+      const effectiveSf = r.effectiveSqFt ? `${r.effectiveSqFt} effective SF` : baseSf;
       const price = r.totalTarget != null ? `$${r.totalTarget.toLocaleString()}` : "no estimate";
       const type = r.sectionType || "no type";
-      return `- ${r.name}: ${sf} | ${price} | ${type}`;
+      return `- ${r.name}: ${effectiveSf} | ${price} | ${type}`;
     })
     .join("\n");
 
@@ -155,8 +194,13 @@ export function buildCopeUserPrompt(
     ? `Yes ($${aggregateData.tradeBreakdown["Plumbing"]?.totalPrice?.toLocaleString() ?? "0"})`
     : "No";
 
-  // Catalog section from template
+  // Catalog section from template (filter inactive items)
   const catalogSection = copeTemplate.tradeGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((item) => item.isActive !== false),
+    }))
+    .filter((g) => g.items.length > 0)
     .map((g) => {
       const items = g.items
         .map((item) => {
@@ -184,7 +228,7 @@ ${companyContext.marketNotes ? `- ${companyContext.marketNotes}` : ""}
 ## Project Aggregate Data
 - Total Estimated Project Value: $${aggregateData.totalEstimatedPrice.toLocaleString()}
 - Total Estimated Project Cost: $${aggregateData.totalEstimatedCost.toLocaleString()}
-- Total Project Area: ${aggregateData.totalAreaSqFt} SF across ${aggregateData.roomCount} rooms
+- Total Project Area: ${aggregateData.totalAreaSqFt} SF across ${aggregateData.roomCount} rooms (includes sub-areas)
 - Rooms with completed estimates: ${aggregateData.roomsWithEstimates}
 
 ## Room Summary

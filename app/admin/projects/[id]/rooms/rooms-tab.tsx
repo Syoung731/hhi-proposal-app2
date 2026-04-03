@@ -18,6 +18,7 @@ import {
   updateRoomSubAreasAction,
   updateRoomPricingTierAction,
   updateRoomManualPriceAction,
+  updateProjectDefaultCeilingHeightAction,
 } from "./actions";
 import { updateProjectStylePresetAction } from "../overview/actions";
 import { getRoomTypes } from "@/app/admin/settings/actions";
@@ -636,6 +637,7 @@ function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): s
 type Props = {
   projectId: string;
   projectStylePresetId: string | null;
+  defaultCeilingHeightFt: number;
   rooms: Room[];
   stylePresets: StylePresetOption[];
   sectionTypes: SectionTypeOption[];
@@ -1057,7 +1059,7 @@ function RoomSubAreasEditor({
   );
 }
 
-export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, rooms: initialRooms, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
+export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, defaultCeilingHeightFt: initialCeilingHeight, rooms: initialRooms, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [rooms, setRooms] = useState<Room[]>(() =>
@@ -1082,6 +1084,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [merging, setMerging] = useState(false);
   const [roomTemplates, setRoomTemplates] = useState<RoomTemplateOption[]>([]);
   const [selectedTemplates, setSelectedTemplates] = useState<Record<string, string | null>>({});
+  const [ceilingHeight, setCeilingHeight] = useState<number>(initialCeilingHeight);
+  const [ceilingHeightSaved, setCeilingHeightSaved] = useState(false);
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -1338,6 +1342,30 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           >
             Generate AI Estimates
           </button>
+          <span className="ml-2 flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Default Ceiling Height:
+            <input
+              type="number"
+              min={6}
+              max={20}
+              step={0.5}
+              value={ceilingHeight}
+              onChange={(e) => setCeilingHeight(Number(e.target.value))}
+              onBlur={async () => {
+                const result = await updateProjectDefaultCeilingHeightAction(projectId, ceilingHeight);
+                if (result.error) { alert(result.error); }
+                else { setCeilingHeightSaved(true); setTimeout(() => setCeilingHeightSaved(false), 1500); }
+              }}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter") {
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className="w-[60px] rounded border border-zinc-300 px-1.5 py-1 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+            />
+            ft
+            {ceilingHeightSaved && <span className="text-xs text-green-600 dark:text-green-400">Saved</span>}
+          </span>
           <span className="ml-2 text-sm text-zinc-500 dark:text-zinc-400">
             Style Preset (applies to all sections):
           </span>
