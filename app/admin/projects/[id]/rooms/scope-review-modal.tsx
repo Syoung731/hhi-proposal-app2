@@ -241,7 +241,7 @@ export function ScopeReviewModal({
 
 // ---------- Question Input Component ----------
 
-function QuestionInput({
+export function QuestionInput({
   question,
   onChange,
 }: {

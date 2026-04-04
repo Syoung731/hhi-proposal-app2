@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { updateProjectOverviewAction, updateProjectTranscriptAction, type OverviewFieldErrors } from "./actions";
 import { generateOverviewFromTranscriptAction } from "./generate-overview-action";
+import { AddressAutocomplete } from "./address-autocomplete";
 
 const inputClass =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100";
@@ -100,10 +101,14 @@ const hasExistingTranscript = (text: string | null) =>
 export function OverviewTab({ projectId, project }: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const formSectionRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLTextAreaElement>(null);
   const transcriptFileInputRef = useRef<HTMLInputElement>(null);
   const aiPanelRef = useRef<HTMLDivElement>(null);
   const [transcriptLoaded, setTranscriptLoaded] = useState(() =>
+    hasExistingTranscript(project.transcriptText)
+  );
+  const [transcriptCollapsed, setTranscriptCollapsed] = useState(() =>
     hasExistingTranscript(project.transcriptText)
   );
   const [transcriptValue, setTranscriptValue] = useState(
@@ -125,6 +130,7 @@ export function OverviewTab({ projectId, project }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [saveFieldErrors, setSaveFieldErrors] = useState<OverviewFieldErrors | null>(null);
+  const [appliedToast, setAppliedToast] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const DEBOUNCE_MS = 800;
@@ -304,6 +310,10 @@ export function OverviewTab({ projectId, project }: Props) {
         setApplySelections({});
         setSaveFieldErrors(null);
       });
+      // Show success toast and scroll to form
+      setAppliedToast(true);
+      setTimeout(() => setAppliedToast(false), 3000);
+      setTimeout(() => formSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       router.refresh();
       setTimeout(() => setApplySaveStatus("idle"), 2000);
       return true;
@@ -354,6 +364,7 @@ export function OverviewTab({ projectId, project }: Props) {
       setTranscriptValue(text);
       setUserHasEditedTranscript(false); // change from file load, not typing
       setTranscriptLoaded(true);
+      setTranscriptCollapsed(false); // expand to show newly loaded transcript
       setTranscriptFileName(file.name);
       setError(null);
       // Auto-save immediately when file is loaded so Generate Overview can use it
@@ -372,6 +383,7 @@ export function OverviewTab({ projectId, project }: Props) {
   function handleEraseTranscript() {
     if (transcriptRef.current) transcriptRef.current.value = "";
     setTranscriptLoaded(false);
+    setTranscriptCollapsed(false);
     setTranscriptValue("");
     setSavedTranscriptValue("");
     setUserHasEditedTranscript(false);
@@ -408,8 +420,17 @@ export function OverviewTab({ projectId, project }: Props) {
     submit(buildFormDataFromForm());
   }
 
+  const transcriptWordCount = transcriptValue.trim().split(/\s+/).filter(Boolean).length;
+
   return (
     <form ref={formRef} onSubmit={handleOverviewSubmit} className="max-w-2xl space-y-4">
+      {/* Applied toast */}
+      {appliedToast && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-200">
+          AI suggestions applied
+        </div>
+      )}
+
       {saveFieldErrors && Object.keys(saveFieldErrors).length > 0 && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
           <p className="font-medium">Please complete all required fields.</p>
@@ -418,10 +439,131 @@ export function OverviewTab({ projectId, project }: Props) {
           </p>
         </div>
       )}
+
+      {/* Collapsible Transcript Panel */}
+      <div className="rounded-lg border border-zinc-200 dark:border-zinc-700">
+        <div className="flex flex-wrap items-center gap-2 p-3">
+          <button
+            type="button"
+            onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
+            className="flex items-center gap-1.5 text-sm font-medium text-zinc-900 dark:text-zinc-100"
+          >
+            <span className="text-xs text-zinc-400">{transcriptCollapsed ? "\u25B6" : "\u25BC"}</span>
+            Project Transcript
+          </button>
+          {transcriptLoaded && transcriptCollapsed && (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              {transcriptFileName ? `${transcriptFileName} \u00B7 ` : ""}{transcriptWordCount.toLocaleString()} words
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <input
+              ref={transcriptFileInputRef}
+              id="transcriptFile"
+              type="file"
+              accept=".txt,.md,.text"
+              aria-label="Choose transcript file"
+              className="sr-only"
+              onChange={onTranscriptFileChange}
+            />
+            <label
+              htmlFor="transcriptFile"
+              className="cursor-pointer rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            >
+              Choose Transcript
+            </label>
+            <button
+              type="button"
+              onClick={handleEraseTranscript}
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            >
+              Erase
+            </button>
+          </div>
+        </div>
+        {!transcriptCollapsed && (
+          <div className="space-y-2 border-t border-zinc-200 p-3 dark:border-zinc-700">
+            {showTranscriptArea ? (
+              <textarea
+                ref={transcriptRef}
+                name="transcriptText"
+                value={transcriptValue}
+                onChange={(e) => {
+                  setTranscriptValue(e.target.value);
+                  setUserHasEditedTranscript(true);
+                }}
+                rows={6}
+                className={inputClass}
+                placeholder="Paste or upload transcript..."
+              />
+            ) : (
+              <>
+                <input type="hidden" name="transcriptText" value="" />
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  No transcript loaded. Upload a file or paste text above.
+                </p>
+              </>
+            )}
+            {showTranscriptArea && (
+              <div className="flex flex-wrap items-center gap-2">
+                {hasUnsavedTranscriptChanges && (
+                  <span className="text-sm text-amber-600 dark:text-amber-400">
+                    Unsaved transcript changes
+                  </span>
+                )}
+                {autosaveStatus !== "idle" && (
+                  <span
+                    className={`text-sm ${
+                      autosaveStatus === "saving"
+                        ? "text-zinc-500 dark:text-zinc-400"
+                        : autosaveStatus === "saved"
+                          ? "text-green-600 dark:text-green-400"
+                          : "text-red-600 dark:text-red-400"
+                    }`}
+                  >
+                    {autosaveStatus === "saving"
+                      ? "Saving..."
+                      : autosaveStatus === "saved"
+                        ? "Saved"
+                        : "Save failed"}
+                  </span>
+                )}
+                {hasTranscript && (
+                  <button
+                    type="button"
+                    onClick={handleSaveTranscriptNow}
+                    disabled={autosaveStatus === "saving"}
+                    className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                  >
+                    Save transcript
+                  </button>
+                )}
+              </div>
+            )}
+            {error && (
+              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Generate Overview button */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={runGenerate}
+          disabled={generateDisabled}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading ? "Generating..." : "Generate Overview"}
+        </button>
+      </div>
+
+      {/* AI Suggestions Panel */}
       {aiDraft && (
         <div
           ref={aiPanelRef}
-          className="mb-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800"
+          className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800"
         >
           {aiDraft.changedFields.length === 0 ? (
             <>
@@ -447,7 +589,7 @@ export function OverviewTab({ projectId, project }: Props) {
                 </h3>
                 {applySaveStatus === "saving" && (
                   <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    Saving…
+                    Saving...
                   </p>
                 )}
                 {applySaveStatus === "saved" && (
@@ -497,7 +639,7 @@ export function OverviewTab({ projectId, project }: Props) {
                             Current:{" "}
                           </span>
                           <span className="break-words">
-                            {current || <em className="text-zinc-400">—</em>}
+                            {current || <em className="text-zinc-400">&mdash;</em>}
                           </span>
                         </div>
                         <div>
@@ -556,7 +698,7 @@ export function OverviewTab({ projectId, project }: Props) {
                 <div className="flex items-center gap-2">
                   {applySaveStatus === "saving" && (
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                      Saving…
+                      Saving...
                     </span>
                   )}
                   {applySaveStatus === "saved" && (
@@ -587,299 +729,218 @@ export function OverviewTab({ projectId, project }: Props) {
         </div>
       )}
 
-      {/* Transcript section */}
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Form fields */}
+      <div ref={formSectionRef} className="space-y-4">
+        <div>
+          <label className={labelClass} htmlFor="title">Title <span className="text-red-600 dark:text-red-400">*</span></label>
           <input
-            ref={transcriptFileInputRef}
-            id="transcriptFile"
-            type="file"
-            accept=".txt,.md,.text"
-            aria-label="Choose transcript file"
-            className="sr-only"
-            onChange={onTranscriptFileChange}
-          />
-          <label
-            htmlFor="transcriptFile"
-            className="cursor-pointer rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          >
-            Choose Transcript – AI Notetaker
-          </label>
-          {transcriptFileName && (
-            <span className="text-sm text-zinc-600 dark:text-zinc-400">
-              {transcriptFileName}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={handleEraseTranscript}
-            className="ml-auto rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          >
-            Erase Transcript
-          </button>
-        </div>
-        {showTranscriptArea ? (
-          <textarea
-            ref={transcriptRef}
-            name="transcriptText"
-            value={transcriptValue}
-            onChange={(e) => {
-              setTranscriptValue(e.target.value);
-              setUserHasEditedTranscript(true);
-            }}
-            rows={6}
+            id="title"
+            name="title"
+            defaultValue={project.title}
+            required
+            aria-invalid={!!saveFieldErrors?.title}
+            aria-describedby={saveFieldErrors?.title ? "title-error" : undefined}
             className={inputClass}
-            placeholder="Paste or upload transcript…"
           />
-        ) : (
-          <input type="hidden" name="transcriptText" value="" />
-        )}
-        {showTranscriptArea && (
-          <div className="flex flex-wrap items-center gap-2">
-            {hasUnsavedTranscriptChanges && (
-              <span className="text-sm text-amber-600 dark:text-amber-400">
-                Unsaved transcript changes
-              </span>
-            )}
-            {autosaveStatus !== "idle" && (
-              <span
-                className={`text-sm ${
-                  autosaveStatus === "saving"
-                    ? "text-zinc-500 dark:text-zinc-400"
-                    : autosaveStatus === "saved"
-                      ? "text-green-600 dark:text-green-400"
-                      : "text-red-600 dark:text-red-400"
-                }`}
-              >
-                {autosaveStatus === "saving"
-                  ? "Saving…"
-                  : autosaveStatus === "saved"
-                    ? "Saved"
-                    : "Save failed"}
-              </span>
-            )}
-            {hasTranscript && (
-              <button
-                type="button"
-                onClick={handleSaveTranscriptNow}
-                disabled={autosaveStatus === "saving"}
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                Save transcript
-              </button>
+          {saveFieldErrors?.title && (
+            <p id="title-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.title}</p>
+          )}
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="subtitle">Subtitle <span className="text-red-600 dark:text-red-400">*</span></label>
+          <input
+            id="subtitle"
+            name="subtitle"
+            defaultValue={project.subtitle ?? ""}
+            required
+            aria-invalid={!!saveFieldErrors?.subtitle}
+            aria-describedby={saveFieldErrors?.subtitle ? "subtitle-error" : undefined}
+            className={inputClass}
+          />
+          {saveFieldErrors?.subtitle && (
+            <p id="subtitle-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.subtitle}</p>
+          )}
+        </div>
+
+        {/* Address */}
+        <div className="space-y-2">
+          <span className={labelClass}>Address</span>
+          <AddressAutocomplete
+            inputClass={inputClass}
+            onSelect={({ addressLine1, city, state, zip }) => {
+              const form = formRef.current;
+              if (!form) return;
+              const fields: Record<string, string> = { addressLine1, city, state, zip };
+              for (const [name, value] of Object.entries(fields)) {
+                const el = form.elements.namedItem(name) as HTMLInputElement | null;
+                if (el) {
+                  el.value = value;
+                  el.dispatchEvent(new Event("input", { bubbles: true }));
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+              }
+            }}
+          />
+          <div>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="addressLine1">Address line 1 <span className="text-red-600 dark:text-red-400">*</span></label>
+            <input
+              id="addressLine1"
+              name="addressLine1"
+              defaultValue={project.addressLine1 ?? ""}
+              required
+              aria-invalid={!!saveFieldErrors?.addressLine1}
+              aria-describedby={saveFieldErrors?.addressLine1 ? "addressLine1-error" : undefined}
+              className={inputClass}
+            />
+            {saveFieldErrors?.addressLine1 && (
+              <p id="addressLine1-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.addressLine1}</p>
             )}
           </div>
-        )}
-        {error && (
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        )}
-      </div>
+          <div>
+            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="addressLine2">Address line 2</label>
+            <input
+              id="addressLine2"
+              name="addressLine2"
+              defaultValue={project.addressLine2 ?? ""}
+              className={inputClass}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="city">City <span className="text-red-600 dark:text-red-400">*</span></label>
+              <input
+                id="city"
+                name="city"
+                defaultValue={project.city || "Hilton Head Island"}
+                required
+                aria-invalid={!!saveFieldErrors?.city}
+                aria-describedby={saveFieldErrors?.city ? "city-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.city && (
+                <p id="city-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.city}</p>
+              )}
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="state">State <span className="text-red-600 dark:text-red-400">*</span></label>
+              <input
+                id="state"
+                name="state"
+                defaultValue={project.state || "SC"}
+                required
+                aria-invalid={!!saveFieldErrors?.state}
+                aria-describedby={saveFieldErrors?.state ? "state-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.state && (
+                <p id="state-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.state}</p>
+              )}
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="zip">Zip <span className="text-red-600 dark:text-red-400">*</span></label>
+              <input
+                id="zip"
+                name="zip"
+                defaultValue={project.zip ?? ""}
+                required
+                aria-invalid={!!saveFieldErrors?.zip}
+                aria-describedby={saveFieldErrors?.zip ? "zip-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.zip && (
+                <p id="zip-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.zip}</p>
+              )}
+            </div>
+          </div>
+        </div>
 
-      {/* Generate Overview – below transcript */}
-      <div className="flex flex-wrap items-center gap-2">
+        {/* Client 1 */}
+        <div className="space-y-2">
+          <span className={labelClass}>Client 1 (at least one owner) <span className="text-red-600 dark:text-red-400">*</span></span>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client1First">First name</label>
+              <input
+                id="client1First"
+                name="client1First"
+                defaultValue={project.client1First ?? ""}
+                aria-invalid={!!saveFieldErrors?.client1First}
+                aria-describedby={saveFieldErrors?.client1First ? "client1First-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.client1First && (
+                <p id="client1First-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client1First}</p>
+              )}
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client1Last">Last name</label>
+              <input
+                id="client1Last"
+                name="client1Last"
+                defaultValue={project.client1Last ?? ""}
+                aria-invalid={!!saveFieldErrors?.client1Last}
+                aria-describedby={saveFieldErrors?.client1Last ? "client1Last-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.client1Last && (
+                <p id="client1Last-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client1Last}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Client 2 */}
+        <div className="space-y-2">
+          <span className={labelClass}>Client 2 (optional; if one name given, both required)</span>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client2First">First name</label>
+              <input
+                id="client2First"
+                name="client2First"
+                defaultValue={project.client2First ?? ""}
+                aria-invalid={!!saveFieldErrors?.client2First}
+                aria-describedby={saveFieldErrors?.client2First ? "client2First-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.client2First && (
+                <p id="client2First-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client2First}</p>
+              )}
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client2Last">Last name</label>
+              <input
+                id="client2Last"
+                name="client2Last"
+                defaultValue={project.client2Last ?? ""}
+                aria-invalid={!!saveFieldErrors?.client2Last}
+                aria-describedby={saveFieldErrors?.client2Last ? "client2Last-error" : undefined}
+                className={inputClass}
+              />
+              {saveFieldErrors?.client2Last && (
+                <p id="client2Last-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client2Last}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Objective</label>
+          <textarea
+            name="objective"
+            defaultValue={project.objective ?? ""}
+            rows={4}
+            className={inputClass}
+          />
+        </div>
+
         <button
-          type="button"
-          onClick={runGenerate}
-          disabled={generateDisabled}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          type="submit"
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
-          {loading ? "Generating..." : "Generate Overview"}
+          Save overview
         </button>
       </div>
-
-      <div>
-        <label className={labelClass} htmlFor="title">Title <span className="text-red-600 dark:text-red-400">*</span></label>
-        <input
-          id="title"
-          name="title"
-          defaultValue={project.title}
-          required
-          aria-invalid={!!saveFieldErrors?.title}
-          aria-describedby={saveFieldErrors?.title ? "title-error" : undefined}
-          className={inputClass}
-        />
-        {saveFieldErrors?.title && (
-          <p id="title-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.title}</p>
-        )}
-      </div>
-      <div>
-        <label className={labelClass} htmlFor="subtitle">Subtitle <span className="text-red-600 dark:text-red-400">*</span></label>
-        <input
-          id="subtitle"
-          name="subtitle"
-          defaultValue={project.subtitle ?? ""}
-          required
-          aria-invalid={!!saveFieldErrors?.subtitle}
-          aria-describedby={saveFieldErrors?.subtitle ? "subtitle-error" : undefined}
-          className={inputClass}
-        />
-        {saveFieldErrors?.subtitle && (
-          <p id="subtitle-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.subtitle}</p>
-        )}
-      </div>
-
-      {/* Address */}
-      <div className="space-y-2">
-        <span className={labelClass}>Address</span>
-        <div>
-          <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="addressLine1">Address line 1 <span className="text-red-600 dark:text-red-400">*</span></label>
-          <input
-            id="addressLine1"
-            name="addressLine1"
-            defaultValue={project.addressLine1 ?? ""}
-            required
-            aria-invalid={!!saveFieldErrors?.addressLine1}
-            aria-describedby={saveFieldErrors?.addressLine1 ? "addressLine1-error" : undefined}
-            className={inputClass}
-          />
-          {saveFieldErrors?.addressLine1 && (
-            <p id="addressLine1-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.addressLine1}</p>
-          )}
-        </div>
-        <div>
-          <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="addressLine2">Address line 2</label>
-          <input
-            id="addressLine2"
-            name="addressLine2"
-            defaultValue={project.addressLine2 ?? ""}
-            className={inputClass}
-          />
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="city">City <span className="text-red-600 dark:text-red-400">*</span></label>
-            <input
-              id="city"
-              name="city"
-              defaultValue={project.city ?? ""}
-              required
-              aria-invalid={!!saveFieldErrors?.city}
-              aria-describedby={saveFieldErrors?.city ? "city-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.city && (
-              <p id="city-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.city}</p>
-            )}
-          </div>
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="state">State <span className="text-red-600 dark:text-red-400">*</span></label>
-            <input
-              id="state"
-              name="state"
-              defaultValue={project.state ?? ""}
-              required
-              aria-invalid={!!saveFieldErrors?.state}
-              aria-describedby={saveFieldErrors?.state ? "state-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.state && (
-              <p id="state-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.state}</p>
-            )}
-          </div>
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="zip">Zip <span className="text-red-600 dark:text-red-400">*</span></label>
-            <input
-              id="zip"
-              name="zip"
-              defaultValue={project.zip ?? ""}
-              required
-              aria-invalid={!!saveFieldErrors?.zip}
-              aria-describedby={saveFieldErrors?.zip ? "zip-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.zip && (
-              <p id="zip-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.zip}</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Client 1 */}
-      <div className="space-y-2">
-        <span className={labelClass}>Client 1 (at least one owner) <span className="text-red-600 dark:text-red-400">*</span></span>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client1First">First name</label>
-            <input
-              id="client1First"
-              name="client1First"
-              defaultValue={project.client1First ?? ""}
-              aria-invalid={!!saveFieldErrors?.client1First}
-              aria-describedby={saveFieldErrors?.client1First ? "client1First-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.client1First && (
-              <p id="client1First-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client1First}</p>
-            )}
-          </div>
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client1Last">Last name</label>
-            <input
-              id="client1Last"
-              name="client1Last"
-              defaultValue={project.client1Last ?? ""}
-              aria-invalid={!!saveFieldErrors?.client1Last}
-              aria-describedby={saveFieldErrors?.client1Last ? "client1Last-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.client1Last && (
-              <p id="client1Last-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client1Last}</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Client 2 */}
-      <div className="space-y-2">
-        <span className={labelClass}>Client 2 (optional; if one name given, both required)</span>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client2First">First name</label>
-            <input
-              id="client2First"
-              name="client2First"
-              defaultValue={project.client2First ?? ""}
-              aria-invalid={!!saveFieldErrors?.client2First}
-              aria-describedby={saveFieldErrors?.client2First ? "client2First-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.client2First && (
-              <p id="client2First-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client2First}</p>
-            )}
-          </div>
-          <div>
-            <label className="mb-0.5 block text-xs text-zinc-500" htmlFor="client2Last">Last name</label>
-            <input
-              id="client2Last"
-              name="client2Last"
-              defaultValue={project.client2Last ?? ""}
-              aria-invalid={!!saveFieldErrors?.client2Last}
-              aria-describedby={saveFieldErrors?.client2Last ? "client2Last-error" : undefined}
-              className={inputClass}
-            />
-            {saveFieldErrors?.client2Last && (
-              <p id="client2Last-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{saveFieldErrors.client2Last}</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <label className={labelClass}>Objective</label>
-        <textarea
-          name="objective"
-          defaultValue={project.objective ?? ""}
-          rows={4}
-          className={inputClass}
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-      >
-        Save overview
-      </button>
     </form>
   );
 }

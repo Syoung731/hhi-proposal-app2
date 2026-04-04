@@ -13,6 +13,9 @@ import {
   getAnthropicIntegrationAction,
   saveAnthropicApiKeyAction,
   testAnthropicConnectionAction,
+  getGooglePlacesIntegrationAction,
+  saveGooglePlacesApiKeyAction,
+  testGooglePlacesConnectionAction,
 } from "./actions";
 import type { CompanySettingsForUI } from "./settings-tabs";
 
@@ -403,6 +406,77 @@ export function IntegrationsTab({ settings }: Props) {
           : anthropic?.lastStatus === "error"
             ? "error"
             : anthropic?.hasApiKey
+              ? "connected"
+              : "not_connected";
+
+  // --- Google Places state ---
+  type GooglePlacesState = Awaited<ReturnType<typeof getGooglePlacesIntegrationAction>>;
+  const [googlePlaces, setGooglePlaces] = useState<GooglePlacesState | null>(null);
+  const [googlePlacesLoading, setGooglePlacesLoading] = useState(true);
+  const [googlePlacesSaveStatus, setGooglePlacesSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [googlePlacesSaveError, setGooglePlacesSaveError] = useState<string | null>(null);
+  const [googlePlacesTestStatus, setGooglePlacesTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [googlePlacesTestResult, setGooglePlacesTestResult] = useState<string | null>(null);
+  const [googlePlacesTestError, setGooglePlacesTestError] = useState<string | null>(null);
+
+  const refreshGooglePlaces = useCallback(async () => {
+    const data = await getGooglePlacesIntegrationAction();
+    setGooglePlaces(data);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGooglePlacesIntegrationAction().then((data) => {
+      if (!cancelled) {
+        setGooglePlaces(data);
+        setGooglePlacesLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleGooglePlacesSave(formData: FormData) {
+    setGooglePlacesSaveStatus("saving");
+    setGooglePlacesSaveError(null);
+    const result = await saveGooglePlacesApiKeyAction(formData);
+    if (result.error) {
+      setGooglePlacesSaveStatus("error");
+      setGooglePlacesSaveError(result.error);
+      return;
+    }
+    setGooglePlacesSaveStatus("saved");
+    await refreshGooglePlaces();
+    router.refresh();
+    setTimeout(() => setGooglePlacesSaveStatus("idle"), 3000);
+  }
+
+  async function handleGooglePlacesTest() {
+    setGooglePlacesTestStatus("testing");
+    setGooglePlacesTestError(null);
+    setGooglePlacesTestResult(null);
+    const result = await testGooglePlacesConnectionAction();
+    if (result.ok) {
+      setGooglePlacesTestStatus("ok");
+      setGooglePlacesTestResult("Connected — Places API responding");
+      await refreshGooglePlaces();
+      router.refresh();
+    } else {
+      setGooglePlacesTestStatus("error");
+      setGooglePlacesTestError(result.error ?? "Connection failed");
+    }
+    setTimeout(() => setGooglePlacesTestStatus("idle"), 5000);
+  }
+
+  const googlePlacesBadge: "connected" | "error" | "not_connected" =
+    googlePlacesTestStatus === "ok"
+      ? "connected"
+      : googlePlacesTestStatus === "error"
+        ? "error"
+        : googlePlaces?.lastStatus === "success"
+          ? "connected"
+          : googlePlaces?.lastStatus === "error"
+            ? "error"
+            : googlePlaces?.hasApiKey
               ? "connected"
               : "not_connected";
 
@@ -946,6 +1020,115 @@ export function IntegrationsTab({ settings }: Props) {
               {anthropicTestStatus === "idle" && anthropic?.lastStatus === "success" && (
                 <span className="text-sm text-zinc-500 dark:text-zinc-400">
                   Last tested: {anthropic.lastTestedAt ? new Date(anthropic.lastTestedAt).toLocaleString() : "—"}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Google Places (address autocomplete) */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+            Google Places
+          </h3>
+          <span
+            className={
+              googlePlacesBadge === "connected"
+                ? "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-800/40 dark:text-green-200"
+                : googlePlacesBadge === "error"
+                  ? "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800/40 dark:text-red-200"
+                  : "inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+            }
+          >
+            {googlePlacesBadge === "connected"
+              ? "Connected"
+              : googlePlacesBadge === "error"
+                ? "Error"
+                : "Not Connected"}
+          </span>
+        </div>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Powers address autocomplete on the Overview tab. Paste your API key below — it is stored encrypted in the database.
+          Note: This key is loaded client-side for autocomplete, so restrict it by HTTP referrer in the Google Cloud Console.
+        </p>
+
+        {googlePlacesLoading ? (
+          <p className="text-sm text-zinc-500">Loading...</p>
+        ) : (
+          <div className="flex flex-col gap-6 rounded-xl border border-zinc-200 bg-zinc-50/50 p-6 dark:border-zinc-700 dark:bg-zinc-800/30">
+            {/* API key form */}
+            <form action={handleGooglePlacesSave} className="flex flex-col gap-4">
+              <div>
+                <label htmlFor="googlePlacesApiKey" className={labelClass}>
+                  API key
+                </label>
+                <input
+                  id="googlePlacesApiKey"
+                  name="googlePlacesApiKey"
+                  type="password"
+                  placeholder={googlePlaces?.hasApiKey ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022  (saved \u2014 paste new key to replace)" : "AIza..."}
+                  className={inputClass}
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Get a key from{" "}
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-zinc-700 dark:hover:text-zinc-200"
+                  >
+                    Google Cloud Console
+                  </a>
+                  {" "}with the <strong>Places API</strong> enabled. Leave blank to keep the existing key.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={googlePlacesSaveStatus === "saving"}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                >
+                  {googlePlacesSaveStatus === "saving" ? "Saving..." : "Save Key"}
+                </button>
+                {googlePlacesSaveStatus === "saved" && (
+                  <span className="text-sm text-green-600 dark:text-green-400">
+                    Saved successfully.
+                  </span>
+                )}
+                {googlePlacesSaveStatus === "error" && googlePlacesSaveError && (
+                  <span className="text-sm text-red-600 dark:text-red-400">
+                    {googlePlacesSaveError}
+                  </span>
+                )}
+              </div>
+            </form>
+
+            {/* Test connection */}
+            <div className="flex items-center gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={handleGooglePlacesTest}
+                disabled={googlePlacesTestStatus === "testing" || !googlePlaces?.hasApiKey}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {googlePlacesTestStatus === "testing" ? "Testing..." : "Test Connection"}
+              </button>
+              {googlePlacesTestStatus === "ok" && googlePlacesTestResult && (
+                <span className="text-sm text-green-600 dark:text-green-400">
+                  {googlePlacesTestResult}
+                </span>
+              )}
+              {googlePlacesTestStatus === "error" && googlePlacesTestError && (
+                <span className="text-sm text-red-600 dark:text-red-400">
+                  {googlePlacesTestError}
+                </span>
+              )}
+              {googlePlacesTestStatus === "idle" && googlePlaces?.lastStatus === "success" && (
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Last tested: {googlePlaces.lastTestedAt ? new Date(googlePlaces.lastTestedAt).toLocaleString() : "\u2014"}
                 </span>
               )}
             </div>

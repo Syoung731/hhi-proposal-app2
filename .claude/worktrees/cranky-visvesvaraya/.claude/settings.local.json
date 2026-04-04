@@ -93,7 +93,13 @@
       "Bash(grep -c \"Review & Estimate\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/rooms/rooms-tab.tsx)",
       "Bash(grep -n \"scopeQA\\\\|projectQA\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/tabs.tsx)",
       "Bash(find /c/Users/syoun/Desktop/hhi-proposal-app2 -name actions.ts -path */rooms/*)",
-      "Bash(npx next:*)"
+      "Bash(npx next:*)",
+      "Bash(timeout 15)",
+      "Bash(node check-orphans.mjs)",
+      "Bash(find /c/Users/syoun/Desktop/hhi-proposal-app2/app/integrations -type f -name *.ts -o -name *.tsx)",
+      "Bash(find /c/Users/syoun/Desktop/hhi-proposal-app2 -type f \\\\\\(-name *integrat* -o -name *jobtread* -o -name *anthropic* \\\\\\) -not -path */node_modules/* -not -path */.next/*)",
+      "Bash(curl http://localhost:3000/api/settings/google-places-key)",
+      "Bash(grep -n \"typeof google\" /c/Users/syoun/Desktop/hhi-proposal-app2/app/admin/projects/[id]/overview/address-autocomplete.tsx)"
     ]
   }
 }

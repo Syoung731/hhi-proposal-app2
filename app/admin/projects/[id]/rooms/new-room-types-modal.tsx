@@ -6,6 +6,7 @@ import { listSectionTypes } from "@/app/admin/settings/actions";
 import {
   bulkResolveNewRoomTypes,
   createQuickSectionTypeAction,
+  deleteRoomAction,
   type UnmatchedRoomItem,
 } from "./actions";
 
@@ -157,6 +158,7 @@ type RowState = {
   creatingNew: boolean;
   exterior: boolean;
   newName: string;
+  included: boolean;
 };
 
 type Props = {
@@ -179,6 +181,7 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
         creatingNew: false,
         exterior: false,
         newName: u.name,
+        included: true,
       };
     }
     return init;
@@ -259,10 +262,26 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
     });
   }
 
+  const allIncluded = unmatchedRooms.every((u) => rowState[u.name]?.included);
+  const noneIncluded = unmatchedRooms.every((u) => !rowState[u.name]?.included);
+
+  function toggleAllIncluded() {
+    const newValue = !allIncluded;
+    setRowState((prev) => {
+      const next = { ...prev };
+      for (const u of unmatchedRooms) {
+        if (next[u.name]) next[u.name] = { ...next[u.name]!, included: newValue };
+      }
+      return next;
+    });
+  }
+
   async function handleApply() {
     setApplying(true);
     setError(null);
-    const resolutions = unmatchedRooms.map((u) => {
+    // Only include sections that are checked
+    const includedRooms = unmatchedRooms.filter((u) => rowState[u.name]?.included);
+    const resolutions = includedRooms.map((u) => {
       const state = rowState[u.name]!;
       if (state.creatingNew) {
         return {
@@ -283,11 +302,21 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
       }
       return { name: u.name, roomIds: u.roomIds };
     });
-    const result = await bulkResolveNewRoomTypes(projectId, resolutions);
-    if (result.error) {
-      setError(result.error);
-      setApplying(false);
-      return;
+    // Delete rooms for excluded (unchecked) sections
+    const excludedRooms = unmatchedRooms.filter((u) => !rowState[u.name]?.included);
+    for (const u of excludedRooms) {
+      for (const roomId of u.roomIds) {
+        await deleteRoomAction(projectId, roomId);
+      }
+    }
+    // Apply mappings for included sections
+    if (resolutions.length > 0) {
+      const result = await bulkResolveNewRoomTypes(projectId, resolutions);
+      if (result.error) {
+        setError(result.error);
+        setApplying(false);
+        return;
+      }
     }
     router.refresh();
     onClose();
@@ -372,8 +401,17 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
             Unmatched sections
           </h2>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Map to an existing Pricing Profile or create new ones. Skip to leave sections custom (no profile).
+            Map to an existing Pricing Profile or create new ones. Uncheck sections to exclude them. Skip to leave sections custom (no profile).
           </p>
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={toggleAllIncluded}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              {allIncluded ? "Uncheck all" : "Check all"}
+            </button>
+          </div>
         </div>
         <div className="max-h-[60vh] overflow-y-auto p-4">
           {loading ? (
@@ -385,11 +423,20 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
                 return (
                   <li
                     key={u.name}
-                    className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
+                    className={`rounded-lg border p-3 ${state.included ? "border-zinc-200 dark:border-zinc-700" : "border-zinc-100 bg-zinc-50 opacity-60 dark:border-zinc-800 dark:bg-zinc-800/50"}`}
                   >
-                    <div className="mb-2 font-medium text-zinc-900 dark:text-zinc-100">
-                      {u.name}
+                    <div className="mb-2 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={state.included}
+                        onChange={(e) => setStateFor(u.name, { included: e.target.checked })}
+                        className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800"
+                      />
+                      <span className={`font-medium ${state.included ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-500 line-through dark:text-zinc-400"}`}>
+                        {u.name}
+                      </span>
                     </div>
+                    {state.included && (
                     <div className="space-y-2">
                       <div>
                         <label htmlFor={`map-${u.name}`} className={labelClass}>
@@ -462,13 +509,14 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
                                 className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
                                 onClick={() => handleOpenQuickModal(u.name)}
                               >
-                                Create profile now…
+                                Create profile now...
                               </button>
                             </div>
                           )}
                         </div>
                       </div>
                     </div>
+                    )}
                   </li>
                 );
               })}

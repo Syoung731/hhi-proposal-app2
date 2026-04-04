@@ -72,6 +72,15 @@ JUSTIFICATION REQUIRED: For EVERY line item, the "notes" field must explain:
 Good notes example: "Scope says gut to studs. 48 SF room, 9 ft ceilings, walls = 2*(8+6)*9 = 252 SF minus 21 SF door = 231 SF walls + 48 SF ceiling = 279 SF total drywall"
 Bad notes example: "Based on room size" or "Standard for renovation" — these are NOT acceptable.
 
+UNMATCHED MATERIAL ITEMS:
+  When a line item does not match any catalog item (source = AI_PRICED), estimate the price based on:
+  - The project's location (Hilton Head Island, SC) and local market rates
+  - The finish tier from the Company Context
+  - Similar items in the catalog as a reference point (but do NOT use a different material's price)
+  For example: if carpet removal is needed but only hardwood removal is in the catalog, DO NOT use the hardwood removal price. Estimate carpet removal at local market rates (typically $1.00-$2.50/SF for carpet removal on Hilton Head Island).
+  If tile removal is needed but only hardwood removal is in the catalog, estimate tile removal separately ($3.00-$5.00/SF).
+  Always note the material type and pricing basis in the notes field.
+
 SCOPE DISCIPLINE: Read the scope of work carefully.
 - If the scope says "all other fixtures to remain" then do NOT include replacement items for those fixtures.
 - If the scope says "rebuild shower" then only include shower-related items, not full bathroom renovation items.

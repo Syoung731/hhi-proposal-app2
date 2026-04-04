@@ -320,6 +320,40 @@ export async function testAnthropicConnectionAction(): Promise<{ ok: boolean; mo
 }
 
 // ---------------------------------------------------------------------------
+// Google Places integration (address autocomplete)
+// ---------------------------------------------------------------------------
+
+import {
+  getOrCreateGooglePlacesIntegration,
+  saveGooglePlacesApiKey,
+  testGooglePlacesConnection,
+} from "@/app/integrations/google-places";
+
+export async function getGooglePlacesIntegrationAction() {
+  await requireAdmin();
+  return getOrCreateGooglePlacesIntegration();
+}
+
+export async function saveGooglePlacesApiKeyAction(formData: FormData): Promise<{ error?: string }> {
+  await requireAdmin();
+  const apiKey = (formData.get("googlePlacesApiKey") as string)?.trim() ?? "";
+  if (!apiKey) return { error: "API key is required" };
+  try {
+    await saveGooglePlacesApiKey(apiKey);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to save" };
+  }
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/settings/integrations");
+  return {};
+}
+
+export async function testGooglePlacesConnectionAction(): Promise<{ ok: boolean; error?: string }> {
+  await requireAdmin();
+  return testGooglePlacesConnection();
+}
+
+// ---------------------------------------------------------------------------
 // JobTread integration (Grant Key, base URL, test connection)
 // ---------------------------------------------------------------------------
 

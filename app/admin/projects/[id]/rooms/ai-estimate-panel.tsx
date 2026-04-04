@@ -521,6 +521,9 @@ export function AIEstimatePanel({
   templates,
   refreshKey,
   estimateStaleReason,
+  onTemplateChange,
+  onReviewScope,
+  hasScopeQA,
 }: {
   projectId: string;
   roomId: string;
@@ -531,6 +534,12 @@ export function AIEstimatePanel({
   templates: RoomTemplate[];
   refreshKey?: number;
   estimateStaleReason?: string | null;
+  /** Callback when template selection changes */
+  onTemplateChange?: (templateId: string | null) => void;
+  /** Callback to open scope review modal */
+  onReviewScope?: () => void;
+  /** Whether this room already has scope QA answers */
+  hasScopeQA?: boolean;
 }) {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [loading, setLoading] = useState(false);
@@ -756,49 +765,86 @@ export function AIEstimatePanel({
 
   return (
     <div className="mt-2 rounded-lg border border-zinc-200 bg-white overflow-hidden">
-      {/* Panel Header — clean 3-line layout */}
-      <div className="flex items-start gap-3 px-3 py-2 bg-zinc-50 border-b border-zinc-200">
-        <button
-          type="button"
-          onClick={() => setExpanded((e) => !e)}
-          className="mt-1 text-zinc-400 hover:text-zinc-700 text-[10px]"
-        >
-          {expanded ? "▼" : "▶"}
-        </button>
-        <div className="flex-1 min-w-0">
-          {/* Line 1: Range (prominent) */}
-          <div className="text-base font-bold text-zinc-900 tabular-nums leading-tight">
-            {hasRange
-              ? `${fmtMoneyWhole(rangeTotals.low)} – ${fmtMoneyWhole(rangeTotals.high)}`
-              : fmtMoneyWhole(estimate.totalPrice ?? 0)
-            }
-          </div>
-          {/* Line 2: Target + items + time */}
-          <div className="text-[11px] text-zinc-500 leading-tight mt-0.5">
-            {hasRange && <>Target: {fmtMoneyWhole(estimate.totalPrice ?? 0)} · </>}
-            {sourceCounts.total} items · {timeAgo(estimate.createdAt)}
-            {estimateStaleReason && (
-              <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-700 font-medium">
-                — Stale
-              </span>
-            )}
-          </div>
-          {/* Line 3: Source breakdown */}
-          <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
-            {sourceCountParts.join(", ")}
-          </div>
-        </div>
-        {/* Right: regenerate */}
-        <div className="flex items-center gap-1.5 shrink-0">
+      {/* Panel Header */}
+      <div className="px-3 py-2 bg-zinc-50 border-b border-zinc-200">
+        {/* Top row: template + review/regenerate button */}
+        <div className="flex items-center gap-2 mb-1.5">
           <button
             type="button"
-            onClick={handleRegenerate}
-            disabled={generating}
-            className="rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-100 disabled:opacity-50"
-            title="Regenerate estimate"
+            onClick={() => setExpanded((e) => !e)}
+            className="text-zinc-400 hover:text-zinc-700 text-[10px] shrink-0"
           >
-            {generating ? "..." : "↻"}
+            {expanded ? "\u25BC" : "\u25B6"}
           </button>
+          {onTemplateChange && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] text-zinc-400">Template:</span>
+              <select
+                value={selectedTemplateId ?? ""}
+                onChange={(e) => onTemplateChange(e.target.value || null)}
+                className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                <option value="">Select...</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.displayName || t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="flex-1" />
+          {onReviewScope && (
+            <button
+              type="button"
+              onClick={onReviewScope}
+              disabled={generating}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                hasScopeQA
+                  ? "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700"
+              } disabled:opacity-50`}
+            >
+              {generating ? "Generating..." : hasScopeQA ? "Review Questions" : "Review & Estimate"}
+            </button>
+          )}
+          {!onReviewScope && (
+            <button
+              type="button"
+              onClick={handleRegenerate}
+              disabled={generating}
+              className="rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-100 disabled:opacity-50"
+              title="Regenerate estimate"
+            >
+              {generating ? "..." : "\u21BB"}
+            </button>
+          )}
+        </div>
+        {/* Price summary */}
+        <div className="flex items-start gap-3 pl-4">
+          <div className="flex-1 min-w-0">
+            {/* Line 1: Range (prominent) */}
+            <div className="text-base font-bold text-zinc-900 tabular-nums leading-tight">
+              {hasRange
+                ? `${fmtMoneyWhole(rangeTotals.low)} \u2013 ${fmtMoneyWhole(rangeTotals.high)}`
+                : fmtMoneyWhole(estimate.totalPrice ?? 0)
+              }
+            </div>
+            {/* Line 2: Target + items + time */}
+            <div className="text-[11px] text-zinc-500 leading-tight mt-0.5">
+              {hasRange && <>Target: {fmtMoneyWhole(estimate.totalPrice ?? 0)} &middot; </>}
+              {sourceCounts.total} items &middot; {timeAgo(estimate.createdAt)}
+              {estimateStaleReason && (
+                <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-700 font-medium">
+                  &mdash; Stale
+                </span>
+              )}
+            </div>
+            {/* Line 3: Source breakdown */}
+            <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
+              {sourceCountParts.join(", ")}
+            </div>
+          </div>
         </div>
       </div>
 

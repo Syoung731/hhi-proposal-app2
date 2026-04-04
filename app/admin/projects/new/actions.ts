@@ -15,12 +15,9 @@ function slugify(title: string): string {
     .replace(/[^a-z0-9-]/g, "");
 }
 
-export async function createProjectAction(formData: FormData) {
+export async function createProjectAction(formData?: FormData) {
   await requireAdmin();
-  const title = (formData.get("title") as string)?.trim();
-  if (!title) {
-    return;
-  }
+  const title = (formData?.get("title") as string)?.trim() || "Untitled Project";
   let slug = slugify(title) || "project-" + Date.now();
   const existing = await prisma.project.findUnique({ where: { slug } });
   if (existing) {

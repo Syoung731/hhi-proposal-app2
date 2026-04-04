@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
 import { ProjectStatus } from "@/app/generated/prisma";
 import { ProjectListActions } from "./project-list-actions";
+import { createProjectAction } from "./new/actions";
 
 export default async function AdminProjectsPage({
   searchParams,
@@ -37,12 +38,14 @@ export default async function AdminProjectsPage({
           >
             {includeArchived ? "Hide archived" : "Show archived"}
           </Link>
-          <Link
-            href="/admin/projects/new"
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            New project
-          </Link>
+          <form action={createProjectAction}>
+            <button
+              type="submit"
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              New project
+            </button>
+          </form>
         </div>
       </div>
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">

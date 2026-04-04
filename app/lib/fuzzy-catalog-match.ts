@@ -65,6 +65,40 @@ export function normalizeName(name: string): string {
   return result;
 }
 
+// ---------- Material type guard ----------
+
+/**
+ * Material keyword groups that must NOT cross-match.
+ * E.g., "Remove Flooring Carpet" must not match "[DMO] Remove Flooring Hardwood".
+ */
+const MATERIAL_GROUPS: string[][] = [
+  ["hardwood", "wood"],
+  ["carpet"],
+  ["tile", "ceramic", "porcelain"],
+  ["vinyl", "lvp", "lvt", "laminate"],
+  ["marble", "granite", "quartz", "stone"],
+  ["concrete"],
+  ["linoleum"],
+];
+
+function hasMaterialConflict(name1: string, name2: string): boolean {
+  const n1 = name1.toLowerCase();
+  const n2 = name2.toLowerCase();
+
+  let group1: string[] | null = null;
+  let group2: string[] | null = null;
+
+  for (const group of MATERIAL_GROUPS) {
+    if (!group1 && group.some((kw) => n1.includes(kw))) group1 = group;
+    if (!group2 && group.some((kw) => n2.includes(kw))) group2 = group;
+  }
+
+  // Conflict only when both names contain a material keyword and the groups differ
+  if (group1 && group2 && group1 !== group2) return true;
+
+  return false;
+}
+
 // ---------- Fuzzy matching ----------
 
 export function fuzzyMatch(
@@ -99,6 +133,10 @@ export function fuzzyMatch(
   }
 
   if (bestMatch) {
+    // Reject match if material types conflict (e.g., carpet vs hardwood)
+    if (hasMaterialConflict(candidateName, bestMatch.name)) {
+      return null;
+    }
     const shorterLen = Math.min(
       normalizedCandidate.length,
       normalizeName(bestMatch.name).length,

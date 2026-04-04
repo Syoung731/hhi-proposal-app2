@@ -1,5 +1,6 @@
 import { prisma } from "@/app/lib/prisma";
 import { getEffectiveProjectSF } from "@/app/lib/effective-room-sf";
+import { calculatePermitFee, type PermitFeeResult } from "@/app/lib/permit-fee-calculator";
 
 export async function getProjectAggregateData(
   projectId: string,
@@ -80,6 +81,13 @@ export async function getProjectAggregateData(
   const demoTotal = tradeBreakdown["Demo"]?.totalPrice || 0;
   const distinctTrades = Object.keys(tradeBreakdown).length;
 
+  // 7. Pre-calculate permit fees (never let the AI do this arithmetic)
+  const permitFees = calculatePermitFee(totalEstimatedPrice, {
+    hasFraming,
+    hasPlumbing,
+    hasWindows,
+  });
+
   return {
     rooms: rooms.map((r) => ({
       name: r.name,
@@ -100,6 +108,7 @@ export async function getProjectAggregateData(
     hasElectrical,
     hasWindows,
     distinctTrades,
+    permitFees,
   };
 }
 

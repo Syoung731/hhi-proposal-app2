@@ -27,32 +27,21 @@ RULES:
 
 SKIP ITEMS: Do NOT include "Final Construction Drawings" in the COPE estimate. This item is managed outside the estimating system. If it appears in the COPE template catalog, ignore it.
 
-PERMIT FEE SCHEDULE (Town of Hilton Head Island — Miscellaneous Single Family Permits):
-  Project value $0 to $1,000: permit fee = $35
-  Project value $1,001 to $2,000: permit fee = $70
-  Project value $2,001 to $3,000: permit fee = $77
-  Project value $3,001 to $50,000: permit fee = $77 + $9 per $1,000 (or fraction thereof) over $3,000
-  Project value $50,001 and above: permit fee = $500 + $3.50 per $1,000 (or fraction thereof) over $50,000
-  Plan Review Fee: 50% of the permit fee (non-refundable). Required if ANY of these conditions apply:
-    - Structural work is present (framing trade group exists in any room estimate)
-    - Plumbing is being relocated (not just fixture swaps — look for rough-in, relocation, or new supply line items)
-    - Windows are being replaced or exterior doors are being replaced
-  If Plan Review Fee applies, add it as a separate line item.
+PERMIT FEES — PRE-CALCULATED (do NOT recalculate):
+  The permit fees have been pre-calculated by the system using the Town of Hilton Head Island fee schedule.
+  The exact numbers are provided in the user prompt below. Use EXACTLY those numbers — do NOT recalculate, round, or adjust them.
 
   OUTPUT PERMIT LINE ITEMS AS THREE SEPARATE ITEMS:
 
-  1. "[ADM] Building Permit - Material": This is the actual government permit fee.
-     - Calculate from the fee schedule based on total project value.
-     - unitCost = the calculated fee (government fees have no markup)
-     - unitPrice = the calculated fee (same as cost — no markup on government fees)
+  1. "[ADM] Building Permit - Material": The actual government permit fee.
+     - unitCost and unitPrice = the pre-calculated baseFee from the user prompt (government fees, no markup)
      - source: "ALLOWANCE"
      - quantity: 1
 
-  2. "[ADM] Plan Review Fee": 50% of the permit fee. Only include if plan review is required.
-     - unitCost = permit fee x 0.5
-     - unitPrice = permit fee x 0.5 (no markup on government fees)
+  2. "[ADM] Plan Review Fee": 50% of the permit fee if required.
+     - unitCost and unitPrice = the pre-calculated planReviewFee from the user prompt (government fees, no markup)
      - source: "ALLOWANCE"
-     - quantity: 1 if required, 0 if not required
+     - quantity: 1 if required, 0 if not required (see user prompt for determination)
 
   3. "[ADM] Building Permit - Labor": Labor for someone to pick up, post, and manage the permit.
      - quantity: 2 (hours — standard for any project)
@@ -61,6 +50,7 @@ PERMIT FEE SCHEDULE (Town of Hilton Head Island — Miscellaneous Single Family 
      - source: "ALLOWANCE"
 
   CRITICAL: For government fees (Building Permit Material and Plan Review Fee), unitCost MUST equal unitPrice. There is NO markup on government fees. The cost IS the price.
+  CRITICAL: Use the EXACT dollar amounts from the user prompt. Do NOT recalculate from the fee schedule.
 
 HOA FEES:
   Many Hilton Head communities require HOA architectural review. For renovation projects, estimate:
@@ -133,7 +123,7 @@ TAG EVERY ITEM:
 
 CONFIDENCE SCORES:
   - CATALOG items: 0.95
-  - Permit fees (calculated from fee schedule): 0.85
+  - Permit fees (pre-calculated by system): 0.95
   - ALLOWANCE items (HOA fees, drawings): 0.4 to 0.6
   - Supervision and waste estimates: 0.6 to 0.75
 
@@ -242,7 +232,17 @@ ${roomSummary}
 ## Trade Summary (across all room estimates)
 ${tradeSummary}
 
-${buildProjectClarificationsSection(projectQA)}## Scope Characteristics
+${buildProjectClarificationsSection(projectQA)}## Pre-Calculated Permit Fees (use these EXACT numbers — do NOT recalculate)
+Building Permit Fee: $${aggregateData.permitFees.baseFee.toFixed(2)}
+Plan Review Fee: ${aggregateData.permitFees.planReviewRequired ? `$${aggregateData.permitFees.planReviewFee.toFixed(2)} (required: ${aggregateData.permitFees.planReviewReasons.join(", ")})` : "Not required \u2014 set quantity to 0"}
+Permit Labor: 2 hours at supervision rate ($57.50/hr price, $32.50/hr cost)
+Total Permit Cost: $${aggregateData.permitFees.totalPermitCost.toFixed(2)}
+Calculation: ${aggregateData.permitFees.calculation}
+
+For "[ADM] Building Permit - Material": unitCost = $${aggregateData.permitFees.baseFee.toFixed(2)}, unitPrice = $${aggregateData.permitFees.baseFee.toFixed(2)}
+For "[ADM] Plan Review Fee": unitCost = $${aggregateData.permitFees.planReviewFee.toFixed(2)}, unitPrice = $${aggregateData.permitFees.planReviewFee.toFixed(2)}${aggregateData.permitFees.planReviewRequired ? "" : ", quantity = 0"}
+
+## Scope Characteristics
 - Structural work (framing): ${aggregateData.hasFraming ? "Yes" : "No"}
 - Plumbing work: ${plumbingNote}
 - Electrical work: ${aggregateData.hasElectrical ? "Yes" : "No"}
