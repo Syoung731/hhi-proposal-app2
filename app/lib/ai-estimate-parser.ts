@@ -66,6 +66,96 @@ function extractJSON(raw: string): string {
   return raw.trim();
 }
 
+/**
+ * Attempt to repair truncated or malformed JSON.
+ *
+ * Walks backward from the truncation point to find the last complete
+ * JSON value boundary, then closes all unclosed brackets/braces.
+ * Works for deeply nested structures like AI estimate responses.
+ */
+function repairJSON(broken: string): string {
+  let s = broken.trim();
+
+  // Step 1: Find and trim to the last complete JSON value.
+  // Walk backward to find the last char that ends a complete value:
+  //   " (end of string), digit (end of number), } ] true false null
+  // Then trim everything after it that's an incomplete value.
+
+  // First, handle if we're inside an unclosed string — find the opening quote
+  // and truncate to just before the incomplete key-value pair
+  let inStr = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    if (escaped) { escaped = false; continue; }
+    if (s[i] === "\\") { escaped = true; continue; }
+    if (s[i] === '"') inStr = !inStr;
+  }
+
+  if (inStr) {
+    // We're inside an unclosed string. Find the last opening " and check context.
+    // Walk backward to find the unmatched opening quote
+    let quotePos = s.length - 1;
+    while (quotePos >= 0 && s[quotePos] !== '"') quotePos--;
+    if (quotePos >= 0) {
+      // Check if this is a value string or a key string
+      // If preceded by : it's a value — truncate the incomplete value
+      const before = s.slice(0, quotePos).trimEnd();
+      if (before.endsWith(":")) {
+        // Incomplete value string — remove the whole key: "value pair
+        // Find the comma or bracket before the key
+        const keyStart = before.lastIndexOf('"');
+        if (keyStart >= 0) {
+          s = s.slice(0, keyStart).trimEnd();
+          // Remove trailing comma
+          if (s.endsWith(",")) s = s.slice(0, -1);
+        } else {
+          s = s.slice(0, quotePos) + '""';
+        }
+      } else {
+        // Incomplete key or standalone string — close it
+        s = s.slice(0, quotePos + 1);
+      }
+    }
+  }
+
+  // Step 2: Remove trailing incomplete tokens (partial numbers, partial keywords)
+  // Trim trailing chars that aren't valid JSON value endings
+  s = s.replace(/,\s*"[^"]*"\s*:\s*$/, ""); // trailing `,"key":`
+  s = s.replace(/,\s*"[^"]*"?\s*$/, "");     // trailing `,"partial...`
+  s = s.replace(/,\s*$/, "");                 // trailing comma
+  s = s.replace(/:\s*$/, ": null");           // trailing colon with no value
+
+  // Step 3: Count unclosed brackets/braces
+  let braces = 0;
+  let brackets = 0;
+  inStr = false;
+  escaped = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") braces++;
+    else if (ch === "}") braces--;
+    else if (ch === "[") brackets++;
+    else if (ch === "]") brackets--;
+  }
+
+  // Handle still being in a string after our repairs
+  if (inStr) s += '"';
+
+  // Clean trailing commas one more time
+  s = s.replace(/,\s*$/, "");
+
+  // Step 4: Close unclosed brackets (arrays first, then objects)
+  while (brackets > 0) { s += "]"; brackets--; }
+  while (braces > 0) { s += "}"; braces--; }
+
+  return s;
+}
+
 // ---------- Parser ----------
 
 export function parseEstimateResponse(
@@ -78,7 +168,15 @@ export function parseEstimateResponse(
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
-    throw new Error(`Failed to parse AI estimate JSON: ${jsonStr.slice(0, 200)}...`);
+    // Attempt JSON repair for truncated responses
+    try {
+      const repaired = repairJSON(jsonStr);
+      parsed = JSON.parse(repaired);
+      // eslint-disable-next-line no-console
+      console.warn("[ai-estimate-parser] Repaired truncated JSON successfully");
+    } catch {
+      throw new Error(`Failed to parse AI estimate JSON: ${jsonStr.slice(0, 200)}...`);
+    }
   }
 
   if (!parsed.tradeGroups || !Array.isArray(parsed.tradeGroups)) {

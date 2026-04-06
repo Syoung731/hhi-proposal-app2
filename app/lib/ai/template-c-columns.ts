@@ -1,11 +1,6 @@
 import "server-only";
-import OpenAI from "openai";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+import { callClaude } from "@/app/lib/ai/model";
+import { stripJsonFences } from "@/app/lib/ai/parse-json";
 
 export type TemplateCColumnSuggestion = {
   title: string;
@@ -75,24 +70,23 @@ ${iconJson}
 
 Return JSON: { "columns": [ { "title": "...", "description": "...", "iconId": "..." | null }, ... ], "subtitle": "4-10 word executive summary line" } with exactly 3 column items and one subtitle string.`;
 
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 2048,
     temperature: 0.4,
+    system: systemContent,
     messages: [
-      { role: "system", content: systemContent },
       { role: "user", content: userContent },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = response.content[0]?.type === "text" ? response.content[0].text : null;
   if (!content) {
     throw new Error("No AI response for Template C columns.");
   }
 
   let parsed: { columns?: unknown[] };
   try {
-    parsed = JSON.parse(content) as { columns?: unknown[] };
+    parsed = JSON.parse(stripJsonFences(content)) as { columns?: unknown[] };
   } catch (e) {
     const truncated = typeof content === "string" ? content.slice(0, 400) : String(content).slice(0, 400);
     // eslint-disable-next-line no-console
@@ -165,22 +159,21 @@ ${JSON.stringify(iconList)}
 
 Return JSON: { "column": { "title": "...", "description": "...", "iconId": "..." | null } }`;
 
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 1024,
     temperature: 0.4,
+    system: systemContent,
     messages: [
-      { role: "system", content: systemContent },
       { role: "user", content: userContent },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = response.content[0]?.type === "text" ? response.content[0].text : null;
   if (!content) throw new Error("No AI response for Template C column.");
 
   let parsed: { column?: Record<string, unknown> };
   try {
-    parsed = JSON.parse(content) as { column?: Record<string, unknown> };
+    parsed = JSON.parse(stripJsonFences(content)) as { column?: Record<string, unknown> };
   } catch {
     throw new Error("AI returned invalid JSON for Template C column.");
   }

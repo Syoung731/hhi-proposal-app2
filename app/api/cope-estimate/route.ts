@@ -4,7 +4,7 @@ import { prisma } from "@/app/lib/prisma";
 import { getProjectAggregateData } from "@/app/lib/cope-aggregate-data";
 import { COPE_SYSTEM_PROMPT, buildCopeUserPrompt } from "@/app/lib/cope-estimate-prompt";
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
-import { getAnthropicApiKey } from "@/app/integrations/anthropic";
+import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 
@@ -93,19 +93,9 @@ export async function POST(request: NextRequest) {
     const projectQA = project?.projectQA as import("@/app/lib/cope-estimate-prompt").ProjectQAData | null;
     const userPrompt = buildCopeUserPrompt(aggregateData, copeTemplate, companyContext, projectQA);
 
-    // Call Claude API
-    const apiKey = await getAnthropicApiKey();
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Anthropic API key not configured — add it in Settings > Integrations" },
-        { status: 500 },
-      );
-    }
-
-    const anthropic = new Anthropic({ apiKey });
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 8000,
+    // Call Claude with automatic model fallback
+    const response = await streamClaude({
+      max_tokens: 64000,
       temperature: 0.2,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],

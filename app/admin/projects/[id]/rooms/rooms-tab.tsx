@@ -19,6 +19,7 @@ import {
   updateRoomPricingTierAction,
   updateRoomManualPriceAction,
   updateProjectDefaultCeilingHeightAction,
+  updateRoomTemplateAction,
 } from "./actions";
 import { updateProjectStylePresetAction } from "../overview/actions";
 import { getRoomTypes } from "@/app/admin/settings/actions";
@@ -601,6 +602,7 @@ type Room = {
   unitRateHigh?: number | null;
   scopeQA?: unknown;
   estimateStaleReason?: string | null;
+  roomTemplateId?: string | null;
   subAreas?: {
     id: string;
     name: string;
@@ -745,7 +747,8 @@ function RoomDimensionsRow({
       formData.set("origin", room.origin ?? "MANUAL");
       formData.set("bucket", room.bucket ?? "BASE");
       formData.set("measurementMode", room.measurementMode ?? "");
-      formData.set("areaSqFt", room.areaSqFt != null ? String(room.areaSqFt) : "");
+      // Don't send old areaSqFt — let the server recalculate from new dimensions
+      formData.set("areaSqFt", "");
       formData.set("quantity", room.quantity != null ? String(room.quantity) : "");
       formData.set("estimateUnit", room.estimateUnit ?? "");
       formData.set("customUnitLabel", room.customUnitLabel ?? "");
@@ -1122,10 +1125,10 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           .filter((t: RoomTemplateOption) => t.active)
           .map((t: RoomTemplateOption) => ({ id: t.id, name: t.name, displayName: t.displayName, active: t.active }));
         setRoomTemplates(templates);
-        // Auto-match templates for rooms
+        // Use saved roomTemplateId if available, otherwise auto-match by name
         const matches: Record<string, string | null> = {};
         for (const room of initialRooms) {
-          matches[room.id] = autoMatchTemplate(room.name, templates);
+          matches[room.id] = room.roomTemplateId ?? autoMatchTemplate(room.name, templates);
         }
         setSelectedTemplates((prev) => ({ ...matches, ...prev }));
       })
@@ -1360,7 +1363,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
             type="button"
             onClick={() => setShowBulkEstimateModal(true)}
             disabled={!rooms.length}
-            className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+            className="rounded-lg border px-4 py-2 text-sm font-medium text-brand-accent disabled:opacity-50" style={{ borderColor: "var(--brand-accent-spinner-track)", backgroundColor: "var(--brand-accent-lighter)" }}
           >
             Generate AI Estimates
           </button>
@@ -1453,7 +1456,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       {showBulkEstimateModal && (
         <BulkReviewAndEstimateModal
           projectId={projectId}
-          rooms={rooms.filter((r) => !r.isProjectOverhead).map((r) => ({ id: r.id, name: r.name, scopeNarrative: r.scopeNarrative, scopeQA: r.scopeQA, isProjectOverhead: false }))}
+          rooms={rooms.filter((r) => !r.isProjectOverhead).map((r) => ({ id: r.id, name: r.name, scopeNarrative: r.scopeNarrative, scopeQA: r.scopeQA, isProjectOverhead: false, estimateStaleReason: r.estimateStaleReason ?? null, roomTemplateId: r.roomTemplateId ?? null }))}
           roomTemplates={roomTemplates}
           selectedTemplates={selectedTemplates}
           projectQA={projectQA}
@@ -1473,7 +1476,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           room={room}
           roomTemplates={roomTemplates}
           selectedTemplateId={selectedTemplates[room.id] ?? null}
-          onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
+          onTemplateChange={(roomId, templateId) => { setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId })); updateRoomTemplateAction(projectId, roomId, templateId); }}
           estimateRefreshKey={estimateRefreshKey}
           otherRoomsHaveEstimates={rooms.some((r) => !r.isProjectOverhead && r.pricingTier === "AI_ESTIMATE")}
           onEstimateGenerated={() => { setEstimateRefreshKey((k) => k + 1); router.refresh(); }}
@@ -1509,7 +1512,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               onRewriteScope={() => handleRewriteScope(room.id)}
               roomTemplates={roomTemplates}
               selectedTemplateId={selectedTemplates[room.id] ?? null}
-              onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
+              onTemplateChange={(roomId, templateId) => { setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId })); updateRoomTemplateAction(projectId, roomId, templateId); }}
               estimateRefreshKey={estimateRefreshKey}
               onReviewScope={() => setReviewingRoomId(room.id)}
             />
@@ -1554,7 +1557,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   onRewriteScope={() => handleRewriteScope(room.id)}
                   roomTemplates={roomTemplates}
                   selectedTemplateId={selectedTemplates[room.id] ?? null}
-                  onTemplateChange={(roomId, templateId) => setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId }))}
+                  onTemplateChange={(roomId, templateId) => { setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId })); updateRoomTemplateAction(projectId, roomId, templateId); }}
                   estimateRefreshKey={estimateRefreshKey}
                   onReviewScope={() => setReviewingRoomId(room.id)}
                 />

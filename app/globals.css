@@ -3,11 +3,19 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --brand-accent: #F47216;
+  --brand-text: #1A2332;
+  --brand-accent-hover: color-mix(in srgb, var(--brand-accent) 85%, black);
+  --brand-accent-light: color-mix(in srgb, var(--brand-accent) 15%, white);
+  --brand-accent-lighter: color-mix(in srgb, var(--brand-accent) 8%, white);
+  --brand-accent-spinner-track: color-mix(in srgb, var(--brand-accent) 25%, white);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-text: var(--brand-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

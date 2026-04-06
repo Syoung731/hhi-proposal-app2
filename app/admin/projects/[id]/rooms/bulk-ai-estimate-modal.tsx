@@ -269,7 +269,7 @@ export function BulkAiEstimateModal({
                     <td className="py-1.5 text-center">
                       {row.status === "pending" && <span className="text-zinc-300">—</span>}
                       {row.status === "generating" && (
-                        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+                        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--brand-accent-spinner-track)] border-t-brand-accent" />
                       )}
                       {row.status === "done" && <span className="text-green-600 font-bold">&#10003;</span>}
                       {row.status === "error" && (
@@ -338,11 +338,12 @@ export function BulkAiEstimateModal({
                 disabled={running || checkedCount === 0}
                 className={`rounded-lg px-5 py-2 text-sm font-semibold shadow-sm ${
                   running
-                    ? "bg-indigo-500 text-white cursor-wait"
+                    ? "text-white cursor-wait"
                     : checkedCount === 0
                       ? "bg-zinc-300 text-zinc-500 cursor-not-allowed"
-                      : "bg-indigo-600 text-white hover:bg-indigo-700"
+                      : "text-white"
                 }`}
+                style={checkedCount > 0 ? { backgroundColor: "var(--brand-accent)" } : undefined}
               >
                 {running ? (
                   <span className="flex items-center gap-2">

@@ -24,7 +24,6 @@ export const SETTINGS_TABS: { slug: string; label: string }[] = [
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
   { slug: "ai-pricing", label: "AI Pricing" },
-  { slug: "dev-integrations", label: "DEV Integrations" },
 ];
 
 export type BrandIconForUI = {
@@ -88,6 +87,9 @@ export type CompanySettingsForUI = {
   integrationsJson: unknown;
   roomTypeLowPct: number | null;
   roomTypeHighPct: number | null;
+  anthropicModel: string | null;
+  geminiImageModel: string | null;
+  geminiImageGenModel: string | null;
 };
 
 export type RoomTypeForUI = {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/app/lib/prisma";
-import { getAnthropicApiKey } from "@/app/integrations/anthropic";
+import { callClaude } from "@/app/lib/ai/model";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
 
 /**
@@ -58,9 +58,10 @@ Return this JSON structure:
 const PROJECT_REVIEW_SYSTEM_PROMPT = `You are a construction project reviewer for HHI Builders. Review the overall project and generate questions that affect project-level overhead (COPE — Cost of Project Execution).
 
 RULES:
-1. Return ONLY valid JSON.
+1. Return ONLY valid JSON. No markdown, no explanation, no preamble.
 2. Generate 3-12 questions about project-level concerns.
-3. Focus on information that affects: permits, HOA, waste removal, content manipulation, supervision, and access.
+3. Each question must have a smart default answer.
+4. Focus on information that affects: permits, HOA, waste removal, content manipulation, supervision, and access.
 
 QUESTION CATEGORIES:
 1. HOA: Does this community have an HOA? Is architectural review required?
@@ -71,7 +72,28 @@ QUESTION CATEGORIES:
 6. DURATION: Any timeline constraints or phasing requirements?
 7. SITE CONDITIONS: Parking restrictions? Material staging area? Neighbor sensitivity?
 
-Same JSON format as room-level questions.`;
+QUESTION TYPES:
+- "number": Numeric answer with optional unit
+- "boolean": Yes/No question
+- "choice": Multiple choice from provided options
+- "text": Short free-text answer
+
+For each question, provide ALL of these fields:
+- id: unique identifier (e.g. "hoa_001")
+- question: clear, specific question text
+- reason: brief explanation of WHY this affects the COPE estimate (shown to user as helper text)
+- type: one of "number", "boolean", "choice", "text"
+- unit: for number types, the unit (e.g. "weeks", "count"). null for other types.
+- defaultAnswer: your best guess for the most common answer on Hilton Head Island
+- options: for "choice" type, array of option strings. null for other types.
+
+Return this JSON structure:
+{
+  "questions": [
+    { "id": "hoa_001", "question": "...", "reason": "...", "type": "boolean", "unit": null, "defaultAnswer": true, "options": null },
+    { "id": "access_001", "question": "...", "reason": "...", "type": "choice", "unit": null, "defaultAnswer": "Standard residential", "options": ["Standard residential", "Gated community", "High-rise/elevator", "Island/limited access"] }
+  ]
+}`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -90,20 +112,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing projectId or roomIds" }, { status: 400 });
     }
 
-    const apiKey = await getAnthropicApiKey();
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Anthropic API key not configured" },
-        { status: 500 },
-      );
-    }
-
-    const anthropic = new Anthropic({ apiKey });
-
     // Run all room reviews + project review in parallel
     const roomPromises = roomIds.map(async (roomId) => {
       try {
-        const questions = await generateRoomQuestions(anthropic, roomId, projectId);
+        const questions = await generateRoomQuestions(roomId, projectId);
         return { roomId, questions, error: null };
       } catch (err) {
         return { roomId, questions: [], error: err instanceof Error ? err.message : "Failed" };
@@ -111,7 +123,7 @@ export async function POST(request: NextRequest) {
     });
 
     const projectPromise = includeProject
-      ? generateProjectQuestions(anthropic, projectId)
+      ? generateProjectQuestions(projectId)
           .then((questions) => ({ questions, error: null }))
           .catch((err) => ({ questions: [], error: err instanceof Error ? err.message : "Failed" }))
       : null;
@@ -143,7 +155,6 @@ export async function POST(request: NextRequest) {
 // ---------- Room-level question generation ----------
 
 async function generateRoomQuestions(
-  anthropic: Anthropic,
   roomId: string,
   projectId: string,
 ): Promise<unknown[]> {
@@ -214,8 +225,7 @@ ${existingSection}
 
 Generate questions as JSON.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+  const response = await callClaude({
     max_tokens: 4000,
     temperature: 0.3,
     system: ROOM_REVIEW_SYSTEM_PROMPT,
@@ -234,7 +244,6 @@ Generate questions as JSON.`;
 // ---------- Project-level question generation ----------
 
 async function generateProjectQuestions(
-  anthropic: Anthropic,
   projectId: string,
 ): Promise<unknown[]> {
   const [project, companyContext] = await Promise.all([
@@ -280,8 +289,7 @@ ${existingSection}
 
 Generate questions as JSON.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+  const response = await callClaude({
     max_tokens: 4000,
     temperature: 0.3,
     system: PROJECT_REVIEW_SYSTEM_PROMPT,

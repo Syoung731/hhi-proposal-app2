@@ -442,6 +442,9 @@ model CompanySettings {
   integrationsJson       Json?
   roomTypeLowPct         Float?   // default -10 in UI; low = target * (1 + lowPct/100)
   roomTypeHighPct        Float?   // default +10 in UI; high = target * (1 + highPct/100)
+  anthropicModel         String?  // selected Claude model ID (e.g. "claude-sonnet-4-6")
+  geminiImageModel       String?  // Gemini image/vision model (e.g. "gemini-2.5-flash-image")
+  geminiImageGenModel    String?  // Gemini text-to-image Imagen model (e.g. "imagen-4.0-fast-generate-001")
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 }

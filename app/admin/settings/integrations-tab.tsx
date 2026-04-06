@@ -13,6 +13,11 @@ import {
   getAnthropicIntegrationAction,
   saveAnthropicApiKeyAction,
   testAnthropicConnectionAction,
+  saveAnthropicModelAction,
+  getGeminiIntegrationAction,
+  saveGeminiApiKeyAction,
+  testGeminiConnectionAction,
+  saveGeminiModelsAction,
   getGooglePlacesIntegrationAction,
   saveGooglePlacesApiKeyAction,
   testGooglePlacesConnectionAction,
@@ -348,6 +353,43 @@ export function IntegrationsTab({ settings }: Props) {
   const [anthropicTestResult, setAnthropicTestResult] = useState<string | null>(null);
   const [anthropicTestError, setAnthropicTestError] = useState<string | null>(null);
 
+  // Model selector state
+  type ModelOption = { id: string; displayName: string; maxTokens: number; maxInputTokens: number; description: string; tier: string };
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>(settings.anthropicModel || "claude-sonnet-4-6");
+  const [modelSaveStatus, setModelSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
+
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const res = await fetch("/api/settings/anthropic-models");
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setModelOptions(data.models ?? []);
+    } catch (err) {
+      setModelsError(err instanceof Error ? err.message : "Failed to load models");
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+
+  async function handleModelSave() {
+    setModelSaveStatus("saving");
+    setModelSaveError(null);
+    const result = await saveAnthropicModelAction(selectedModel);
+    if (result.error) {
+      setModelSaveStatus("error");
+      setModelSaveError(result.error);
+    } else {
+      setModelSaveStatus("saved");
+      setTimeout(() => setModelSaveStatus("idle"), 3000);
+    }
+  }
+
   const refreshAnthropic = useCallback(async () => {
     const data = await getAnthropicIntegrationAction();
     setAnthropic(data);
@@ -359,6 +401,7 @@ export function IntegrationsTab({ settings }: Props) {
       if (!cancelled) {
         setAnthropic(data);
         setAnthropicLoading(false);
+        if (data?.hasApiKey) fetchModels();
       }
     });
     return () => { cancelled = true; };
@@ -406,6 +449,113 @@ export function IntegrationsTab({ settings }: Props) {
           : anthropic?.lastStatus === "error"
             ? "error"
             : anthropic?.hasApiKey
+              ? "connected"
+              : "not_connected";
+
+  // --- Google Gemini state ---
+  type GeminiState = Awaited<ReturnType<typeof getGeminiIntegrationAction>>;
+  const [gemini, setGemini] = useState<GeminiState | null>(null);
+  const [geminiLoading, setGeminiLoading] = useState(true);
+  const [geminiSaveStatus, setGeminiSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [geminiSaveError, setGeminiSaveError] = useState<string | null>(null);
+  const [geminiTestStatus, setGeminiTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [geminiTestResult, setGeminiTestResult] = useState<string | null>(null);
+  const [geminiTestError, setGeminiTestError] = useState<string | null>(null);
+
+  type GeminiModelOption = { id: string; displayName: string; description: string; category: string; inputTokenLimit: number; outputTokenLimit: number };
+  const [geminiModelOptions, setGeminiModelOptions] = useState<GeminiModelOption[]>([]);
+  const [geminiModelsLoading, setGeminiModelsLoading] = useState(false);
+  const [geminiModelsError, setGeminiModelsError] = useState<string | null>(null);
+  const [selectedGeminiImageModel, setSelectedGeminiImageModel] = useState<string>(settings.geminiImageModel || "gemini-2.5-flash-image");
+  const [selectedGeminiImageGenModel, setSelectedGeminiImageGenModel] = useState<string>(settings.geminiImageGenModel || "imagen-4.0-fast-generate-001");
+  const [geminiModelSaveStatus, setGeminiModelSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [geminiModelSaveError, setGeminiModelSaveError] = useState<string | null>(null);
+
+  const fetchGeminiModels = useCallback(async () => {
+    setGeminiModelsLoading(true);
+    setGeminiModelsError(null);
+    try {
+      const res = await fetch("/api/settings/gemini-models");
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setGeminiModelOptions(data.models ?? []);
+    } catch (err) {
+      setGeminiModelsError(err instanceof Error ? err.message : "Failed to load models");
+    } finally {
+      setGeminiModelsLoading(false);
+    }
+  }, []);
+
+  const refreshGemini = useCallback(async () => {
+    const data = await getGeminiIntegrationAction();
+    setGemini(data);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGeminiIntegrationAction().then((data) => {
+      if (!cancelled) {
+        setGemini(data);
+        setGeminiLoading(false);
+        if (data?.hasApiKey) fetchGeminiModels();
+      }
+    });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleGeminiSave(formData: FormData) {
+    setGeminiSaveStatus("saving");
+    setGeminiSaveError(null);
+    const result = await saveGeminiApiKeyAction(formData);
+    if (result.error) {
+      setGeminiSaveStatus("error");
+      setGeminiSaveError(result.error);
+    } else {
+      setGeminiSaveStatus("saved");
+      await refreshGemini();
+      fetchGeminiModels();
+      setTimeout(() => setGeminiSaveStatus("idle"), 3000);
+    }
+  }
+
+  async function handleGeminiTest() {
+    setGeminiTestStatus("testing");
+    setGeminiTestResult(null);
+    setGeminiTestError(null);
+    const result = await testGeminiConnectionAction();
+    if (result.ok) {
+      setGeminiTestStatus("ok");
+      setGeminiTestResult(result.model ?? "Connected");
+      await refreshGemini();
+    } else {
+      setGeminiTestStatus("error");
+      setGeminiTestError(result.error ?? "Connection failed");
+    }
+  }
+
+  async function handleGeminiModelSave() {
+    setGeminiModelSaveStatus("saving");
+    setGeminiModelSaveError(null);
+    const result = await saveGeminiModelsAction(selectedGeminiImageModel, selectedGeminiImageGenModel);
+    if (result.error) {
+      setGeminiModelSaveStatus("error");
+      setGeminiModelSaveError(result.error);
+    } else {
+      setGeminiModelSaveStatus("saved");
+      setTimeout(() => setGeminiModelSaveStatus("idle"), 3000);
+    }
+  }
+
+  const geminiBadge =
+    geminiTestStatus === "ok"
+      ? "connected"
+      : geminiTestStatus === "error"
+        ? "error"
+        : gemini?.lastStatus === "success"
+          ? "connected"
+          : gemini?.lastStatus === "error"
+            ? "error"
+            : gemini?.hasApiKey
               ? "connected"
               : "not_connected";
 
@@ -609,312 +759,6 @@ export function IntegrationsTab({ settings }: Props) {
                 )}
               </div>
             </form>
-
-            {/* C. Metadata / debug block */}
-            <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-600 dark:bg-zinc-900/50">
-              <h4 className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Integration metadata
-              </h4>
-              <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-zinc-500 dark:text-zinc-400">Provider</dt>
-                  <dd className="font-mono text-zinc-900 dark:text-zinc-100">jobtread</dd>
-                </div>
-                <div>
-                  <dt className="text-zinc-500 dark:text-zinc-400">Base URL</dt>
-                  <dd className="break-all font-mono text-zinc-900 dark:text-zinc-100">
-                    {jobTread?.apiBaseUrl || "None"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-zinc-500 dark:text-zinc-400">Secret stored</dt>
-                  <dd className="text-zinc-900 dark:text-zinc-100">
-                    {jobTread?.hasGrantKey ? "Yes" : "No"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-zinc-500 dark:text-zinc-400">Last status</dt>
-                  <dd className="text-zinc-900 dark:text-zinc-100">
-                    {jobTread?.lastStatus ?? "Never"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-zinc-500 dark:text-zinc-400">Last tested</dt>
-                  <dd className="text-zinc-900 dark:text-zinc-100">
-                    {jobTread?.lastTestedAt
-                      ? new Date(jobTread.lastTestedAt).toLocaleString()
-                      : "Never"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-zinc-500 dark:text-zinc-400">Last message</dt>
-                  <dd className="text-zinc-900 dark:text-zinc-100">
-                    {jobTread?.lastMessage?.trim() || "None"}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            {/* D. Test Job Sync */}
-            <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-600 dark:bg-zinc-900/50">
-              <h4 className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Test job sync
-              </h4>
-              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
-                Sync one JobTread job budget into the app. Enter a job ID and run sync.
-              </p>
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="min-w-[200px]">
-                  <label htmlFor="testJobId" className={labelClass}>
-                    Test job ID
-                  </label>
-                  <input
-                    id="testJobId"
-                    type="text"
-                    value={testJobId}
-                    onChange={(e) => setTestJobId(e.target.value)}
-                    placeholder={DEFAULT_TEST_JOB_ID}
-                    className={inputClass}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRunSync}
-                  disabled={syncStatus === "running" || !jobTread?.hasGrantKey}
-                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                >
-                  {syncStatus === "running" ? "Syncing…" : "Run sync"}
-                </button>
-              </div>
-              {syncStatus === "ok" && syncResult && (
-                <div className="mt-3 rounded border border-green-200 bg-green-50 p-3 text-sm dark:border-green-800 dark:bg-green-900/20">
-                  <p className="font-medium text-green-800 dark:text-green-200">Sync completed</p>
-                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-green-700 dark:text-green-300 sm:grid-cols-4">
-                    <span>jobId: {syncResult.jobId}</span>
-                    <span>Rows: {syncResult.rowCount}</span>
-                    <span>Sell: {syncResult.officialSell}</span>
-                    <span>Cost: {syncResult.officialCost}</span>
-                  </dl>
-                  <p className="mt-1 text-xs text-green-600 dark:text-green-400">Status: {syncResult.status}</p>
-                </div>
-              )}
-              {syncStatus === "error" && syncError && (
-                <p className="mt-3 text-sm text-red-600 dark:text-red-400">
-                  {syncError}
-                </p>
-              )}
-            </div>
-
-            {/* E. Synced budget inspector */}
-            <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-600 dark:bg-zinc-900/50">
-              <h4 className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Synced budget inspector
-              </h4>
-              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
-                Inspect synced budget data for the test job above. Uses the same job ID as the sync field.
-              </p>
-              <button
-                type="button"
-                onClick={() => loadInspector(testJobId)}
-                disabled={inspectorLoading || !testJobId.trim()}
-                className="mb-4 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                {inspectorLoading ? "Loading…" : "Load synced budget"}
-              </button>
-
-              {inspectorLoading && (
-                <p className="text-sm text-zinc-500">Loading…</p>
-              )}
-
-              {!inspectorLoading && inspectorData && !inspectorData.summary && (
-                <div className="rounded border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-400">
-                  No synced data for this job yet. Run a sync above, then load again to inspect the results.
-                </div>
-              )}
-
-              {!inspectorLoading && inspectorData?.summary && (
-                <>
-                  <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-600 dark:bg-zinc-800/30">
-                    <h5 className="mb-3 text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                      Sync summary
-                    </h5>
-                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Job name</dt>
-                        <dd className="font-medium text-zinc-900 dark:text-zinc-100">{inspectorData.summary.jobName}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Job ID</dt>
-                        <dd className="font-mono text-zinc-900 dark:text-zinc-100">{inspectorData.summary.jobId}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Job number</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.jobNumber ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Last synced</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">
-                          {inspectorData.summary.lastSyncedAt
-                            ? new Date(inspectorData.summary.lastSyncedAt).toLocaleString()
-                            : "—"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Status</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.lastSyncStatus ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Message</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.lastSyncMessage ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Row count</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.lastRowCount}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Official sell</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.officialSellTotal}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Official cost</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.officialCostTotal}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Source summary sell</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.sourceSummarySell ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-zinc-500 dark:text-zinc-400">Source summary cost</dt>
-                        <dd className="text-zinc-900 dark:text-zinc-100">{inspectorData.summary.sourceSummaryCost ?? "—"}</dd>
-                      </div>
-                    </dl>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <h5 className="mb-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                      First 25 rows
-                    </h5>
-                    <table className="min-w-full border-collapse text-sm">
-                      <thead>
-                        <tr className="border-b border-zinc-200 dark:border-zinc-600">
-                          <th className="px-2 py-1.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">Group</th>
-                          <th className="px-2 py-1.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">Item</th>
-                          <th className="px-2 py-1.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">Cost code</th>
-                          <th className="px-2 py-1.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">Cost type</th>
-                          <th className="px-2 py-1.5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400">Qty</th>
-                          <th className="px-2 py-1.5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400">Unit cost</th>
-                          <th className="px-2 py-1.5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400">Unit price</th>
-                          <th className="px-2 py-1.5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400">Ext cost</th>
-                          <th className="px-2 py-1.5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400">Ext sell</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {inspectorData.rows.map((row) => (
-                          <tr key={row.id} className="border-b border-zinc-100 dark:border-zinc-700">
-                            <td className="px-2 py-1.5 text-zinc-900 dark:text-zinc-100">{row.groupName ?? "—"}</td>
-                            <td className="px-2 py-1.5 text-zinc-900 dark:text-zinc-100">{row.itemName}</td>
-                            <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{row.costCode ?? "—"}</td>
-                            <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{row.costType ?? "—"}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-zinc-700 dark:text-zinc-300">{row.quantity ?? "—"}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-zinc-700 dark:text-zinc-300">{row.unitCost ?? "—"}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-zinc-700 dark:text-zinc-300">{row.unitPrice ?? "—"}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-zinc-900 dark:text-zinc-100">{row.extCost}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-zinc-900 dark:text-zinc-100">{row.extSell}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {inspectorData.summary.lastRowCount > 25 && (
-                      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                        Showing first 25 of {inspectorData.summary.lastRowCount} rows.
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* F. Dev-only: Paste budget export text */}
-            {isDev && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-800 dark:bg-amber-900/10">
-                <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                  Paste JobTread budget export (Dev Only)
-                </h4>
-                <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
-                  Paste the DataX-style budget export text here, then click Parse &amp; Sync to run through the canonical sync. For development and testing only.
-                </p>
-                <textarea
-                  value={budgetTextDraft}
-                  onChange={(e) => setBudgetTextDraft(e.target.value)}
-                  placeholder="Paste DataX-style export (Job: ... Summary: ... group headings and - item lines)"
-                  rows={8}
-                  className="mb-3 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                  spellCheck={false}
-                />
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handlePasteSync}
-                    disabled={pasteSyncStatus === "running" || !budgetTextDraft.trim()}
-                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                  >
-                    {pasteSyncStatus === "running" ? "Parsing & syncing…" : "Parse & sync budget text"}
-                  </button>
-                  {pasteSyncStatus === "ok" && pasteSyncResult && (
-                    <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-900/20">
-                      <span className="font-medium text-green-800 dark:text-green-200">Synced:</span>{" "}
-                      {pasteSyncResult.jobId} · {pasteSyncResult.rowCount} rows · Sell {pasteSyncResult.officialSell} · Cost {pasteSyncResult.officialCost}
-                    </div>
-                  )}
-                  {pasteSyncStatus === "error" && pasteSyncError && (
-                    <p className="text-sm text-red-600 dark:text-red-400">
-                      {pasteSyncError}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* G. Dev-only: Paste budget JSON */}
-            {isDev && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-800 dark:bg-amber-900/10">
-                <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                  Paste JobTread budget JSON (Dev Only)
-                </h4>
-                <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
-                  Paste budget-shaped JSON (jobId, jobName, groups, items) here, then click Parse &amp; Sync to run through the same canonical sync as text import.
-                </p>
-                <textarea
-                  value={budgetJsonDraft}
-                  onChange={(e) => setBudgetJsonDraft(e.target.value)}
-                  placeholder='{"jobId":"...","jobName":"...","groups":[],"items":[{...}]}'
-                  rows={8}
-                  className="mb-3 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                  spellCheck={false}
-                />
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handlePasteJsonSync}
-                    disabled={pasteJsonSyncStatus === "running" || !budgetJsonDraft.trim()}
-                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                  >
-                    {pasteJsonSyncStatus === "running" ? "Parsing & syncing…" : "Parse & sync budget JSON"}
-                  </button>
-                  {pasteJsonSyncStatus === "ok" && pasteJsonSyncResult && (
-                    <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-900/20">
-                      <span className="font-medium text-green-800 dark:text-green-200">Synced:</span>{" "}
-                      {pasteJsonSyncResult.jobId} · {pasteJsonSyncResult.rowCount} rows · Sell {pasteJsonSyncResult.officialSell} · Cost {pasteJsonSyncResult.officialCost}
-                    </div>
-                  )}
-                  {pasteJsonSyncStatus === "error" && pasteJsonSyncError && (
-                    <p className="text-sm text-red-600 dark:text-red-400">
-                      {pasteJsonSyncError}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </section>
@@ -997,6 +841,80 @@ export function IntegrationsTab({ settings }: Props) {
               </div>
             </form>
 
+            {/* AI Model selector */}
+            {anthropic?.hasApiKey && (
+              <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="anthropicModel" className={labelClass}>
+                    AI Model
+                  </label>
+                  <button
+                    type="button"
+                    onClick={fetchModels}
+                    disabled={modelsLoading}
+                    className="text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 underline"
+                  >
+                    {modelsLoading ? "Loading…" : "Refresh models"}
+                  </button>
+                </div>
+
+                {modelsError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{modelsError}</p>
+                )}
+
+                <select
+                  id="anthropicModel"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className={inputClass}
+                  disabled={modelsLoading}
+                >
+                  {modelOptions.length === 0 && (
+                    <option value={selectedModel}>{selectedModel}</option>
+                  )}
+                  {modelOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName} — {m.maxInputTokens >= 1000000 ? "1M" : `${Math.round(m.maxInputTokens / 1000)}K`} context, {Math.round(m.maxTokens / 1000)}K output
+                    </option>
+                  ))}
+                </select>
+
+                {(() => {
+                  const sel = modelOptions.find((m) => m.id === selectedModel);
+                  if (!sel) return null;
+                  return (
+                    <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium mr-2 ${
+                        sel.tier === "flagship" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                        : sel.tier === "fast" ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                        : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                      }`}>
+                        {sel.tier === "flagship" ? "Flagship" : sel.tier === "fast" ? "Fast" : "Balanced"}
+                      </span>
+                      {sel.description}
+                    </div>
+                  );
+                })()}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleModelSave}
+                    disabled={modelSaveStatus === "saving" || selectedModel === (settings.anthropicModel || "claude-sonnet-4-6")}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  >
+                    {modelSaveStatus === "saving" ? "Saving…" : "Save Model"}
+                  </button>
+                  {modelSaveStatus === "saved" && (
+                    <span className="text-sm text-green-600 dark:text-green-400">Model saved.</span>
+                  )}
+                  {modelSaveStatus === "error" && modelSaveError && (
+                    <span className="text-sm text-red-600 dark:text-red-400">{modelSaveError}</span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Test connection */}
             <div className="flex items-center gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
               <button
@@ -1020,6 +938,132 @@ export function IntegrationsTab({ settings }: Props) {
               {anthropicTestStatus === "idle" && anthropic?.lastStatus === "success" && (
                 <span className="text-sm text-zinc-500 dark:text-zinc-400">
                   Last tested: {anthropic.lastTestedAt ? new Date(anthropic.lastTestedAt).toLocaleString() : "—"}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Google Gemini (AI Images) */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+            Google Gemini (AI Images)
+          </h3>
+          <span
+            className={
+              geminiBadge === "connected"
+                ? "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-800/40 dark:text-green-200"
+                : geminiBadge === "error"
+                  ? "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800/40 dark:text-red-200"
+                  : "inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+            }
+          >
+            {geminiBadge === "connected" ? "Connected" : geminiBadge === "error" ? "Error" : "Not Connected"}
+          </span>
+        </div>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Powers room rendering, slide background generation, and brand icon creation.
+        </p>
+
+        {geminiLoading ? (
+          <p className="text-sm text-zinc-500">Loading…</p>
+        ) : (
+          <div className="flex flex-col gap-6 rounded-xl border border-zinc-200 bg-zinc-50/50 p-6 dark:border-zinc-700 dark:bg-zinc-800/30">
+            {/* API key form */}
+            <form action={handleGeminiSave} className="flex flex-col gap-4">
+              <div>
+                <label htmlFor="geminiApiKey" className={labelClass}>API key</label>
+                <input
+                  id="geminiApiKey"
+                  name="geminiApiKey"
+                  type="password"
+                  placeholder={gemini?.hasApiKey ? "••••••••  (saved — paste new key to replace)" : "AIza..."}
+                  className={inputClass}
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Get a key from{" "}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="underline hover:text-zinc-700 dark:hover:text-zinc-200">
+                    Google AI Studio
+                  </a>. Leave blank to keep the existing key.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button type="submit" disabled={geminiSaveStatus === "saving"} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+                  {geminiSaveStatus === "saving" ? "Saving…" : "Save Key"}
+                </button>
+                {geminiSaveStatus === "saved" && <span className="text-sm text-green-600 dark:text-green-400">Saved successfully.</span>}
+                {geminiSaveStatus === "error" && geminiSaveError && <span className="text-sm text-red-600 dark:text-red-400">{geminiSaveError}</span>}
+              </div>
+            </form>
+
+            {/* Model selectors */}
+            {gemini?.hasApiKey && (
+              <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className={labelClass}>AI Models</span>
+                  <button type="button" onClick={fetchGeminiModels} disabled={geminiModelsLoading} className="text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 underline">
+                    {geminiModelsLoading ? "Loading…" : "Refresh models"}
+                  </button>
+                </div>
+                {geminiModelsError && <p className="text-xs text-red-600 dark:text-red-400">{geminiModelsError}</p>}
+
+                {/* Image Model */}
+                <div className="space-y-1">
+                  <label htmlFor="geminiImageModel" className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Image Model (rendering, vision, editing)</label>
+                  <select id="geminiImageModel" value={selectedGeminiImageModel} onChange={(e) => setSelectedGeminiImageModel(e.target.value)} className={inputClass} disabled={geminiModelsLoading}>
+                    {geminiModelOptions.filter((m) => m.category === "image").length === 0 && (
+                      <option value={selectedGeminiImageModel}>{selectedGeminiImageModel}</option>
+                    )}
+                    {geminiModelOptions.filter((m) => m.category === "image").map((m) => (
+                      <option key={m.id} value={m.id}>{m.displayName}</option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const sel = geminiModelOptions.find((m) => m.id === selectedGeminiImageModel);
+                    return sel ? <p className="text-xs text-zinc-500 dark:text-zinc-400">{sel.description}</p> : null;
+                  })()}
+                </div>
+
+                {/* Imagen Model */}
+                <div className="space-y-1">
+                  <label htmlFor="geminiImageGenModel" className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Image Generation Model (text-to-image, slide backgrounds)</label>
+                  <select id="geminiImageGenModel" value={selectedGeminiImageGenModel} onChange={(e) => setSelectedGeminiImageGenModel(e.target.value)} className={inputClass} disabled={geminiModelsLoading}>
+                    {geminiModelOptions.filter((m) => m.category === "imagen").length === 0 && (
+                      <option value={selectedGeminiImageGenModel}>{selectedGeminiImageGenModel}</option>
+                    )}
+                    {geminiModelOptions.filter((m) => m.category === "imagen").map((m) => (
+                      <option key={m.id} value={m.id}>{m.displayName}</option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const sel = geminiModelOptions.find((m) => m.id === selectedGeminiImageGenModel);
+                    return sel ? <p className="text-xs text-zinc-500 dark:text-zinc-400">{sel.description}</p> : null;
+                  })()}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={handleGeminiModelSave} disabled={geminiModelSaveStatus === "saving"} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+                    {geminiModelSaveStatus === "saving" ? "Saving…" : "Save Models"}
+                  </button>
+                  {geminiModelSaveStatus === "saved" && <span className="text-sm text-green-600 dark:text-green-400">Models saved.</span>}
+                  {geminiModelSaveStatus === "error" && geminiModelSaveError && <span className="text-sm text-red-600 dark:text-red-400">{geminiModelSaveError}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* Test connection */}
+            <div className="flex items-center gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+              <button type="button" onClick={handleGeminiTest} disabled={geminiTestStatus === "testing" || !gemini?.hasApiKey} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+                {geminiTestStatus === "testing" ? "Testing…" : "Test Connection"}
+              </button>
+              {geminiTestStatus === "ok" && geminiTestResult && <span className="text-sm text-green-600 dark:text-green-400">{geminiTestResult}</span>}
+              {geminiTestStatus === "error" && geminiTestError && <span className="text-sm text-red-600 dark:text-red-400">{geminiTestError}</span>}
+              {geminiTestStatus === "idle" && gemini?.lastStatus === "success" && (
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Last tested: {gemini.lastTestedAt ? new Date(gemini.lastTestedAt).toLocaleString() : "—"}
                 </span>
               )}
             </div>
@@ -1136,46 +1180,6 @@ export function IntegrationsTab({ settings }: Props) {
         )}
       </section>
 
-      {/* Generic integrations JSON (existing) */}
-      <section className="space-y-4">
-        <h3 className="text-base font-medium text-zinc-800 dark:text-zinc-200">
-          Other integrations (JSON)
-        </h3>
-        <form action={handleIntegrationsSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="integrationsJson" className={labelClass}>
-              Integrations config (JSON)
-            </label>
-            <textarea
-              id="integrationsJson"
-              name="integrationsJson"
-              rows={12}
-              defaultValue={integrationsJsonString}
-              className="w-full max-w-2xl rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-              spellCheck={false}
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={status === "saving"}
-              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              {status === "saving" ? "Saving…" : "Save"}
-            </button>
-            {status === "saved" && (
-              <span className="text-sm text-green-600 dark:text-green-400">
-                Saved successfully.
-              </span>
-            )}
-            {status === "error" && errorMessage && (
-              <span className="text-sm text-red-600 dark:text-red-400">
-                {errorMessage}
-              </span>
-            )}
-          </div>
-        </form>
-      </section>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/app/lib/prisma";
 import { SYSTEM_PROMPT, buildUserPrompt, type ProjectContext, type RoomDimensions } from "@/app/lib/ai-estimate-prompt";
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
-import { getAnthropicApiKey } from "@/app/integrations/anthropic";
+import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 
 // ---------- POST — Regenerate estimate (creates a new one) ----------
@@ -90,16 +90,8 @@ export async function POST(
       roomDimensions,
     );
 
-    const apiKey = await getAnthropicApiKey();
-    if (!apiKey) {
-      return NextResponse.json({ error: "Anthropic API key not configured — add it in Settings > Integrations" }, { status: 500 });
-    }
-
-    const anthropic = new Anthropic({ apiKey });
-
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 16000,
+    const response = await streamClaude({
+      max_tokens: 64000,
       temperature: 0.2,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
@@ -115,10 +107,8 @@ export async function POST(
     }
 
     if (response.stop_reason === "max_tokens") {
-      return NextResponse.json(
-        { error: "AI response was truncated (max_tokens reached). Try a narrower scope." },
-        { status: 502 },
-      );
+      // eslint-disable-next-line no-console
+      console.warn("[ai-estimate/regenerate] Response truncated (max_tokens) — attempting repair parse");
     }
 
     const parsedEstimate = parseEstimateResponse(rawText, catalogItems);

@@ -11,6 +11,8 @@ type Room = {
   scopeNarrative: string;
   scopeQA: unknown;
   isProjectOverhead: boolean;
+  estimateStaleReason?: string | null;
+  roomTemplateId?: string | null;
 };
 
 type RoomTemplateOption = {
@@ -20,7 +22,7 @@ type RoomTemplateOption = {
   active: boolean;
 };
 
-type Phase = "review" | "generating" | "done";
+type Phase = "select" | "review" | "generating" | "done";
 
 type RoomGenStatus = "pending" | "generating" | "done" | "error" | "skipped";
 
@@ -32,6 +34,66 @@ type RoomGenRow = {
   status: RoomGenStatus;
   error?: string;
 };
+
+type SelectRow = {
+  roomId: string;
+  roomName: string;
+  hasScope: boolean;
+  hasEstimate: boolean;
+  isStale: boolean;
+  templateId: string | null;
+  checked: boolean;
+};
+
+// ---------- Answer merge helper ----------
+
+/**
+ * Merge an existing saved answer into a newly generated question.
+ * Only reuses the old answer if:
+ * 1. The question text matches exactly (not just ID — IDs like q1/q2 get reused)
+ * 2. For choice questions, the old answer is one of the current options
+ * 3. For boolean questions, the old answer is a valid boolean
+ * Otherwise falls back to the AI's defaultAnswer.
+ */
+function mergeAnswer(
+  newQ: ReviewQuestion,
+  existingQuestions: ReviewQuestion[] | undefined,
+): unknown {
+  if (!existingQuestions?.length) return newQ.defaultAnswer;
+
+  // Only match on question text (IDs like q1, q2 get reused across different question sets)
+  const match = existingQuestions.find(
+    (eq) => eq.question === newQ.question,
+  );
+  if (!match || match.answer == null) return newQ.defaultAnswer;
+
+  // Validate the old answer still fits the new question's type/options
+  const answer = match.answer;
+  const qType = newQ.type || "text";
+
+  if (qType === "choice" && newQ.options?.length) {
+    // For choice: old answer must be one of the current options
+    if (typeof answer === "string" && newQ.options.includes(answer)) return answer;
+    return newQ.defaultAnswer;
+  }
+
+  if (qType === "boolean") {
+    if (typeof answer === "boolean") return answer;
+    const s = String(answer).toLowerCase().trim();
+    if (s === "yes" || s === "true") return true;
+    if (s === "no" || s === "false") return false;
+    return newQ.defaultAnswer;
+  }
+
+  if (qType === "number") {
+    const n = Number(answer);
+    if (!isNaN(n)) return n;
+    return newQ.defaultAnswer;
+  }
+
+  // text type: accept any string
+  return answer;
+}
 
 // ---------- Template auto-matching ----------
 
@@ -69,44 +131,121 @@ export function BulkReviewAndEstimateModal({
   projectQA: unknown;
   onClose: () => void;
 }) {
-  const [phase, setPhase] = useState<Phase>("review");
+  const [phase, setPhase] = useState<Phase>("select");
 
-  // --- Phase 1: QA Review state ---
-  const [loadingQuestions, setLoadingQuestions] = useState(true);
+  // Filter to non-COPE rooms
+  const estimateRooms = rooms.filter((r) => !r.isProjectOverhead);
+
+  // --- Select phase state ---
+  const [selectRows, setSelectRows] = useState<SelectRow[]>([]);
+  const [selectLoading, setSelectLoading] = useState(true);
+  const [includeCope, setIncludeCope] = useState(true);
+
+  // --- Review phase state ---
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Per-room questions: { roomId: ReviewQuestion[] }
   const [roomQuestions, setRoomQuestions] = useState<Record<string, ReviewQuestion[]>>({});
   const [projectQuestions, setProjectQuestions] = useState<ReviewQuestion[]>([]);
-  // Collapsed sections
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
-  // --- Phase 2: Generation state ---
+  // --- Generation phase state ---
   const [genRows, setGenRows] = useState<RoomGenRow[]>([]);
   const [genProgress, setGenProgress] = useState({ current: 0, total: 0 });
   const [copeStatus, setCopeStatus] = useState<RoomGenStatus>("pending");
   const [copeError, setCopeError] = useState<string | null>(null);
 
-  // Filter to non-COPE rooms with scope
-  const estimateRooms = rooms.filter((r) => !r.isProjectOverhead);
-
-  // ==================== Phase 1: Load Questions ====================
+  // ==================== Select Phase: Init rows ====================
 
   useEffect(() => {
-    async function fetchQuestions() {
-      setLoadingQuestions(true);
-      setLoadError(null);
-      try {
-        const roomIds = estimateRooms
-          .filter((r) => r.scopeNarrative?.trim())
-          .map((r) => r.id);
+    async function init() {
+      const checks = await Promise.all(
+        estimateRooms.map(async (room) => {
+          try {
+            const res = await fetch(`/api/ai-estimate?projectId=${projectId}&sectionId=${room.id}`);
+            const data = await res.json();
+            return { roomId: room.id, hasEstimate: !!data.estimate };
+          } catch {
+            return { roomId: room.id, hasEstimate: false };
+          }
+        })
+      );
+      const checkMap = new Map(checks.map((c) => [c.roomId, c.hasEstimate]));
 
+      setSelectRows(
+        estimateRooms.map((room) => ({
+          roomId: room.id,
+          roomName: room.name,
+          hasScope: !!room.scopeNarrative?.trim(),
+          hasEstimate: checkMap.get(room.id) ?? false,
+          isStale: !!room.estimateStaleReason,
+          templateId: selectedTemplates[room.id] ?? room.roomTemplateId ?? autoMatchTemplate(room.name, roomTemplates),
+          checked: true,
+        }))
+      );
+      setSelectLoading(false);
+    }
+    init();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleSelectRow(roomId: string) {
+    setSelectRows((prev) => prev.map((r) => r.roomId === roomId ? { ...r, checked: !r.checked } : r));
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectRows((prev) => prev.map((r) => ({ ...r, checked })));
+  }
+
+  function setSelectTemplate(roomId: string, templateId: string | null) {
+    setSelectRows((prev) => prev.map((r) => r.roomId === roomId ? { ...r, templateId } : r));
+  }
+
+  const checkedSelectCount = selectRows.filter((r) => r.checked).length;
+
+  // ==================== Transition: Select → Review ====================
+
+  async function handleContinueToReview() {
+    setPhase("review");
+    setLoadingQuestions(true);
+    setLoadError(null);
+    try {
+      const checkedRows = selectRows.filter((r) => r.checked && r.hasScope);
+
+      // Only request new AI review for rooms that are stale or have no saved QA.
+      // Rooms with existing non-stale QA keep their saved answers.
+      const roomsNeedingReview = checkedRows.filter((r) => {
+        const room = estimateRooms.find((er) => er.id === r.roomId);
+        const existingQA = room?.scopeQA as { questions?: ReviewQuestion[] } | null;
+        const hasAnswers = (existingQA?.questions?.length ?? 0) > 0;
+        return r.isStale || !hasAnswers;
+      });
+
+      const roomIdsForReview = roomsNeedingReview.map((r) => r.roomId);
+
+      // Also check if project QA needs review
+      const existingProjectQA = projectQA as { questions?: ReviewQuestion[] } | null;
+      const projectNeedsReview = !(existingProjectQA?.questions?.length);
+
+      const newRoomQuestions: Record<string, ReviewQuestion[]> = {};
+
+      // For rooms with existing non-stale answers, use them directly
+      for (const sr of checkedRows) {
+        if (roomIdsForReview.includes(sr.roomId)) continue;
+        const room = estimateRooms.find((r) => r.id === sr.roomId);
+        const existingQA = room?.scopeQA as { questions?: ReviewQuestion[] } | null;
+        if (existingQA?.questions?.length) {
+          newRoomQuestions[sr.roomId] = existingQA.questions;
+        }
+      }
+
+      // Fetch new questions only for rooms that need review
+      if (roomIdsForReview.length > 0 || projectNeedsReview) {
         const res = await fetch("/api/ai-review/batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             projectId,
-            roomIds,
-            includeProject: true,
+            roomIds: roomIdsForReview,
+            includeProject: projectNeedsReview,
           }),
         });
 
@@ -117,49 +256,55 @@ export function BulkReviewAndEstimateModal({
 
         const data = await res.json();
 
-        // Merge fetched questions with existing answers
-        const newRoomQuestions: Record<string, ReviewQuestion[]> = {};
-        for (const room of estimateRooms) {
-          const fetched = (data.rooms?.[room.id]?.questions ?? []) as ReviewQuestion[];
+        // Merge fetched questions with existing answers (validated)
+        for (const roomId of roomIdsForReview) {
+          const room = estimateRooms.find((r) => r.id === roomId);
+          if (!room) continue;
+          const fetched = (data.rooms?.[roomId]?.questions ?? []) as ReviewQuestion[];
           const existingQA = room.scopeQA as { questions?: ReviewQuestion[] } | null;
 
-          newRoomQuestions[room.id] = fetched.map((q: ReviewQuestion) => {
-            const existing = existingQA?.questions?.find(
-              (eq) => eq.id === q.id || eq.question === q.question,
-            );
-            return {
-              ...q,
-              answer: existing?.answer ?? q.defaultAnswer,
-            };
-          });
+          newRoomQuestions[roomId] = fetched.map((q: ReviewQuestion) => ({
+            ...q,
+            answer: mergeAnswer(q, existingQA?.questions),
+          }));
         }
-        setRoomQuestions(newRoomQuestions);
 
         // Project questions
-        const fetchedProjectQ = (data.project?.questions ?? []) as ReviewQuestion[];
-        const existingProjectQA = projectQA as { questions?: ReviewQuestion[] } | null;
-        setProjectQuestions(
-          fetchedProjectQ.map((q: ReviewQuestion) => {
-            const existing = existingProjectQA?.questions?.find(
-              (eq) => eq.id === q.id || eq.question === q.question,
-            );
-            return {
+        if (projectNeedsReview) {
+          const fetchedProjectQ = (data.project?.questions ?? []) as ReviewQuestion[];
+          setProjectQuestions(
+            fetchedProjectQ.map((q: ReviewQuestion) => ({
               ...q,
-              answer: existing?.answer ?? q.defaultAnswer,
-            };
-          }),
-        );
-      } catch (err) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load questions");
-      } finally {
-        setLoadingQuestions(false);
+              answer: mergeAnswer(q, existingProjectQA?.questions),
+            })),
+          );
+        } else if (existingProjectQA?.questions?.length) {
+          setProjectQuestions(existingProjectQA.questions);
+        }
+      } else {
+        // All rooms have existing answers, no API call needed
+        if (existingProjectQA?.questions?.length) {
+          setProjectQuestions(existingProjectQA.questions);
+        }
       }
+
+      setRoomQuestions(newRoomQuestions);
+
+      // Auto-collapse rooms that have existing non-stale answers (no new questions to review)
+      const roomsWithExistingAnswers = checkedRows
+        .filter((r) => !roomIdsForReview.includes(r.roomId))
+        .map((r) => r.roomId);
+      if (roomsWithExistingAnswers.length > 0) {
+        setCollapsedSections(new Set(roomsWithExistingAnswers));
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load questions");
+    } finally {
+      setLoadingQuestions(false);
     }
+  }
 
-    fetchQuestions();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ==================== Phase 1: QA handlers ====================
+  // ==================== Review Phase: QA handlers ====================
 
   function updateRoomAnswer(roomId: string, questionId: string, value: unknown) {
     setRoomQuestions((prev) => ({
@@ -185,12 +330,12 @@ export function BulkReviewAndEstimateModal({
     });
   }
 
+  const checkedRooms = selectRows.filter((r) => r.checked);
   const totalQuestions = Object.values(roomQuestions).reduce((s, qs) => s + qs.length, 0) + projectQuestions.length;
 
-  // ==================== Phase 2: Save QA + Generate ====================
+  // ==================== Generate Phase: Save QA + Generate ====================
 
   const handleConfirmAndGenerate = useCallback(async (useDefaults: boolean) => {
-    // 1. Prepare questions (apply defaults if requested)
     const finalRoomQuestions = { ...roomQuestions };
     if (useDefaults) {
       for (const roomId of Object.keys(finalRoomQuestions)) {
@@ -205,12 +350,12 @@ export function BulkReviewAndEstimateModal({
       ? projectQuestions.map((q) => ({ ...q, answer: q.answer ?? q.defaultAnswer }))
       : projectQuestions;
 
-    // 2. Build generation rows
-    const rows: RoomGenRow[] = estimateRooms.map((room) => ({
-      roomId: room.id,
-      roomName: room.name,
-      templateId: selectedTemplates[room.id] ?? autoMatchTemplate(room.name, roomTemplates),
-      hasScope: !!room.scopeNarrative?.trim(),
+    // Build generation rows from select phase selections
+    const rows: RoomGenRow[] = checkedRooms.map((sr) => ({
+      roomId: sr.roomId,
+      roomName: sr.roomName,
+      templateId: sr.templateId,
+      hasScope: sr.hasScope,
       status: "pending" as const,
     }));
     setGenRows(rows);
@@ -218,18 +363,18 @@ export function BulkReviewAndEstimateModal({
     setCopeError(null);
     setPhase("generating");
 
-    // 3. Save all QA answers in parallel
+    // Save all QA answers in parallel
     const savePromises: Promise<void>[] = [];
 
-    for (const room of estimateRooms) {
-      const questions = finalRoomQuestions[room.id];
+    for (const sr of checkedRooms) {
+      const questions = finalRoomQuestions[sr.roomId];
       if (questions && questions.length > 0) {
         savePromises.push(
           fetch("/api/ai-review/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              roomId: room.id,
+              roomId: sr.roomId,
               projectId,
               level: "room",
               questions,
@@ -255,7 +400,7 @@ export function BulkReviewAndEstimateModal({
 
     await Promise.allSettled(savePromises);
 
-    // 4. Generate estimates sequentially
+    // Generate estimates sequentially
     const toProcess = rows.filter((r) => r.hasScope && r.templateId);
     setGenProgress({ current: 0, total: toProcess.length });
 
@@ -308,46 +453,60 @@ export function BulkReviewAndEstimateModal({
       }),
     );
 
-    // 5. Generate COPE
-    setCopeStatus("generating");
-    try {
-      const copeRes = await fetch("/api/cope-estimate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
-      });
-      if (!copeRes.ok) {
-        const data = await copeRes.json().catch(() => ({ error: "Request failed" }));
-        throw new Error(data.error || `HTTP ${copeRes.status}`);
+    // Generate COPE if checked
+    if (includeCope) {
+      setCopeStatus("generating");
+      try {
+        const copeRes = await fetch("/api/cope-estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId }),
+        });
+        if (!copeRes.ok) {
+          const data = await copeRes.json().catch(() => ({ error: "Request failed" }));
+          throw new Error(data.error || `HTTP ${copeRes.status}`);
+        }
+        setCopeStatus("done");
+      } catch (err) {
+        setCopeStatus("error");
+        setCopeError(err instanceof Error ? err.message : "COPE estimate failed");
       }
-      setCopeStatus("done");
-    } catch (err) {
-      setCopeStatus("error");
-      setCopeError(err instanceof Error ? err.message : "COPE estimate failed");
+    } else {
+      setCopeStatus("skipped");
     }
 
     setPhase("done");
-  }, [roomQuestions, projectQuestions, estimateRooms, selectedTemplates, roomTemplates, projectId]);
+  }, [roomQuestions, projectQuestions, checkedRooms, estimateRooms, projectId, includeCope]);
 
   // ==================== Render ====================
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
     >
-      <div className="flex w-full max-w-3xl max-h-[85vh] flex-col rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+      <div
+        className="flex w-full max-w-3xl flex-col rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        style={{ maxHeight: "calc(100vh - 2rem)" }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3 dark:border-zinc-700">
           <div>
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              {phase === "review"
-                ? "Review & Generate Estimates"
-                : phase === "generating"
-                  ? "Generating Estimates"
-                  : "Estimates Complete"}
+              {phase === "select"
+                ? "Generate AI Estimates"
+                : phase === "review"
+                  ? "Review & Generate Estimates"
+                  : phase === "generating"
+                    ? "Generating Estimates"
+                    : "Estimates Complete"}
             </h2>
+            {phase === "select" && !selectLoading && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Select rooms and assign templates
+              </p>
+            )}
             {phase === "review" && !loadingQuestions && (
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 {totalQuestions > 0
@@ -368,17 +527,92 @@ export function BulkReviewAndEstimateModal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+
+          {/* ========== Select Phase ========== */}
+          {phase === "select" && (
+            <>
+              {selectLoading ? (
+                <p className="text-sm text-zinc-500 py-8 text-center">Loading rooms...</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-200 text-left text-[10px] uppercase tracking-wider text-zinc-400">
+                      <th className="pb-2 pr-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={selectRows.length > 0 && selectRows.every((r) => r.checked)}
+                          onChange={(e) => toggleSelectAll(e.target.checked)}
+                          className="h-3 w-3"
+                          style={{ accentColor: "var(--brand-accent)" }}
+                        />
+                      </th>
+                      <th className="pb-2 pr-2">Room</th>
+                      <th className="pb-2 pr-2 w-44">Template</th>
+                      <th className="pb-2 pr-2 w-16 text-center">Scope</th>
+                      <th className="pb-2 w-20 text-center">Estimate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectRows.map((row) => (
+                      <tr key={row.roomId} className="border-b border-zinc-50 hover:bg-zinc-50/50">
+                        <td className="py-1.5 pr-2">
+                          <input
+                            type="checkbox"
+                            checked={row.checked}
+                            onChange={() => toggleSelectRow(row.roomId)}
+                            className="h-3 w-3"
+                            style={{ accentColor: "var(--brand-accent)" }}
+                          />
+                        </td>
+                        <td className="py-1.5 pr-2 font-medium text-zinc-800">{row.roomName}</td>
+                        <td className="py-1.5 pr-2">
+                          <select
+                            value={row.templateId ?? ""}
+                            onChange={(e) => setSelectTemplate(row.roomId, e.target.value || null)}
+                            className={`w-full rounded border px-1.5 py-0.5 text-xs ${!row.templateId ? "border-red-300 bg-red-50" : "border-zinc-300 bg-white"}`}
+                          >
+                            <option value="">Select template...</option>
+                            {roomTemplates.map((t) => (
+                              <option key={t.id} value={t.id}>{t.displayName || t.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-1.5 pr-2 text-center">
+                          {row.hasScope ? (
+                            <span className="text-green-600" title="Has scope narrative">&#10003;</span>
+                          ) : (
+                            <span className="text-red-400" title="No scope narrative">&#10007;</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 text-center">
+                          {row.hasEstimate && row.isStale ? (
+                            <span className="inline-flex items-center rounded bg-red-50 px-1 py-px text-[10px] font-medium text-red-600 border border-red-200">stale</span>
+                          ) : row.hasEstimate ? (
+                            <span className="inline-flex items-center rounded bg-amber-50 px-1 py-px text-[10px] font-medium text-amber-600 border border-amber-200">exists</span>
+                          ) : (
+                            <span className="text-zinc-300">&mdash;</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+
+          {/* ========== Review Phase ========== */}
           {phase === "review" && (
             <>
               {loadingQuestions && (
                 <div className="flex flex-col items-center justify-center py-16">
-                  <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+                  <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2" style={{ borderColor: "var(--brand-accent-spinner-track)", borderTopColor: "var(--brand-accent)" }} />
                   <p className="text-sm text-zinc-500 dark:text-zinc-400">
                     Reviewing all scopes...
                   </p>
                   <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                    Generating questions for {estimateRooms.filter((r) => r.scopeNarrative?.trim()).length} rooms + project overhead
+                    Generating questions for {checkedRooms.filter((r) => r.hasScope).length} rooms + project overhead
                   </p>
                 </div>
               )}
@@ -391,10 +625,13 @@ export function BulkReviewAndEstimateModal({
 
               {!loadingQuestions && !loadError && (
                 <div className="space-y-4">
-                  {/* Room sections */}
-                  {estimateRooms.map((room) => {
+                  {/* Room sections — only checked rooms */}
+                  {checkedRooms.map((sr) => {
+                    const room = estimateRooms.find((r) => r.id === sr.roomId);
+                    if (!room) return null;
                     const questions = roomQuestions[room.id] ?? [];
                     const isCollapsed = collapsedSections.has(room.id);
+                    const hasSavedAnswers = !sr.isStale && ((room.scopeQA as { questions?: unknown[] } | null)?.questions?.length ?? 0) > 0;
 
                     return (
                       <div
@@ -419,12 +656,17 @@ export function BulkReviewAndEstimateModal({
                                 : ""}
                             </span>
                           </div>
-                          {!room.scopeNarrative?.trim() && (
+                          {hasSavedAnswers && (
+                            <span className="text-xs text-green-600 dark:text-green-400">
+                              ✓ Previously answered — using saved
+                            </span>
+                          )}
+                          {!hasSavedAnswers && !room.scopeNarrative?.trim() && (
                             <span className="text-xs text-amber-600 dark:text-amber-400">
                               No scope
                             </span>
                           )}
-                          {room.scopeNarrative?.trim() && questions.length === 0 && (
+                          {!hasSavedAnswers && room.scopeNarrative?.trim() && questions.length === 0 && (
                             <span className="text-xs text-green-600 dark:text-green-400">
                               Scope complete
                             </span>
@@ -439,7 +681,7 @@ export function BulkReviewAndEstimateModal({
                                 className="rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-800/30"
                               >
                                 <div className="mb-1 flex items-start gap-2">
-                                  <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-medium text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
+                                  <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-medium text-brand-accent" style={{ backgroundColor: "var(--brand-accent-light)" }}>
                                     {idx + 1}
                                   </span>
                                   <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
@@ -447,7 +689,7 @@ export function BulkReviewAndEstimateModal({
                                   </p>
                                 </div>
                                 <p className="mb-2 ml-6 text-[11px] text-zinc-500 dark:text-zinc-400">
-                                  {q.reason}
+                                  {q.reason || ((q as unknown as Record<string, string>).impact) || ""}
                                 </p>
                                 <div className="ml-6">
                                   <QuestionInput
@@ -500,7 +742,7 @@ export function BulkReviewAndEstimateModal({
                                 </p>
                               </div>
                               <p className="mb-2 ml-6 text-[11px] text-zinc-500 dark:text-zinc-400">
-                                {q.reason}
+                                {q.reason || ((q as unknown as Record<string, string>).impact) || ""}
                               </p>
                               <div className="ml-6">
                                 <QuestionInput
@@ -519,7 +761,7 @@ export function BulkReviewAndEstimateModal({
             </>
           )}
 
-          {/* Phase 2: Generation Progress */}
+          {/* ========== Generation Progress ========== */}
           {(phase === "generating" || phase === "done") && (
             <div className="space-y-2">
               {genRows.map((row) => (
@@ -535,7 +777,7 @@ export function BulkReviewAndEstimateModal({
                       <span className="text-xs text-zinc-400">&middot;</span>
                     )}
                     {row.status === "generating" && (
-                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2" style={{ borderColor: "var(--brand-accent-spinner-track)", borderTopColor: "var(--brand-accent)" }} />
                     )}
                     {row.status === "done" && (
                       <span className="text-sm text-green-600 font-bold">&#10003;</span>
@@ -561,37 +803,59 @@ export function BulkReviewAndEstimateModal({
               ))}
 
               {/* COPE row */}
-              <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/30 px-4 py-2 dark:border-amber-800 dark:bg-amber-900/10">
-                <span className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                  Project Overhead (COPE)
-                </span>
-                <div className="flex items-center gap-2">
-                  {copeStatus === "pending" && (
-                    <span className="text-xs text-zinc-400">&middot;</span>
-                  )}
-                  {copeStatus === "generating" && (
-                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-200 border-t-amber-600" />
-                  )}
-                  {copeStatus === "done" && (
-                    <span className="text-sm text-green-600 font-bold">&#10003;</span>
-                  )}
-                  {copeStatus === "error" && (
-                    <span
-                      className="text-sm text-red-500 cursor-help"
-                      title={copeError ?? undefined}
-                    >
-                      &#10007; {copeError}
-                    </span>
-                  )}
+              {includeCope && (
+                <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/30 px-4 py-2 dark:border-amber-800 dark:bg-amber-900/10">
+                  <span className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                    Project Overhead (COPE)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {copeStatus === "pending" && (
+                      <span className="text-xs text-zinc-400">&middot;</span>
+                    )}
+                    {copeStatus === "generating" && (
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-200 border-t-amber-600" />
+                    )}
+                    {copeStatus === "done" && (
+                      <span className="text-sm text-green-600 font-bold">&#10003;</span>
+                    )}
+                    {copeStatus === "error" && (
+                      <span
+                        className="text-sm text-red-500 cursor-help"
+                        title={copeError ?? undefined}
+                      >
+                        &#10007; {copeError}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
 
+        {/* COPE option — shown in select phase */}
+        {phase === "select" && !selectLoading && (
+          <div className="flex items-center gap-2 border-t border-zinc-200 px-5 py-2 bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800/50">
+            <input
+              type="checkbox"
+              checked={includeCope}
+              onChange={(e) => setIncludeCope(e.target.checked)}
+              className="h-3 w-3"
+              style={{ accentColor: "var(--brand-accent)" }}
+              id="cope-checkbox"
+            />
+            <label htmlFor="cope-checkbox" className="text-xs text-zinc-700 font-medium dark:text-zinc-300">
+              Also generate COPE estimate (project overhead)
+            </label>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-zinc-200 px-5 py-3 dark:border-zinc-700">
           <div className="text-xs text-zinc-500 dark:text-zinc-400">
+            {phase === "select" && !selectLoading && (
+              <span>{checkedSelectCount} of {selectRows.length} rooms selected</span>
+            )}
             {phase === "generating" && copeStatus !== "generating" && (
               <span>Processing {genProgress.current} of {genProgress.total} rooms...</span>
             )}
@@ -612,11 +876,27 @@ export function BulkReviewAndEstimateModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={phase === "review" ? () => setPhase("select") : onClose}
               className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
-              {phase === "done" ? "Close" : "Cancel"}
+              {phase === "done" ? "Close" : phase === "review" ? "Back" : "Cancel"}
             </button>
+
+            {phase === "select" && !selectLoading && (
+              <button
+                type="button"
+                onClick={handleContinueToReview}
+                disabled={checkedSelectCount === 0}
+                className={`rounded-lg px-5 py-2 text-sm font-semibold shadow-sm ${
+                  checkedSelectCount === 0
+                    ? "bg-zinc-300 text-zinc-500 cursor-not-allowed"
+                    : "text-white"
+                }`}
+                style={checkedSelectCount > 0 ? { backgroundColor: "var(--brand-accent)" } : undefined}
+              >
+                Continue to Review
+              </button>
+            )}
 
             {phase === "review" && !loadingQuestions && (
               <>
@@ -632,7 +912,7 @@ export function BulkReviewAndEstimateModal({
                 <button
                   type="button"
                   onClick={() => handleConfirmAndGenerate(false)}
-                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                  className="rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-sm" style={{ backgroundColor: "var(--brand-accent)" }}
                 >
                   {totalQuestions > 0 ? "Confirm & Generate All" : "Generate All Estimates"}
                 </button>

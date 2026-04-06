@@ -1,14 +1,9 @@
 import "server-only";
-import OpenAI from "openai";
+import { callClaude } from "@/app/lib/ai/model";
 import { SECTIONS, MAX_SECTIONS } from "@/app/lib/sections";
 import { COMMON_TAGS } from "@/app/lib/common-tags";
 import { mapCandidatesToTags, normalizeTag } from "@/app/lib/tag-utils";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const model = process.env.OPENAI_MODEL || "gpt-5.2";
+import { stripJsonFences } from "@/app/lib/ai/parse-json";
 
 export type ObjectiveContentSuggestion = {
   objectiveParagraph: string;
@@ -87,24 +82,23 @@ Overview text (fallback / secondary):
 ${overviewRaw || "(none)"}
 `;
 
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 4096,
     temperature: 0.3,
+    system: systemContent,
     messages: [
-      { role: "system", content: systemContent },
       { role: "user", content: userContent },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = response.content[0]?.type === "text" ? response.content[0].text : null;
   if (!content) {
     throw new Error("No AI response for objective content.");
   }
 
   let parsed: Partial<ObjectiveContentSuggestion>;
   try {
-    parsed = JSON.parse(content) as Partial<ObjectiveContentSuggestion>;
+    parsed = JSON.parse(stripJsonFences(content)) as Partial<ObjectiveContentSuggestion>;
   } catch (e) {
     const truncated = typeof content === "string" ? content.slice(0, 500) : String(content).slice(0, 500);
     // eslint-disable-next-line no-console
@@ -225,16 +219,16 @@ Return ONLY the rewritten statement. No quotes, no prefix, no explanation.
 
   const userContent = `Original objective statement:\n\n${source}`;
 
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 256,
     temperature: 0.25,
+    system: systemContent,
     messages: [
-      { role: "system", content: systemContent },
       { role: "user", content: userContent },
     ],
   });
 
-  const raw = response.choices[0]?.message?.content?.trim();
+  const raw = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
   if (!raw) {
     throw new Error("No AI response for Template B fit statement.");
   }
@@ -244,4 +238,3 @@ Return ONLY the rewritten statement. No quotes, no prefix, no explanation.
   const capped = words.length > 36 ? words.slice(0, 36).join(" ") : raw;
   return capped.trim();
 }
-

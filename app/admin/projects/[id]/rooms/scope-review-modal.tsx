@@ -160,7 +160,7 @@ export function ScopeReviewModal({
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading && (
             <div className="flex flex-col items-center justify-center py-12">
-              <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+              <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2" style={{ borderColor: "var(--brand-accent-spinner-track)", borderTopColor: "var(--brand-accent)" }} />
               <p className="text-sm text-zinc-500">Reviewing scope...</p>
             </div>
           )}
@@ -185,7 +185,7 @@ export function ScopeReviewModal({
                   className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50"
                 >
                   <div className="mb-1 flex items-start gap-2">
-                    <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-medium text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
+                    <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium text-brand-accent" style={{ backgroundColor: "var(--brand-accent-light)" }}>
                       {idx + 1}
                     </span>
                     <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -228,7 +228,7 @@ export function ScopeReviewModal({
             <button
               onClick={() => handleSave(true)}
               disabled={saving}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50" style={{ backgroundColor: "var(--brand-accent)" }}
             >
               {saving ? "Saving..." : "Confirm & Generate"}
             </button>
@@ -241,6 +241,68 @@ export function ScopeReviewModal({
 
 // ---------- Question Input Component ----------
 
+function ChoiceInput({
+  question,
+  onChange,
+}: {
+  question: ReviewQuestion;
+  onChange: (value: unknown) => void;
+}) {
+  const options = question.options ?? [];
+  const answerStr = question.answer != null ? String(question.answer) : "";
+  const isPreset = options.includes(answerStr);
+  const [otherMode, setOtherMode] = useState(!isPreset && answerStr !== "");
+
+  // If current answer is not in the options list, it's a custom "other" value
+  const isOther = otherMode || (!isPreset && answerStr !== "");
+
+  return (
+    <div className="space-y-1.5">
+      {options.map((opt) => (
+        <label key={opt} className="flex items-center gap-2 text-sm">
+          <input
+            type="radio"
+
+            checked={!isOther && question.answer === opt}
+            onChange={() => {
+              setOtherMode(false);
+              onChange(opt);
+            }}
+            className="h-4 w-4" style={{ accentColor: "var(--brand-accent)" }}
+          />
+          <span className="text-zinc-700 dark:text-zinc-300">{opt}</span>
+          {opt === question.defaultAnswer && (
+            <span className="text-xs text-brand-accent opacity-70">(AI suggested)</span>
+          )}
+        </label>
+      ))}
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          name={`q-${question.id}`}
+          checked={isOther}
+          onChange={() => {
+            setOtherMode(true);
+            onChange("");
+          }}
+          className="h-4 w-4" style={{ accentColor: "var(--brand-accent)" }}
+        />
+        <span className="text-zinc-700 dark:text-zinc-300">Other</span>
+      </label>
+      {isOther && (
+        <input
+          type="text"
+          value={answerStr}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Enter custom answer..."
+          autoFocus
+          className="ml-6 w-64 rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+        />
+      )}
+    </div>
+  );
+}
+
 export function QuestionInput({
   question,
   onChange,
@@ -248,22 +310,38 @@ export function QuestionInput({
   question: ReviewQuestion;
   onChange: (value: unknown) => void;
 }) {
-  switch (question.type) {
+  // Normalize answer for type-safe comparisons
+  const q = { ...question };
+  const qType = q.type || "text";
+
+  // Coerce boolean answers: AI may return "Yes"/"No"/"true"/"false" strings
+  if (qType === "boolean" && q.answer != null && typeof q.answer !== "boolean") {
+    const s = String(q.answer).toLowerCase().trim();
+    if (s === "yes" || s === "true") q.answer = true;
+    else if (s === "no" || s === "false") q.answer = false;
+  }
+  if (qType === "boolean" && q.defaultAnswer != null && typeof q.defaultAnswer !== "boolean") {
+    const s = String(q.defaultAnswer).toLowerCase().trim();
+    if (s === "yes" || s === "true") q.defaultAnswer = true;
+    else if (s === "no" || s === "false") q.defaultAnswer = false;
+  }
+
+  switch (qType) {
     case "number":
       return (
         <div className="flex items-center gap-2">
           <input
             type="number"
-            value={question.answer != null ? String(question.answer) : ""}
+            value={q.answer != null ? String(q.answer) : ""}
             onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
             className="w-32 rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
           />
-          {question.unit && (
-            <span className="text-sm text-zinc-500">{question.unit}</span>
+          {q.unit && (
+            <span className="text-sm text-zinc-500">{q.unit}</span>
           )}
           <span className="ml-2 text-xs text-zinc-400">
-            AI suggested: {String(question.defaultAnswer)}
-            {question.unit ? ` ${question.unit}` : ""}
+            AI suggested: {String(q.defaultAnswer)}
+            {q.unit ? ` ${q.unit}` : ""}
           </span>
         </div>
       );
@@ -274,69 +352,60 @@ export function QuestionInput({
           <label className="flex items-center gap-2 text-sm">
             <input
               type="radio"
-              name={`q-${question.id}`}
-              checked={question.answer === true}
+              checked={q.answer === true}
               onChange={() => onChange(true)}
-              className="h-4 w-4 text-indigo-600"
+              className="h-4 w-4" style={{ accentColor: "var(--brand-accent)" }}
             />
             <span className="text-zinc-700 dark:text-zinc-300">Yes</span>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="radio"
-              name={`q-${question.id}`}
-              checked={question.answer === false}
+              checked={q.answer === false}
               onChange={() => onChange(false)}
-              className="h-4 w-4 text-indigo-600"
+              className="h-4 w-4" style={{ accentColor: "var(--brand-accent)" }}
             />
             <span className="text-zinc-700 dark:text-zinc-300">No</span>
           </label>
           <span className="ml-2 text-xs text-zinc-400">
-            AI suggested: {question.defaultAnswer ? "Yes" : "No"}
+            AI suggested: {q.defaultAnswer === true ? "Yes" : "No"}
           </span>
         </div>
       );
 
     case "choice":
-      return (
-        <div className="space-y-1.5">
-          {(question.options ?? []).map((opt) => (
-            <label key={opt} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name={`q-${question.id}`}
-                checked={question.answer === opt}
-                onChange={() => onChange(opt)}
-                className="h-4 w-4 text-indigo-600"
-              />
-              <span className="text-zinc-700 dark:text-zinc-300">{opt}</span>
-              {opt === question.defaultAnswer && (
-                <span className="text-xs text-indigo-500">(AI suggested)</span>
-              )}
-            </label>
-          ))}
-        </div>
-      );
+      return <ChoiceInput question={q} onChange={onChange} />;
 
     case "text":
       return (
         <div>
           <input
             type="text"
-            value={question.answer != null ? String(question.answer) : ""}
+            value={q.answer != null ? String(q.answer) : ""}
             onChange={(e) => onChange(e.target.value || null)}
             className="w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-            placeholder={question.defaultAnswer ? String(question.defaultAnswer) : "Enter answer..."}
+            placeholder={q.defaultAnswer ? String(q.defaultAnswer) : "Enter answer..."}
           />
-          {question.defaultAnswer != null && (
+          {q.defaultAnswer != null && (
             <span className="mt-1 text-xs text-zinc-400">
-              AI suggested: {String(question.defaultAnswer)}
+              AI suggested: {String(q.defaultAnswer)}
             </span>
           )}
         </div>
       );
 
     default:
-      return null;
+      // Fallback: render as text input for any unrecognized question type
+      return (
+        <div>
+          <input
+            type="text"
+            value={q.answer != null ? String(q.answer) : ""}
+            onChange={(e) => onChange(e.target.value || null)}
+            className="w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+            placeholder={q.defaultAnswer ? String(q.defaultAnswer) : "Enter answer..."}
+          />
+        </div>
+      );
   }
 }

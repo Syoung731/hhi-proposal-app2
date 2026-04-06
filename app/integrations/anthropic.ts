@@ -11,6 +11,8 @@ import Anthropic from "@anthropic-ai/sdk";
 const PROVIDER_ANTHROPIC = "anthropic";
 const INTEGRATION_NAME = "Anthropic (Claude AI)";
 
+import { getClaudeModel } from "@/app/lib/ai/model";
+
 export type AnthropicIntegration = {
   id: string;
   name: string;
@@ -69,13 +71,13 @@ export async function saveAnthropicApiKey(apiKey: string): Promise<AnthropicInte
 }
 
 /**
- * Get the Anthropic API key: DB first, then env var fallback.
+ * Get the Anthropic API key from the encrypted DB store.
  * Server-only — never expose to client.
+ * Configure via Settings > Integrations.
  */
 export async function getAnthropicApiKey(): Promise<string | null> {
   const dbKey = await getDecryptedIntegrationSecret(PROVIDER_ANTHROPIC);
-  if (dbKey?.trim()) return dbKey.trim();
-  return process.env.ANTHROPIC_API_KEY?.trim() || null;
+  return dbKey?.trim() || null;
 }
 
 /** Test the Anthropic API key and update status. */
@@ -91,9 +93,9 @@ export async function testAnthropicConnection(): Promise<{
   }
 
   try {
-    const anthropic = new Anthropic({ apiKey });
+    const anthropic = new Anthropic({ apiKey, maxRetries: 5 });
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: await getClaudeModel(),
       max_tokens: 16,
       messages: [{ role: "user", content: "Reply with only the word: OK" }],
     });

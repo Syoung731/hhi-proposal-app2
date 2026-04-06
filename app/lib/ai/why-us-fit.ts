@@ -1,12 +1,7 @@
 import "server-only";
-import OpenAI from "openai";
+import { callClaude } from "@/app/lib/ai/model";
 import type { WhyUsPillar } from "@/app/lib/layout-config";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+import { stripJsonFences } from "@/app/lib/ai/parse-json";
 
 export type WhyUsFitPillar = {
   headline: string;
@@ -48,24 +43,23 @@ Exactly 4 objects in "pillars" array. Order must match input order.
 
   const userContent = `Rewrite these 4 value pillars to fit the card layout. Preserve meaning, shorten to fit.\n\n${JSON.stringify(input, null, 2)}`;
 
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 2048,
     temperature: 0.25,
+    system: systemContent,
     messages: [
-      { role: "system", content: systemContent },
       { role: "user", content: userContent },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const raw = response.choices[0]?.message?.content?.trim();
+  const raw = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
   if (!raw) {
     throw new Error("No AI response for Why Us fit.");
   }
 
   let parsed: { pillars?: unknown[] };
   try {
-    parsed = JSON.parse(raw) as { pillars?: unknown[] };
+    parsed = JSON.parse(stripJsonFences(raw)) as { pillars?: unknown[] };
   } catch {
     throw new Error("AI returned invalid JSON for Why Us fit.");
   }

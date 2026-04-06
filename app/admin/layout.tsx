@@ -53,14 +53,15 @@ export default async function AdminLayout({
     : null;
   const logoLightUrl = settings?.logoLightUrl?.trim() || null;
 
-  const brandTextStyle = textColorHex ? { color: textColorHex } : undefined;
+  const brandStyle: React.CSSProperties & Record<string, string> = {};
+  if (primaryColorHex) brandStyle["--brand-accent"] = primaryColorHex;
+  if (textColorHex) brandStyle["--brand-text"] = textColorHex;
 
   return (
     <AdminLayoutChrome
       displayName={displayName}
-      primaryColorHex={primaryColorHex}
       logoLightUrl={logoLightUrl}
-      brandTextStyle={brandTextStyle}
+      brandStyle={Object.keys(brandStyle).length > 0 ? brandStyle : undefined}
     >
       {children}
     </AdminLayoutChrome>

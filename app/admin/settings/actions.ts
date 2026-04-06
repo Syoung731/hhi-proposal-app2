@@ -319,6 +319,80 @@ export async function testAnthropicConnectionAction(): Promise<{ ok: boolean; mo
   return testAnthropicConnection();
 }
 
+export async function saveAnthropicModelAction(model: string): Promise<{ error?: string }> {
+  await requireAdmin();
+  const trimmed = (model ?? "").trim();
+  if (!trimmed) return { error: "Model ID is required." };
+  try {
+    const settings = await prisma.companySettings.findFirst();
+    if (settings) {
+      await prisma.companySettings.update({ where: { id: settings.id }, data: { anthropicModel: trimmed } });
+    } else {
+      await prisma.companySettings.create({ data: { anthropicModel: trimmed } });
+    }
+    revalidatePath("/admin/settings");
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to save model selection." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Google Gemini integration (AI image generation)
+// ---------------------------------------------------------------------------
+
+import {
+  getOrCreateGeminiIntegration,
+  saveGeminiApiKey,
+  testGeminiConnection,
+} from "@/app/integrations/gemini";
+
+export async function getGeminiIntegrationAction() {
+  await requireAdmin();
+  return getOrCreateGeminiIntegration();
+}
+
+export async function saveGeminiApiKeyAction(formData: FormData): Promise<{ error?: string }> {
+  await requireAdmin();
+  const apiKey = (formData.get("geminiApiKey") as string)?.trim();
+  if (!apiKey) return { error: "API key is required." };
+  try {
+    await saveGeminiApiKey(apiKey);
+    revalidatePath("/admin/settings");
+    revalidatePath("/admin/settings/integrations");
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to save Gemini key." };
+  }
+}
+
+export async function testGeminiConnectionAction(): Promise<{ ok: boolean; model?: string; error?: string }> {
+  await requireAdmin();
+  return testGeminiConnection();
+}
+
+export async function saveGeminiModelsAction(
+  imageModel: string,
+  imageGenModel: string
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  try {
+    const settings = await prisma.companySettings.findFirst();
+    const data: Record<string, string | null> = {};
+    if (imageModel?.trim()) data.geminiImageModel = imageModel.trim();
+    if (imageGenModel?.trim()) data.geminiImageGenModel = imageGenModel.trim();
+    if (settings) {
+      await prisma.companySettings.update({ where: { id: settings.id }, data });
+    } else {
+      await prisma.companySettings.create({ data: { ...data, companyName: "" } as Parameters<typeof prisma.companySettings.create>[0]["data"] });
+    }
+    revalidatePath("/admin/settings");
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to save model selection." };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Google Places integration (address autocomplete)
 // ---------------------------------------------------------------------------
@@ -1503,10 +1577,8 @@ export async function seedSectionTypesAction(): Promise<{ error?: string; insert
 
 // ——— Brand Icons ———
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash";
-const GEMINI_SVG_MODEL = process.env.GEMINI_SVG_MODEL ?? "gemini-2.5-flash";
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
+import { getGeminiApiKey as _getGeminiApiKey } from "@/app/integrations/gemini";
+import { getGeminiImageModel as _getGeminiImageModel } from "@/app/lib/ai/gemini-models";
 const BRAND_ICON_NORMALIZED_SIZE = 256;
 
 async function normalizeAndValidateIconPng(
@@ -1640,10 +1712,11 @@ function safeJsonParse<T>(raw: string): T | null {
 }
 
 async function getGeminiTextClient() {
-  if (!GEMINI_API_KEY?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
+  const apiKey = await _getGeminiApiKey();
+  if (!apiKey?.trim()) {
+    throw new Error("Gemini API key not configured. Add it in Settings > Integrations.");
   }
-  return new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  return new GoogleGenAI({ apiKey: apiKey.trim() });
 }
 
 export async function suggestBrandIconsAction(
@@ -1739,7 +1812,7 @@ Hard constraints:
   let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
   try {
     response = await ai.models.generateContent({
-      model: GEMINI_TEXT_MODEL,
+      model: await _getGeminiImageModel(),
       contents: [
         {
           role: "user",
@@ -1762,7 +1835,7 @@ Hard constraints:
     if (isNotFound) {
       return {
         error:
-          "Gemini model not available. Update GEMINI_TEXT_MODEL / GEMINI_SVG_MODEL env var.",
+          "Gemini model not available. Check model selection in Settings > Integrations.",
       };
     }
     return { error: `Gemini suggestion request failed: ${message}` };
@@ -1890,11 +1963,12 @@ export async function generateBrandIconPngAction(
     return { error: "Visual directive is required for PNG generation." };
   }
 
-  if (!GEMINI_API_KEY?.trim()) {
-    return { error: "GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local." };
+  const geminiKey = await _getGeminiApiKey();
+  if (!geminiKey?.trim()) {
+    return { error: "Gemini API key not configured. Add it in Settings > Integrations." };
   }
 
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  const ai = new GoogleGenAI({ apiKey: geminiKey.trim() });
 
   const prompt = `
 You are designing a single clean, modern PNG icon for a design-build-remodel company.
@@ -1939,7 +2013,7 @@ Output:
   let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
   try {
     response = await ai.models.generateContent({
-      model: GEMINI_IMAGE_MODEL,
+      model: await _getGeminiImageModel(),
       contents: [
         {
           role: "user",

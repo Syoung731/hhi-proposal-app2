@@ -14,11 +14,7 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href);
 }
 
-export function AdminNav({
-  primaryColorHex,
-}: {
-  primaryColorHex: string | null;
-}) {
+export function AdminNav() {
   const pathname = usePathname();
 
   return (
@@ -36,7 +32,7 @@ export function AdminNav({
             }`}
             style={
               active
-                ? { borderBottom: `2px solid ${primaryColorHex ?? "currentColor"}` }
+                ? { borderBottom: "2px solid var(--brand-accent, currentColor)" }
                 : undefined
             }
           >

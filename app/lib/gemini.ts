@@ -4,17 +4,102 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
+import { getGeminiApiKey } from "@/app/integrations/gemini";
+import { getGeminiImageModel, getGeminiImageGenModel, DEFAULT_GEMINI_IMAGE_MODEL } from "@/app/lib/ai/gemini-models";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-image";
+/** Create a GoogleGenAI client using the configured API key. */
+async function getGeminiClient(): Promise<GoogleGenAI> {
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey?.trim()) {
+    throw new Error("Gemini API key not configured. Add it in Settings > Integrations.");
+  }
+  return new GoogleGenAI({ apiKey: apiKey.trim() });
+}
 
 /**
- * Model for text-to-image generation (no input image required).
- * Separate from GEMINI_MODEL which is used for image-in → image-out editing.
- * Override via GEMINI_IMAGE_GEN_MODEL env var if needed.
+ * Call a Gemini image-editing model with automatic fallback.
+ * If the user-selected model fails (no content parts / unsupported), retries with
+ * the default image model (gemini-2.5-flash-image) which is known to support
+ * image-in → image-out editing with responseModalities: ["TEXT", "IMAGE"].
  */
-const GEMINI_IMAGE_GEN_MODEL =
-  process.env.GEMINI_IMAGE_GEN_MODEL ?? "imagen-4.0-fast-generate-001";
+async function callGeminiImageEdit(
+  ai: GoogleGenAI,
+  contents: Parameters<typeof ai.models.generateContent>[0]["contents"],
+): Promise<{ bytes: Buffer; mimeType: string }> {
+  const selectedModel = await getGeminiImageModel();
+  const models = [selectedModel];
+  if (selectedModel !== DEFAULT_GEMINI_IMAGE_MODEL) {
+    models.push(DEFAULT_GEMINI_IMAGE_MODEL);
+  }
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    const isFallback = i > 0;
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config: { responseModalities: ["TEXT", "IMAGE"] },
+      });
+
+      const candidates = (response as { candidates?: unknown[] })?.candidates;
+      if (!candidates?.length) {
+        const feedback = (response as { promptFeedback?: { blockReason?: string; blockReasonMessage?: string } })?.promptFeedback;
+        const reason = feedback?.blockReason ?? "No candidates returned";
+        const detail = feedback?.blockReasonMessage ?? "";
+        if (reason === "PROHIBITED_CONTENT") {
+          throw new Error(
+            "Gemini blocked this edit as unsafe (PROHIBITED_CONTENT). Try rephrasing in neutral design language."
+          );
+        }
+        if (!isFallback && models.length > 1) {
+          // eslint-disable-next-line no-console
+          console.warn(`[gemini] Model ${model} returned no candidates — falling back to ${models[i + 1]}`);
+          continue;
+        }
+        throw new Error(`Gemini returned no image: ${reason}. ${detail}`.trim());
+      }
+
+      const parts = (candidates[0] as { content?: { parts?: unknown[] } })?.content?.parts;
+      if (!parts?.length) {
+        if (!isFallback && models.length > 1) {
+          // eslint-disable-next-line no-console
+          console.warn(`[gemini] Model ${model} returned no content parts — falling back to ${models[i + 1]}`);
+          continue;
+        }
+        throw new Error("Gemini returned no content parts.");
+      }
+
+      for (const part of parts) {
+        const partWithData = part as { inlineData?: { mimeType?: string; data?: string } };
+        if (partWithData.inlineData?.data) {
+          if (isFallback) {
+            // eslint-disable-next-line no-console
+            console.log(`[gemini] Fallback to ${model} succeeded`);
+          }
+          return {
+            bytes: Buffer.from(partWithData.inlineData.data, "base64"),
+            mimeType: partWithData.inlineData.mimeType ?? "image/png",
+          };
+        }
+      }
+
+      if (!isFallback && models.length > 1) {
+        // eslint-disable-next-line no-console
+        console.warn(`[gemini] Model ${model} returned no image data — falling back to ${models[i + 1]}`);
+        continue;
+      }
+      throw new Error("Gemini returned no image: response contained no part with inlineData.");
+    } catch (e) {
+      if (isFallback || models.length === 1) throw e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("PROHIBITED_CONTENT")) throw e; // Don't retry content blocks
+      // eslint-disable-next-line no-console
+      console.warn(`[gemini] Model ${model} failed: ${msg} — falling back to ${models[i + 1]}`);
+    }
+  }
+  throw new Error("All Gemini image models failed");
+}
 
 async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
   const res = await fetch(url, { cache: "no-store" });
@@ -57,11 +142,7 @@ export async function generateRoomRendering({
   stylePresetPrompt = "",
   promptVersion = 1,
 }: GenerateRoomRenderingParams): Promise<GenerateRoomRenderingResult> {
-  if (!GEMINI_API_KEY?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  const ai = await getGeminiClient();
 
   const { data: imageBase64, mimeType: sourceMimeType } = await fetchImageAsBase64(imageUrl);
 
@@ -123,59 +204,20 @@ Requirements:
 Global rendering guardrails:
 ${guardrails}`;
 
-  let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
-  try {
-    response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
+  return callGeminiImageEdit(ai, [
+    {
+      role: "user",
+      parts: [
         {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType: sourceMimeType,
-                data: imageBase64,
-              },
-            },
-            { text: textPrompt },
-          ],
+          inlineData: {
+            mimeType: sourceMimeType,
+            data: imageBase64,
+          },
         },
+        { text: textPrompt },
       ],
-      config: {
-        responseModalities: ["TEXT", "IMAGE"],
-      },
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`Gemini API failed: ${msg}`);
-  }
-
-  const candidates = (response as { candidates?: unknown[] })?.candidates;
-  if (!candidates?.length) {
-    const feedback = (response as { promptFeedback?: { blockReason?: string; blockReasonMessage?: string } })?.promptFeedback;
-    const reason = feedback?.blockReason ?? "No candidates returned";
-    const detail = feedback?.blockReasonMessage ?? "";
-    throw new Error(`Gemini returned no image: ${reason}. ${detail}`.trim());
-  }
-
-  const parts = (candidates[0] as { content?: { parts?: unknown[] } })?.content?.parts;
-  if (!parts?.length) {
-    throw new Error("Gemini returned no content parts.");
-  }
-
-  for (const part of parts) {
-    const partWithData = part as { inlineData?: { mimeType?: string; data?: string } };
-    if (partWithData.inlineData?.data) {
-      const base64 = partWithData.inlineData.data;
-      const mimeType = partWithData.inlineData.mimeType ?? "image/png";
-      const bytes = Buffer.from(base64, "base64");
-      return { bytes, mimeType };
-    }
-  }
-
-  throw new Error(
-    "Gemini returned no image: response contained no part with inlineData (image bytes)."
-  );
+    },
+  ]);
 }
 
 export type GenerateRenderEditParams = {
@@ -194,11 +236,7 @@ export async function generateRenderEdit({
   instruction,
   stylePresetPrompt = "",
 }: GenerateRenderEditParams): Promise<GenerateRoomRenderingResult> {
-  if (!GEMINI_API_KEY?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  const ai = await getGeminiClient();
   const { data: imageBase64, mimeType: sourceMimeType } = await fetchImageAsBase64(imageUrl);
 
   const styleGuidance = stylePresetPrompt.trim()
@@ -216,64 +254,20 @@ Requirements:
 - Keep perspective and composition similar unless the instruction says otherwise.
 - No text overlays, no watermarks, no labels.`;
 
-  let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
-  try {
-    response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
+  return callGeminiImageEdit(ai, [
+    {
+      role: "user",
+      parts: [
         {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType: sourceMimeType,
-                data: imageBase64,
-              },
-            },
-            { text: textPrompt },
-          ],
+          inlineData: {
+            mimeType: sourceMimeType,
+            data: imageBase64,
+          },
         },
+        { text: textPrompt },
       ],
-      config: {
-        responseModalities: ["TEXT", "IMAGE"],
-      },
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`Gemini API failed: ${msg}`);
-  }
-
-  const candidates = (response as { candidates?: unknown[] })?.candidates;
-  if (!candidates?.length) {
-    const feedback = (response as { promptFeedback?: { blockReason?: string; blockReasonMessage?: string } })?.promptFeedback;
-    const reason = feedback?.blockReason ?? "No candidates returned";
-    const detail = feedback?.blockReasonMessage ?? "";
-    if (reason === "PROHIBITED_CONTENT") {
-      throw new Error(
-        "Gemini blocked this edit as unsafe (PROHIBITED_CONTENT). This sometimes happens even for harmless interior-design edits. Try rephrasing in neutral design language, for example: \"Change the vanity cabinet color to blue. No people or faces, just recolor the cabinetry.\""
-      );
-    }
-    throw new Error(`Gemini returned no image: ${reason}. ${detail}`.trim());
-  }
-
-  const parts = (candidates[0] as { content?: { parts?: unknown[] } })?.content?.parts;
-  if (!parts?.length) {
-    throw new Error("Gemini returned no content parts.");
-  }
-
-  for (const part of parts) {
-    const partWithData = part as { inlineData?: { mimeType?: string; data?: string } };
-    if (partWithData.inlineData?.data) {
-      const base64 = partWithData.inlineData.data;
-      const mimeType = partWithData.inlineData.mimeType ?? "image/png";
-      const bytes = Buffer.from(base64, "base64");
-      return { bytes, mimeType };
-    }
-  }
-
-  throw new Error(
-    "Gemini returned no image: response contained no part with inlineData (image bytes)."
-  );
+    },
+  ]);
 }
 
 export type CompareSourceAndRenderResult = {
@@ -288,11 +282,7 @@ export async function compareSourceAndRenderImages(
   sourceImageUrl: string,
   renderImageUrl: string
 ): Promise<CompareSourceAndRenderResult> {
-  if (!GEMINI_API_KEY?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  const ai = await getGeminiClient();
   const [source, render] = await Promise.all([
     fetchImageAsBase64(sourceImageUrl),
     fetchImageAsBase64(renderImageUrl),
@@ -313,7 +303,7 @@ Do not include any other text, headers, or numbering. Only the bullets or NONE.`
   let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
   try {
     response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: await getGeminiImageModel(),
       contents: [
         {
           role: "user",
@@ -400,16 +390,12 @@ export type GenerateSlideBackgroundResult = {
 export async function generateSlideBackground(
   prompt: string
 ): Promise<GenerateSlideBackgroundResult> {
-  if (!GEMINI_API_KEY?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  const ai = await getGeminiClient();
 
   let response: Awaited<ReturnType<typeof ai.models.generateImages>>;
   try {
     response = await ai.models.generateImages({
-      model: GEMINI_IMAGE_GEN_MODEL,
+      model: await getGeminiImageGenModel(),
       prompt,
       config: {
         numberOfImages: 1,

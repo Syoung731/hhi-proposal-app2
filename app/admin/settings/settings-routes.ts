@@ -16,7 +16,6 @@ export const SETTINGS_TAB_SLUGS = [
   "employees",
   "integrations",
   "ai-pricing",
-  "dev-integrations",
 ] as const;
 
 export type SettingsTabSlug = (typeof SETTINGS_TAB_SLUGS)[number];

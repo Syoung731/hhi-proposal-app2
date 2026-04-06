@@ -457,6 +457,27 @@ export async function updateRoomAction(
         data: { estimateStaleReason: reason },
       });
     }
+
+    // Also flag COPE as stale when any room's dimensions or scope change,
+    // since COPE aggregates data from all rooms (total SF, total value, etc.)
+    if (dimsChanged) {
+      const copeRoom = await prisma.room.findFirst({
+        where: { projectId, isProjectOverhead: true },
+        select: { id: true },
+      });
+      if (copeRoom) {
+        const copeHasEstimate = await prisma.aIEstimate.findFirst({
+          where: { sectionId: copeRoom.id },
+          select: { id: true },
+        });
+        if (copeHasEstimate) {
+          await prisma.room.update({
+            where: { id: copeRoom.id },
+            data: { estimateStaleReason: "Room dimensions changed — COPE may need regeneration" },
+          });
+        }
+      }
+    }
   }
 
   // After updating main room dimensions, recompute total area from any included sub-areas.
@@ -464,6 +485,22 @@ export async function updateRoomAction(
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+export async function updateRoomTemplateAction(
+  projectId: string,
+  roomId: string,
+  roomTemplateId: string | null
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const room = await prisma.room.findFirst({ where: { id: roomId, projectId } });
+  if (!room) return { error: "Room not found" };
+  await prisma.room.update({
+    where: { id: roomId },
+    data: { roomTemplateId },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
   return {};
 }
 

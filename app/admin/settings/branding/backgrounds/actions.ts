@@ -10,9 +10,8 @@ import type { Prisma } from "@/app/generated/prisma";
 import sharp from "sharp";
 import type { TextZoneSuggestion } from "@/app/lib/deck/types";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
-const IMAGEN_4_MODEL = process.env.GEMINI_IMAGE_GEN_MODEL ?? "imagen-4.0-fast-generate-001";
+import { getGeminiApiKey } from "@/app/integrations/gemini";
+import { getGeminiImageModel, getGeminiImageGenModel } from "@/app/lib/ai/gemini-models";
 
 // ─── Generation mode types ────────────────────────────────────────────────────
 
@@ -294,8 +293,9 @@ export async function generateBackgroundImagesAction(
 ): Promise<GenerateBackgroundImagesResult> {
   await requireAdmin();
 
-  if (!GEMINI_API_KEY?.trim()) {
-    return { error: "GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local." };
+  const geminiKey = await getGeminiApiKey();
+  if (!geminiKey?.trim()) {
+    return { error: "Gemini API key not configured. Add it in Settings > Integrations." };
   }
 
   const userPrompt = (input.prompt ?? "").toString().trim();
@@ -387,13 +387,13 @@ export async function generateBackgroundImagesAction(
     }
   }
 
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+  const ai = new GoogleGenAI({ apiKey: geminiKey.trim() });
 
   const generateOne = async (promptText: string): Promise<{ imageUrl: string; imageKey: string } | null> => {
     let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
     try {
       response = await ai.models.generateContent({
-        model: GEMINI_IMAGE_MODEL,
+        model: await getGeminiImageModel(),
         contents: [
           {
             role: "user",
@@ -450,7 +450,7 @@ export async function generateBackgroundImagesAction(
     let imgResponse: Awaited<ReturnType<typeof ai.models.generateImages>>;
     try {
       imgResponse = await ai.models.generateImages({
-        model: IMAGEN_4_MODEL,
+        model: await getGeminiImageGenModel(),
         prompt: fullPrompt,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         config: { numberOfImages: 1, outputMimeType: "image/png", aspectRatio: "16:9" } as any,
@@ -1406,8 +1406,10 @@ Rules:
 - recommendedTextColor: "dark" if zone is light/neutral, "light" if zone is dark
 - confidence: 0.0–1.0`;
 
+  const textZoneApiKey = await getGeminiApiKey();
+  const textZoneModel = await getGeminiImageModel();
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${textZoneModel}:generateContent?key=${textZoneApiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

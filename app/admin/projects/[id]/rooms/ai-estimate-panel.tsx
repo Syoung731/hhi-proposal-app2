@@ -158,7 +158,7 @@ function SourceBadge({ source }: { source: string }) {
     case "ALLOWANCE":
       return <span className={`${base} bg-amber-50 text-amber-700 border border-amber-200`}>ALW</span>;
     case "AI_PRICED":
-      return <span className={`${base} bg-indigo-50 text-indigo-700 border border-indigo-200`}>AI</span>;
+      return <span className={`${base} border text-brand-accent`} style={{ backgroundColor: "var(--brand-accent-lighter)", borderColor: "var(--brand-accent-spinner-track)" }}>AI</span>;
     case "MANUAL":
       return <span className={`${base} bg-blue-50 text-blue-700 border border-blue-200`}>MAN</span>;
     default:
@@ -198,7 +198,7 @@ function NotesTooltip({ notes }: { notes?: string | null }) {
       <button
         ref={btnRef}
         type="button"
-        className="shrink-0 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-bold text-zinc-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors"
+        className="shrink-0 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-bold text-zinc-500 hover:text-brand-accent transition-colors"
         onMouseEnter={() => setShow(true)}
         onMouseLeave={() => setShow(false)}
         onClick={() => setShow((s) => !s)}
@@ -801,9 +801,13 @@ export function AIEstimatePanel({
               disabled={generating}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
                 hasScopeQA
-                  ? "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                  : "bg-indigo-600 text-white hover:bg-indigo-700"
+                  ? "border text-brand-accent"
+                  : "text-white"
               } disabled:opacity-50`}
+              style={hasScopeQA
+                ? { borderColor: "var(--brand-accent-spinner-track)", backgroundColor: "var(--brand-accent-lighter)" }
+                : { backgroundColor: "var(--brand-accent)" }
+              }
             >
               {generating ? "Generating..." : hasScopeQA ? "Review Questions" : "Review & Estimate"}
             </button>
@@ -860,7 +864,7 @@ export function AIEstimatePanel({
                 for (const [trade] of tradeGroups) allExpanded[trade] = false;
                 setCollapsedGroups(allExpanded);
               }}
-              className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800"
+              className="text-[10px] font-medium text-brand-accent hover:opacity-80"
             >
               Expand All
             </button>
@@ -872,7 +876,7 @@ export function AIEstimatePanel({
                 for (const [trade] of tradeGroups) allCollapsed[trade] = true;
                 setCollapsedGroups(allCollapsed);
               }}
-              className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800"
+              className="text-[10px] font-medium text-brand-accent hover:opacity-80"
             >
               Collapse All
             </button>

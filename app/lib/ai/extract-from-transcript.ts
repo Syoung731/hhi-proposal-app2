@@ -1,12 +1,7 @@
 import "server-only";
-import OpenAI from "openai";
+import { callClaude } from "@/app/lib/ai/model";
 import { parseDimToInches } from "@/app/lib/dimensions";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const model = process.env.OPENAI_MODEL || "gpt-5.2";
+import { stripJsonFences } from "@/app/lib/ai/parse-json";
 
 export type TranscriptExtraction = {
   overview: {
@@ -50,14 +45,10 @@ const MIN_SCOPE_NARRATIVE_LENGTH = 40;
 export async function extractFromTranscript(
   transcript: string
 ): Promise<TranscriptExtraction> {
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 4096,
     temperature: 0.2,
-    messages: [
-      {
-        role: "system",
-        content: `
-You are an expert residential remodeling proposal extractor.
+    system: `You are an expert residential remodeling proposal extractor.
 
 Return ONLY valid JSON.
 No commentary.
@@ -86,21 +77,19 @@ Array of:
 - name
 - description
 
-Subtitle must always be present in overview. If a value is unknown for other fields, omit the field. Do not fabricate data.
-        `,
-      },
+Subtitle must always be present in overview. If a value is unknown for other fields, omit the field. Do not fabricate data.`,
+    messages: [
       {
         role: "user",
         content: transcript,
       },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const content = response.choices[0].message.content;
+  const content = response.content[0]?.type === "text" ? response.content[0].text : null;
   if (!content) throw new Error("No AI response");
 
-  const parsed = JSON.parse(content) as TranscriptExtraction;
+  const parsed = JSON.parse(stripJsonFences(content)) as TranscriptExtraction;
   if (
     !parsed.overview ||
     typeof parsed.overview.subtitle !== "string" ||
@@ -201,28 +190,24 @@ Rules:
   if (stylePresetPrompt?.trim()) {
     systemContent += `\n\nStyle instructions (apply to tone and language of scope narratives where relevant):\n${stylePresetPrompt.trim()}`;
   }
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 8192,
     temperature: 0.2,
+    system: systemContent,
     messages: [
-      {
-        role: "system",
-        content: systemContent,
-      },
       {
         role: "user",
         content: transcript,
       },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const content = response.choices[0].message.content;
+  const content = response.content[0]?.type === "text" ? response.content[0].text : null;
   if (!content) throw new Error("No AI response");
 
   let parsed: RoomsFromTranscript & SectionsFromTranscript;
   try {
-    parsed = JSON.parse(content) as RoomsFromTranscript & SectionsFromTranscript;
+    parsed = JSON.parse(stripJsonFences(content)) as RoomsFromTranscript & SectionsFromTranscript;
   } catch {
     throw new Error("AI returned invalid JSON");
   }
@@ -264,14 +249,11 @@ Rules:
   if (stylePresetPrompt?.trim()) {
     systemContent += `\n\nStyle instructions (apply to tone and language where relevant):\n${stylePresetPrompt.trim()}`;
   }
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 2048,
     temperature: 0.2,
+    system: systemContent,
     messages: [
-      {
-        role: "system",
-        content: systemContent,
-      },
       {
         role: "user",
         content: `Transcript:\n\n${transcriptText}\n\n---\n\nCurrent scope for "${roomName}":\n${currentScopeNarrative || "(none)"}\n\nRewrite the scope paragraph for "${roomName}" using the transcript and current scope. One paragraph only.`,
@@ -279,7 +261,7 @@ Rules:
     ],
   });
 
-  const content = response.choices[0]?.message?.content?.trim();
+  const content = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
   if (!content) throw new Error("No AI response");
   return content;
 }
@@ -329,14 +311,11 @@ Rules:
           .join("\n\n")
       : fallback;
 
-  const response = await client.chat.completions.create({
-    model,
+  const response = await callClaude({
+    max_tokens: 2048,
     temperature: 0.2,
+    system: systemContent,
     messages: [
-      {
-        role: "system",
-        content: systemContent,
-      },
       {
         role: "user",
         content: `Transcript (for reference):\n\n${transcriptText}\n\n---\n\nExisting scopes to merge into "${mergedRoomName}":\n\n${scopesText}\n\nWrite a single combined scope paragraph for "${mergedRoomName}". One paragraph only.`,
@@ -344,7 +323,7 @@ Rules:
     ],
   });
 
-  const content = response.choices[0]?.message?.content?.trim();
+  const content = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
   if (!content) throw new Error("No AI response");
   return content;
 }

@@ -217,9 +217,13 @@ export function OverviewTab({ projectId, project }: Props) {
     try {
       const result = await generateOverviewFromTranscriptAction(projectId);
       const overview = (result.overview ?? {}) as OverviewDraft;
-      const changedFields = DIFF_FIELD_IDS.filter((field) =>
-        normalize(getCurrentValue(field)) !== normalize(getAiValueFromOverview(overview, field))
-      ) as DiffFieldId[];
+      const changedFields = DIFF_FIELD_IDS.filter((field) => {
+        const current = normalize(getCurrentValue(field));
+        const ai = normalize(getAiValueFromOverview(overview, field));
+        // Skip: AI returned empty but current has a value — "not found" ≠ "clear it"
+        if (!ai && current) return false;
+        return current !== ai;
+      }) as DiffFieldId[];
       setAiDraft({
         overview,
         rooms: result.rooms,
@@ -283,61 +287,33 @@ export function OverviewTab({ projectId, project }: Props) {
     });
   }
 
-  async function persistOverviewFromForm(): Promise<boolean> {
-    setApplySaveStatus("saving");
-    setApplyError(null);
-    setSaveFieldErrors(null);
-    try {
-      const formData = buildFormDataFromForm();
-      const result = await updateProjectOverviewAction(projectId, formData);
-      if (result.fieldErrors && Object.keys(result.fieldErrors).length > 0) {
-        setApplySaveStatus("failed");
-        setApplyError(result.error ?? "Please complete all required fields.");
-        setSaveFieldErrors(result.fieldErrors);
-        return false;
-      }
-      if (result.error) {
-        setApplySaveStatus("failed");
-        setApplyError(result.error);
-        return false;
-      }
-      setApplySaveStatus("saved");
+  function dismissAiPanel() {
+    flushSync(() => {
+      setAiDraft(null);
+      setAiOpen(false);
+      setApplySelections({});
       setApplyError(null);
-      // Clear all AI suggestion UI state so the panel and "Changed" markers disappear immediately
-      flushSync(() => {
-        setAiDraft(null);
-        setAiOpen(false);
-        setApplySelections({});
-        setSaveFieldErrors(null);
-      });
-      // Show success toast and scroll to form
-      setAppliedToast(true);
-      setTimeout(() => setAppliedToast(false), 3000);
-      setTimeout(() => formSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-      router.refresh();
-      setTimeout(() => setApplySaveStatus("idle"), 2000);
-      return true;
-    } catch {
-      setApplySaveStatus("failed");
-      setApplyError("Failed to save.");
-      return false;
-    }
+      setSaveFieldErrors(null);
+    });
+    setAppliedToast(true);
+    setTimeout(() => setAppliedToast(false), 3000);
+    setTimeout(() => formSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
-  async function applySelected() {
+  function applySelected() {
     if (!aiDraft || aiDraft.changedFields.length === 0) return;
     const toApply = aiDraft.changedFields.filter((field) =>
       isApplyChecked(field, true)
     );
     if (toApply.length === 0) return;
     applyToForm(toApply);
-    await persistOverviewFromForm();
+    dismissAiPanel();
   }
 
-  async function applyAllChanges() {
+  function applyAllChanges() {
     if (!aiDraft || aiDraft.changedFields.length === 0) return;
     applyToForm([...aiDraft.changedFields]);
-    await persistOverviewFromForm();
+    dismissAiPanel();
   }
 
   async function submit(formData: FormData) {

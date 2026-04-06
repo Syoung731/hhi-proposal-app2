@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/app/lib/prisma";
 import { SYSTEM_PROMPT, buildUserPrompt, getCorrectionHistory, type ProjectContext, type RoomDimensions } from "@/app/lib/ai-estimate-prompt";
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
-import { getAnthropicApiKey } from "@/app/integrations/anthropic";
+import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
 
@@ -111,17 +111,9 @@ export async function POST(request: NextRequest) {
       scopeQA,
     );
 
-    // Call Claude API
-    const apiKey = await getAnthropicApiKey();
-    if (!apiKey) {
-      return NextResponse.json({ error: "Anthropic API key not configured — add it in Settings > Integrations" }, { status: 500 });
-    }
-
-    const anthropic = new Anthropic({ apiKey });
-
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 16000,
+    // Call Claude with automatic model fallback
+    const response = await streamClaude({
+      max_tokens: 64000,
       temperature: 0.2,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
@@ -137,15 +129,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Empty response from Claude API" }, { status: 502 });
     }
 
-    // Check for truncation
+    // Log truncation but still attempt to parse (repair will close unclosed brackets)
     if (response.stop_reason === "max_tokens") {
-      return NextResponse.json(
-        { error: "AI response was truncated (max_tokens reached). Try a narrower scope." },
-        { status: 502 },
-      );
+      // eslint-disable-next-line no-console
+      console.warn("[ai-estimate] Response truncated (max_tokens) — attempting repair parse");
     }
 
-    // Parse and validate
+    // Parse and validate (includes JSON repair for truncated responses)
     const parsedEstimate = parseEstimateResponse(rawText, catalogItems);
 
     // Calculate price ranges

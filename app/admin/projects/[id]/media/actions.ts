@@ -440,7 +440,7 @@ export async function startHeroRenderAction(
       parentMediaId: sourceMedia.id,
       editInstruction: finalInstruction,
       renderProvider: "gemini",
-      renderModel: GEMINI_MODEL,
+      renderModel: await _getGeminiImgModel(),
       renderStatus: RenderStatus.QUEUED,
     },
   });
@@ -570,7 +570,8 @@ export async function moveMediaOrderAction(
  * Reorder media by assigning sortOrder from the given orderedIds (index = sortOrder).
  * Validates projectId and ensures all ids belong to the project; updates in a transaction.
  */
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-image";
+import { getGeminiImageModel as _getGeminiImgModel } from "@/app/lib/ai/gemini-models";
+// GEMINI_MODEL removed — now read from DB via getGeminiImageModel()
 
 /**
  * Resolve effective style prompt for Media rendering: project-level preset only.
@@ -757,7 +758,7 @@ export async function startRoomRenderAction(
       sourceMediaId: sourceMedia.id,
       stylePresetId: effectivePresetId,
       renderProvider: "gemini",
-      renderModel: GEMINI_MODEL,
+      renderModel: await _getGeminiImgModel(),
       renderStatus: RenderStatus.QUEUED,
       promptVersion,
     },
@@ -1046,7 +1047,7 @@ export async function startRenderUpdateAction(
       editInstruction: trimmed,
       stylePresetId: effectivePresetId,
       renderProvider: "gemini",
-      renderModel: GEMINI_MODEL,
+      renderModel: await _getGeminiImgModel(),
       renderStatus: RenderStatus.QUEUED,
       promptVersion: baseRender.promptVersion,
     },

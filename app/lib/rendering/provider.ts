@@ -4,17 +4,19 @@
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getGeminiApiKey } from "@/app/integrations/gemini";
+import { getGeminiImageModel } from "@/app/lib/ai/gemini-models";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const RENDER_PROVIDER = process.env.RENDER_PROVIDER ?? "gemini";
 
-function getGeminiClient(): GoogleGenerativeAI {
-  if (!GEMINI_API_KEY?.trim()) {
+async function getGeminiClient(): Promise<GoogleGenerativeAI> {
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey?.trim()) {
     throw new Error(
-      "GEMINI_API_KEY is not set. Add GEMINI_API_KEY to .env.local to use Gemini rendering."
+      "Gemini API key not configured. Add it in Settings > Integrations."
     );
   }
-  return new GoogleGenerativeAI(GEMINI_API_KEY.trim());
+  return new GoogleGenerativeAI(apiKey.trim());
 }
 
 /**
@@ -60,7 +62,7 @@ export async function renderRoomImage({
     );
   }
 
-  const client = getGeminiClient();
+  const client = await getGeminiClient();
 
   let imageBase64: string;
   let mimeType: string;
@@ -85,7 +87,7 @@ RULES:
 Generate exactly one image that shows the room after the described renovation, keeping the same viewpoint.`;
 
   const model = client.getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
+    model: await getGeminiImageModel(),
     generationConfig: {
       // Request image output (supported by Gemini 2.0 Flash for image generation)
       responseModalities: ["IMAGE", "TEXT"],

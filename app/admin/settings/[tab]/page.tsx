@@ -123,6 +123,9 @@ export default async function SettingsTabPage({
         integrationsJson: settings.integrationsJson,
         roomTypeLowPct: settings.roomTypeLowPct,
         roomTypeHighPct: settings.roomTypeHighPct,
+        anthropicModel: settings.anthropicModel,
+        geminiImageModel: settings.geminiImageModel,
+        geminiImageGenModel: settings.geminiImageGenModel,
       }}
       sectionTypes={sectionTypes.map((s) => ({
         id: s.id,
