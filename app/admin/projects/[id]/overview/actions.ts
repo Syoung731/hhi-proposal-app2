@@ -39,6 +39,10 @@ export async function updateProjectOverviewAction(
   const client2Last = (formData.get("client2Last") as string)?.trim() ?? "";
   const transcriptText = (formData.get("transcriptText") as string)?.trim() || null;
   const objective = (formData.get("objective") as string)?.trim() || null;
+  const supportingText = (formData.get("supportingText") as string)?.trim() || null;
+  const bulletsRaw = (formData.get("bullets") as string)?.trim() || "";
+  const bullets = bulletsRaw ? bulletsRaw.split("\n").map((b) => b.trim()).filter(Boolean) : [];
+  const scopeOverview = (formData.get("scopeOverview") as string)?.trim() || null;
   const coverHeroImageId = formData.has("coverHeroImageId")
     ? ((formData.get("coverHeroImageId") as string)?.trim() || null)
     : undefined;
@@ -86,6 +90,9 @@ export async function updateProjectOverviewAction(
       client2Last: client2Last || null,
       transcriptText,
       objective,
+      supportingText,
+      bullets,
+      scopeOverview,
       ...(coverHeroImageId !== undefined && { coverHeroImageId }),
     },
   });

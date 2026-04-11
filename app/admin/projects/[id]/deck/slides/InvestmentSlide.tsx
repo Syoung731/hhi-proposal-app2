@@ -7,11 +7,23 @@ import type {
   InvestmentLineItem,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SLIDE_PADDING, SECTION_LABEL_SIZE, HEADLINE_SCALE, BODY_SCALE, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
   hasAiBackground?: boolean;
+}
+
+function makeOutlineShadow(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  const d = 1;
+  return [
+    `${d}px 0 0 ${color}`, `${-d}px 0 0 ${color}`,
+    `0 ${d}px 0 ${color}`, `0 ${-d}px 0 ${color}`,
+    `${d}px ${d}px 0 ${color}`, `${-d}px ${-d}px 0 ${color}`,
+  ].join(", ");
 }
 
 function formatRange(low?: number | null, high?: number | null): string {
@@ -53,28 +65,38 @@ function sumRange(
 // retainer callout box, large bold total line in accent color, footer.
 function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as InvestmentContent;
+  const GOLD = "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const items = content.lineItems ?? [];
   const totalLow = sumRange(items, "low");
   const totalHigh = sumRange(items, "high");
+  const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
+  const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
+  const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const tableHeaderBg = content.tableHeaderBgColor ?? "#1B2A4A";
+  const lineItemPadding = content.lineItemSizePreset === "compact" ? "0.35em 0.9em" : content.lineItemSizePreset === "spacious" ? "0.65em 0.9em" : "0.5em 0.9em";
+  const retainerAccent = content.retainerAccentColor ?? GOLD;
 
   return (
     <div
       className="relative w-full h-full flex flex-col"
       style={{
         background: hasAiBackground ? "transparent" : "#FAFAF8",
-        padding: "6% 7% 5% 7%",
+        padding: SLIDE_PADDING.content,
       }}
     >
       {/* Heading */}
       <div className="flex-shrink-0" style={{ marginBottom: "3%" }}>
-        {slide.subheadline && (
+        {(content.showSectionLabel ?? true) && slide.subheadline && (
           <p
             className="uppercase tracking-widest"
             style={{
-              fontSize: "0.65em",
+              fontFamily: SLIDE_FONTS.defaults.label,
+              fontSize: SECTION_LABEL_SIZE,
               fontWeight: 600,
               letterSpacing: "0.13em",
-              color: branding.accentColor,
+              color: resolvedAccent,
               marginBottom: "0.35em",
             }}
           >
@@ -82,16 +104,19 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
           </p>
         )}
         <h1
-          className="font-serif"
           style={{
-            fontSize: "2.8em",
-            fontWeight: 700,
-            color: branding.textColor,
+            fontFamily: headlineFont,
+            fontSize: `${(content.headlineSize ?? 2.0) * headlineScale}em`,
+            fontWeight: (content.headlineBold !== false) ? 700 : 400,
+            fontStyle: content.headlineItalic ? "italic" : "normal",
+            textDecoration: content.headlineUnderline ? "underline" : "none",
+            color: content.headlineColor ?? branding.textColor,
+            textShadow: makeOutlineShadow(content.headlineOutline),
           }}
         >
           {slide.headline || "Projected Investment"}
         </h1>
-        <TitleAccentRule accentColor={branding.accentColor} />
+        <TitleAccentRule accentColor={resolvedAccent} />
       </div>
 
       {/* Empty state placeholder */}
@@ -127,24 +152,37 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
           <div
             className="flex"
             style={{
-              background: branding.textColor,
+              background: tableHeaderBg,
               padding: "0.55em 0.9em",
             }}
           >
             <span
-              className="flex-1 font-bold"
-              style={{ fontSize: "0.72em", color: "#fff", letterSpacing: "0.03em" }}
+              className="flex-1"
+              style={{
+                fontFamily: content.tableHeaderFont ?? bodyFont,
+                fontSize: `${(content.tableHeaderSize ?? 0.72) * bodyScale}em`,
+                fontWeight: (content.tableHeaderBold !== false) ? 700 : 400,
+                fontStyle: content.tableHeaderItalic ? "italic" : "normal",
+                textDecoration: content.tableHeaderUnderline ? "underline" : "none",
+                color: "#fff",
+                letterSpacing: "0.03em",
+                textShadow: makeOutlineShadow(content.tableHeaderOutline),
+              }}
             >
               Space to Renovate
             </span>
             <span
-              className="font-bold"
               style={{
-                fontSize: "0.72em",
+                fontFamily: content.tableHeaderFont ?? bodyFont,
+                fontSize: `${(content.tableHeaderSize ?? 0.72) * bodyScale}em`,
+                fontWeight: (content.tableHeaderBold !== false) ? 700 : 400,
+                fontStyle: content.tableHeaderItalic ? "italic" : "normal",
+                textDecoration: content.tableHeaderUnderline ? "underline" : "none",
                 color: "#fff",
                 letterSpacing: "0.03em",
                 minWidth: "30%",
                 textAlign: "right",
+                textShadow: makeOutlineShadow(content.tableHeaderOutline),
               }}
             >
               Range
@@ -157,21 +195,22 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
               key={item.id}
               className="flex"
               style={{
-                padding: "0.5em 0.9em",
+                padding: lineItemPadding,
                 background: i % 2 === 0 ? "#fff" : "#F9FAFB",
                 borderTop: "1px solid #E5E7EB",
               }}
             >
               <span
                 className="flex-1"
-                style={{ fontSize: "0.78em", color: branding.textColor }}
+                style={{ fontFamily: bodyFont, fontSize: `${0.78 * bodyScale}em`, color: content.bodyColor ?? branding.textColor }}
               >
                 {item.label}
               </span>
               <span
                 style={{
-                  fontSize: "0.78em",
-                  color: branding.textColor,
+                  fontFamily: bodyFont,
+                  fontSize: `${0.78 * bodyScale}em`,
+                  color: content.bodyColor ?? branding.textColor,
                   minWidth: "30%",
                   textAlign: "right",
                 }}
@@ -184,22 +223,51 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
       )}
 
       {/* Retainer callout box */}
-      {content.retainerLabel && content.retainerAmount != null && (
+      {(content.showRetainerSection ?? true) && content.retainerLabel && content.retainerAmount != null && (
         <div
           className="flex-shrink-0"
           style={{
-            border: `1px solid ${branding.accentColor}`,
+            border: `1px solid ${retainerAccent}`,
             borderRadius: 2,
             padding: "0.6em 0.9em",
             marginBottom: "2.5%",
           }}
         >
-          <p style={{ fontSize: "0.75em", color: branding.textColor }}>
-            <strong>{content.retainerLabel}:</strong>{" "}
-            {formatRange(content.retainerAmount, null).replace("–", "")}
-          </p>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "0.4em", flexWrap: "wrap" }}>
+            <span style={{
+              fontFamily: content.retainerLabelFont ?? bodyFont,
+              fontSize: `${(content.retainerLabelSize ?? 0.75) * bodyScale}em`,
+              fontWeight: (content.retainerLabelBold !== false) ? 700 : 400,
+              fontStyle: content.retainerLabelItalic ? "italic" : "normal",
+              textDecoration: content.retainerLabelUnderline ? "underline" : "none",
+              color: content.retainerLabelColor ?? branding.textColor,
+              textShadow: makeOutlineShadow(content.retainerLabelOutline),
+            }}>
+              {content.retainerLabel}:
+            </span>
+            <span style={{
+              fontFamily: content.retainerAmountFont ?? SLIDE_FONTS.defaults.headline,
+              fontSize: `${(content.retainerAmountSize ?? 2.5) * bodyScale * 0.3}em`,
+              fontWeight: (content.retainerAmountBold !== false) ? 700 : 400,
+              fontStyle: content.retainerAmountItalic ? "italic" : "normal",
+              textDecoration: content.retainerAmountUnderline ? "underline" : "none",
+              color: content.retainerAmountColor ?? branding.textColor,
+              textShadow: makeOutlineShadow(content.retainerAmountOutline),
+            }}>
+              {formatRange(content.retainerAmount, null).replace("–", "")}
+            </span>
+          </div>
           {(content.retainerDescription || content.disclaimer) && (
-            <p style={{ fontSize: "0.62em", color: "#6B7280", marginTop: "0.3em" }}>
+            <p style={{
+              fontFamily: content.retainerDescFont ?? bodyFont,
+              fontSize: `${(content.retainerDescSize ?? 0.62) * bodyScale}em`,
+              fontWeight: content.retainerDescBold ? 700 : 400,
+              fontStyle: content.retainerDescItalic ? "italic" : "normal",
+              textDecoration: content.retainerDescUnderline ? "underline" : "none",
+              color: content.retainerDescColor ?? "#6B7280",
+              marginTop: "0.3em",
+              textShadow: makeOutlineShadow(content.retainerDescOutline),
+            }}>
               {content.retainerDescription || content.disclaimer}
             </p>
           )}
@@ -210,11 +278,10 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
       {items.length > 0 && (
         <div className="flex-shrink-0" style={{ marginBottom: "1.5%" }}>
           <p
-            className="font-bold font-serif"
-            style={{ fontSize: "1.35em", color: branding.textColor }}
+            style={{ fontFamily: headlineFont, fontSize: `${1.35 * headlineScale}em`, fontWeight: 700, color: content.headlineColor ?? branding.textColor }}
           >
             Total Cost of Project Execution Range:{" "}
-            <span style={{ color: branding.accentColor }}>
+            <span style={{ color: resolvedAccent }}>
               {formatRange(totalLow, totalHigh)}
             </span>
           </p>
@@ -236,6 +303,14 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
           {content.address ?? branding.address ?? ""}
         </span>
       </div>
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }

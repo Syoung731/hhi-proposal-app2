@@ -10,6 +10,16 @@ import { BeforeAfterSlide } from "./BeforeAfterSlide";
 import { ScopeBreakdownSlide } from "./ScopeBreakdownSlide";
 import { RiskBriefSlide } from "./RiskBriefSlide";
 import { ProcessSlide } from "./ProcessSlide";
+import { CoreValuesSlide } from "./CoreValuesSlide";
+import { ProjectTimelineSlide } from "./ProjectTimelineSlide";
+import { CopePageSlide } from "./CopePageSlide";
+import { DesignRetainerSlide } from "./DesignRetainerSlide";
+import { NextStepsSlide } from "./NextStepsSlide";
+import { ClosingSlide } from "./ClosingSlide";
+import { VisualInspirationSlide } from "./VisualInspirationSlide";
+import { ClientTestimonialsSlide } from "./ClientTestimonialsSlide";
+import { DesignBuildAdvantageSlide } from "./DesignBuildAdvantageSlide";
+import { AdditionOverviewSlide } from "./AdditionOverviewSlide";
 
 interface Props {
   slide: ProposalSlide;
@@ -62,6 +72,26 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false 
       return <RiskBriefSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "process":
       return <ProcessSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "core-values":
+      return <CoreValuesSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "project-timeline":
+      return <ProjectTimelineSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "cope-page":
+      return <CopePageSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "design-retainer":
+      return <DesignRetainerSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "next-steps":
+      return <NextStepsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "closing-slide":
+      return <ClosingSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "visual-inspiration":
+      return <VisualInspirationSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "client-testimonials":
+      return <ClientTestimonialsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "design-build-advantage":
+      return <DesignBuildAdvantageSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "addition-overview":
+      return <AdditionOverviewSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     default:
       return (
         <div className="w-full h-full flex items-center justify-center bg-white">

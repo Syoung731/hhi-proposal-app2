@@ -48,6 +48,36 @@ const SLIDE_SUBJECTS: Record<SlideType, string> = {
 
   process:
     "Soft horizontal gradient wash, warm cream to light gray. No objects, no rooms.",
+
+  "core-values":
+    "Warm linen parchment texture with very faint geometric lattice pattern. Elegant, minimal, no objects.",
+
+  "project-timeline":
+    "Soft vertical gradient wash, warm cream transitioning to pale sand. Subtle paper grain. No objects, no rooms.",
+
+  "cope-page":
+    "Warm off-white surface with very faint blueprint grid lines. Construction document feel, minimal, no objects.",
+
+  "design-retainer":
+    "Elegant linen textured background with soft warm lighting, subtle architectural drafting elements at edges. Premium, confident, minimal.",
+
+  "next-steps":
+    "Clean warm parchment surface with faint directional lines suggesting forward motion. Minimal, professional, no objects.",
+
+  "closing-slide":
+    "Dark moody architectural interior with deep navy tones, soft warm light spill from a window. Elegant, quiet, premium closing feel.",
+
+  "visual-inspiration":
+    "Soft warm linen texture with very subtle watercolor wash, no objects. Gallery wall feel, neutral background for photo overlay.",
+
+  "client-testimonials":
+    "Warm elegant interior with soft natural light, muted warm tones, slightly out of focus. Luxurious residential feel, perfect testimonial backdrop.",
+
+  "design-build-advantage":
+    "Clean architectural blueprint overlay on warm linen, very subtle technical drawing lines. Professional, structured, design-forward.",
+
+  "addition-overview":
+    "Warm linen background with very subtle architectural drafting elements — faint dashed construction lines and light pencil sketches of building additions. Professional, elegant, no objects.",
 };
 
 // ─── Style-preset colour / mood overlays ─────────────────────────────────────

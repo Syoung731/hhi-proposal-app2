@@ -4,7 +4,24 @@ import { prisma } from "@/app/lib/prisma";
 import { getDeckForProject, saveAllSlides } from "@/app/lib/deck/db";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
-import type { ProposalSlide, WhyUsPillarItem, WhyUsContent } from "@/app/lib/deck/types";
+import type { ProposalSlide, WhyUsPillarItem, WhyUsContent, AdditionBullet } from "@/app/lib/deck/types";
+import { callClaude } from "@/app/lib/ai/model";
+
+// ─── fetchProjectScopeOverviewAction ─────────────────────────────────────────
+
+/**
+ * Fetches the AI-generated scope overview text from the Project record.
+ * Used by the InspectorPanel "Pull from Overview" button.
+ */
+export async function fetchProjectScopeOverviewAction(
+  projectId: string
+): Promise<{ scopeOverview: string | null }> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { scopeOverview: true },
+  });
+  return { scopeOverview: project?.scopeOverview ?? null };
+}
 
 // ─── saveDeckSlidesAction ────────────────────────────────────────────────────
 
@@ -97,7 +114,7 @@ export async function refreshDeckAction(
               { type: "RENDERING", renderStatus: "DONE" },
             ],
           },
-          select: { id: true, url: true, kind: true, type: true, renderStatus: true, caption: true },
+          select: { id: true, url: true, kind: true, type: true, renderStatus: true, caption: true, parentMediaId: true, sourceMediaId: true },
           orderBy: { sortOrder: "asc" },
         },
       },
@@ -112,9 +129,21 @@ export async function refreshDeckAction(
       beforeMedia: room.media
         .filter((m) => m.type === "EXISTING")
         .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption })),
-      renderMedia: room.media
-        .filter((m) => m.type === "RENDERING" && m.renderStatus === "DONE")
-        .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption })),
+      renderMedia: (() => {
+        const doneRenders = room.media.filter((m) => m.type === "RENDERING" && m.renderStatus === "DONE");
+        // Exclude orphaned children: when a parent render is deleted, its children get parentMediaId=null
+        // and look like duplicate roots. Keep only the first root per sourceMediaId.
+        const seenSources = new Set<string>();
+        return doneRenders
+          .filter((m) => {
+            if (m.parentMediaId != null) return true; // child of existing root — keep
+            const key = m.sourceMediaId ?? m.id;
+            if (seenSources.has(key)) return false; // duplicate root — orphan
+            seenSources.add(key);
+            return true;
+          })
+          .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption }));
+      })(),
     }));
 
     // 4. Re-fetch value pillars.
@@ -177,5 +206,93 @@ export async function refreshDeckAction(
   } catch (err) {
     console.error("[refreshDeckAction]", err);
     return { slides: currentSlides, error: String(err) };
+  }
+}
+
+// ─── generateAdditionBulletsAction ──────────────────────────────────────────
+
+const DEFAULT_ADDITION_BULLETS: AdditionBullet[] = [
+  { id: "b1", label: "The Structure", description: "Foundations, structural framing, and all load-bearing elements engineered to current code standards." },
+  { id: "b2", label: "Engineering & Systems", description: "Mechanical, electrical, and plumbing systems designed to serve the new space seamlessly." },
+  { id: "b3", label: "Finishes & Site Work", description: "Interior finishes selected to complement the existing home, with exterior work matched to current materials." },
+];
+
+/**
+ * Generate 3 scope-summary bullets for the Addition Overview slide
+ * by pulling from the project's room scopes and summarizing via Claude.
+ */
+export async function generateAdditionBulletsAction(
+  projectId: string
+): Promise<{ bullets: AdditionBullet[]; fromAI: boolean }> {
+  // Fetch all BASE rooms with scope narratives
+  const rooms = await prisma.room.findMany({
+    where: {
+      projectId,
+      bucket: "BASE",
+    },
+    select: { name: true, scopeNarrative: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  const roomsWithScope = rooms.filter((r) => r.scopeNarrative?.trim());
+
+  if (roomsWithScope.length === 0) {
+    return { bullets: DEFAULT_ADDITION_BULLETS, fromAI: false };
+  }
+
+  const formattedScopes = roomsWithScope
+    .map((r) => `${r.name}:\n${r.scopeNarrative}`)
+    .join("\n\n---\n\n");
+
+  try {
+    const response = await callClaude({
+      system: `You are a proposal writer for a luxury design-build company. Extract exactly 3 bullet points from these room scopes for an Addition Overview slide. Each bullet has:
+- A short bold label (2-4 words, e.g. "The Structure", "Engineering & Systems", "Site Work", "Interior Finishes")
+- A description (1-2 sentences, specific to this project, client-facing elevated language, no contractor jargon)
+
+Return JSON only:
+{
+  "bullets": [
+    {"label": "...", "description": "..."},
+    {"label": "...", "description": "..."},
+    {"label": "...", "description": "..."}
+  ]
+}`,
+      messages: [
+        {
+          role: "user",
+          content: `Room scopes:\n\n${formattedScopes}\n\nGenerate 3 bullets that summarize the key scope areas for a property addition or major renovation project.`,
+        },
+      ],
+      max_tokens: 512,
+    });
+
+    const text = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("");
+
+    // Extract JSON from response (may be wrapped in markdown code fences)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.warn("[generateAdditionBullets] No JSON found in response");
+      return { bullets: DEFAULT_ADDITION_BULLETS, fromAI: false };
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as { bullets: { label: string; description: string }[] };
+    if (!Array.isArray(parsed.bullets) || parsed.bullets.length === 0) {
+      return { bullets: DEFAULT_ADDITION_BULLETS, fromAI: false };
+    }
+
+    const bullets: AdditionBullet[] = parsed.bullets.slice(0, 3).map((b, i) => ({
+      id: `ai-${Date.now()}-${i}`,
+      label: b.label,
+      description: b.description,
+    }));
+
+    return { bullets, fromAI: true };
+  } catch (err) {
+    console.error("[generateAdditionBullets] Claude error:", err);
+    return { bullets: DEFAULT_ADDITION_BULLETS, fromAI: false };
   }
 }

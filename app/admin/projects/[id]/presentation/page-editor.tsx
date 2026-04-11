@@ -29,7 +29,6 @@ import { COMMON_TAGS } from "@/app/lib/common-tags";
 import { normalizeTag } from "@/app/lib/tag-utils";
 import {
   listObjectiveSuggestedPhotosAction,
-  suggestObjectiveCopyAction,
   suggestObjectivePhotoFiltersAction,
   suggestTemplateBFitStatementAction,
   suggestTemplateCColumnsAction,
@@ -591,8 +590,7 @@ function ObjectiveContentEditor({
   overviewText,
   templateId,
 }: ObjectiveContentEditorProps) {
-  const [copyLoading, setCopyLoading] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
+  // Copy generation removed — objective/supportingText/bullets now come from the Overview tab
   const [toast, setToast] = useState<string | null>(null);
   const latestConfigRef = useRef(config);
   const latestAiRef = useRef<NonNullable<ObjectivePageConfig["ai"]>>(
@@ -626,24 +624,9 @@ function ObjectiveContentEditor({
     (ai.suggestedSections?.length ?? 0) + (ai.suggestedTags?.length ?? 0) > 0;
   const transcriptChars = transcriptText?.trim().length ?? 0;
   const overviewChars = overviewText?.trim().length ?? 0;
-  const suggestedObjectiveParagraph = ai.suggestedObjectiveParagraph ?? "";
-  const suggestedCommitments = (ai.suggestedCommitments ?? []).slice(0, 3);
-  while (suggestedCommitments.length < 3) suggestedCommitments.push("");
-  const copyLastRunAt = ai.copyLastRunAt ?? ai.lastRunAt ?? null;
   const commitmentsHaveContent = commitments.some(
     (c) => (c ?? "").trim().length > 0,
   );
-  const showParagraphSuggestion =
-    suggestedObjectiveParagraph.trim().length > 0 &&
-    !ai.copyParagraphAppliedAt &&
-    !objectiveText.trim();
-  const showCommitmentsSuggestion =
-    suggestedCommitments.some((c) => c.trim().length > 0) &&
-    !ai.copyCommitmentsAppliedAt &&
-    !commitmentsHaveContent;
-  const showGreenPanel = showParagraphSuggestion || showCommitmentsSuggestion;
-
-  const autoRunRef = useRef(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -666,258 +649,17 @@ function ObjectiveContentEditor({
       },
     });
 
-  const runCopySuggestions = useCallback(async () => {
-    if (!projectId) return;
-
-    const hasTranscriptNow = !!(transcriptText && transcriptText.trim());
-    const hasOverviewNow = !!(overviewText && overviewText.trim());
-
-    if (!hasTranscriptNow && !hasOverviewNow) {
-      setCopyError(
-        "Add transcript or objective text (Overview tab) to run AI copy.",
-      );
-      return;
-    }
-
-    setCopyLoading(true);
-    setCopyError(null);
-    try {
-      const result = await suggestObjectiveCopyAction({
-        projectId,
-        transcriptText,
-        overviewText,
-      });
-
-      updateAi({
-        suggestedObjectiveParagraph: result.objectiveParagraph,
-        suggestedCommitments: result.commitments.slice(0, 3),
-        copyLastRunAt: new Date().toISOString(),
-      });
-
-      // When Template C is active, also refresh the shared subtitle
-      // unless the subtitle is locked.
-      if (templateId === "C") {
-        const current = latestConfigRef.current;
-        const subtitleLocked = current.templateC?.subtitleLocked === true;
-        if (!subtitleLocked) {
-          const tcResult = await suggestTemplateCColumnsAction({
-            projectId,
-            objectiveTitle: current.title,
-            objectiveText: current.objectiveText,
-            transcriptText,
-            overviewText,
-          });
-          if (!("error" in tcResult)) {
-            const nextTc = {
-              ...current.templateC,
-              barColor: current.templateC?.barColor ?? undefined,
-              columns: getTemplateCColumns(current),
-            };
-            updateObjective({
-              subtitle: tcResult.subtitle ?? "",
-              templateC: nextTc,
-            });
-          }
-        }
-      }
-    } catch (e) {
-      setCopyError(
-        e instanceof Error
-          ? e.message
-          : "Failed to load AI copy suggestions.",
-      );
-    } finally {
-      setCopyLoading(false);
-    }
-  }, [
-    projectId,
-    transcriptText,
-    overviewText,
-    updateAi,
-    templateId,
-    updateObjective,
-  ]);
-
-  // Auto-run once when Objective page first loads and AI has never run,
-  // user has not applied AI copy, and chosen fields are still empty.
-  useEffect(() => {
-    if (autoRunRef.current) return;
-    if (!projectId) return;
-    if (copyLastRunAt) return;
-    if (ai.appliedAt) return;
-
-    const chosenObjectiveEmpty = !(config.objectiveText?.trim());
-    const chosenCommitmentsEmpty = (config.commitments ?? []).every(
-      (c) => !(c?.trim()),
-    );
-    if (!chosenObjectiveEmpty || !chosenCommitmentsEmpty) return;
-
-    const hasTranscriptNow = !!(transcriptText && transcriptText.trim());
-    const hasOverviewNow = !!(overviewText && overviewText.trim());
-    if (!hasTranscriptNow && !hasOverviewNow) return;
-
-    autoRunRef.current = true;
-    void runCopySuggestions();
-  }, [
-    projectId,
-    transcriptText,
-    overviewText,
-    copyLastRunAt,
-    ai.appliedAt,
-    config.objectiveText,
-    commitmentsKey,
-    runCopySuggestions,
-  ]);
-
-  const handleApplySuggestedParagraph = () => {
-    const suggestion = suggestedObjectiveParagraph.trim();
-    if (!suggestion) return;
-    const current = (objectiveText ?? "").trim();
-    const now = new Date().toISOString();
-    const nextAi = { ...ai, copyParagraphAppliedAt: now, appliedAt: now };
-    if (!current) {
-      updateObjective({
-        objectiveText: suggestion,
-        ai: nextAi,
-      });
-      setToast("Objective paragraph applied.");
-      return;
-    }
-    if (
-      typeof window === "undefined" ||
-      window.confirm(
-        "Replace existing objective paragraph with AI suggestion?",
-      )
-    ) {
-      updateObjective({
-        objectiveText: suggestion,
-        ai: nextAi,
-      });
-      setToast("Objective paragraph replaced with AI suggestion.");
-    }
-  };
-
-  const handleApplySuggestedCommitments = () => {
-    const cleanedSuggestions = suggestedCommitments
-      .map((c) => c.trim())
-      .filter(Boolean);
-    if (!cleanedSuggestions.length) return;
-    const currentTrimmed = commitments.map((c) => c.trim());
-    const hasExisting = currentTrimmed.some((c) => c.length > 0);
-    const next = [...cleanedSuggestions].slice(0, 3);
-    while (next.length < 3) next.push("");
-    const now = new Date().toISOString();
-    const nextAi = { ...ai, copyCommitmentsAppliedAt: now, appliedAt: now };
-    if (!hasExisting) {
-      updateObjective({
-        commitments: next,
-        ai: nextAi,
-      });
-      setToast("Commitments applied from AI suggestions.");
-      return;
-    }
-    if (
-      typeof window === "undefined" ||
-      window.confirm("Replace existing commitments with AI suggestions?")
-    ) {
-      updateObjective({
-        commitments: next,
-        ai: nextAi,
-      });
-      setToast("Commitments replaced with AI suggestions.");
-    }
-  };
-
   return (
     <section className="space-y-4">
       <div className="rounded-xl border border-zinc-200 bg-white/80 p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/60">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              Objective Content
-            </p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              This content is used by all Objective templates; the template only changes the layout.
-            </p>
-          </div>
-          <div className="flex flex-shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={runCopySuggestions}
-              disabled={!projectId || copyLoading}
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {copyLoading
-                ? "Running…"
-                : copyLastRunAt
-                  ? templateId === "C"
-                    ? "Re-run AI Copy + Subtitle"
-                    : "Re-run AI Copy"
-                  : templateId === "C"
-                    ? "Run AI Copy + Subtitle"
-                    : "Run AI Copy"}
-            </button>
-          </div>
+        <div className="mb-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Objective Content
+          </p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Objective, supporting text, and bullets are generated in the Overview tab. This content is used by all Objective templates; the template only changes the layout.
+          </p>
         </div>
-        {showGreenPanel ? (
-          <div className="mb-3 rounded-lg border border-dashed border-emerald-300 bg-emerald-50/70 p-3 text-xs dark:border-emerald-700 dark:bg-emerald-900/30">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="font-semibold text-emerald-900 dark:text-emerald-100">
-                Suggested objective & commitments (AI)
-              </p>
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800 dark:bg-emerald-800 dark:text-emerald-50">
-                Preview only – click Apply to use
-              </span>
-            </div>
-            <div className="space-y-2">
-              {showParagraphSuggestion ? (
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium text-emerald-900 dark:text-emerald-50">
-                      Suggested Objective Paragraph
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleApplySuggestedParagraph}
-                      className="rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                    >
-                      Apply to paragraph
-                    </button>
-                  </div>
-                  <p className="rounded-md bg-white/80 px-2.5 py-2 text-[11px] leading-relaxed text-emerald-950 shadow-sm dark:bg-emerald-950/40 dark:text-emerald-50">
-                    {suggestedObjectiveParagraph}
-                  </p>
-                </div>
-              ) : null}
-              {showCommitmentsSuggestion ? (
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium text-emerald-900 dark:text-emerald-50">
-                      Suggested Commitments
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleApplySuggestedCommitments}
-                      className="rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                    >
-                      Apply to commitments
-                    </button>
-                  </div>
-                  <ul className="space-y-1.5 text-[11px] text-emerald-950 dark:text-emerald-50">
-                    {suggestedCommitments.map((c, idx) =>
-                      c.trim() ? (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="mt-[3px] h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          <span>{c}</span>
-                        </li>
-                      ) : null,
-                    )}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
         <div className="space-y-3">
           <div>
             <label
@@ -1013,19 +755,11 @@ function ObjectiveContentEditor({
             · Overview:{" "}
             <span className="font-medium">
               {hasOverview ? `Present (${overviewChars} chars)` : "Empty (0)"}
-            </span>{" "}
-            · lastRunAt:{" "}
-            <span className="font-mono">{copyLastRunAt ?? "null"}</span>
+            </span>
           </p>
-          {copyError && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">
-              Copy: {copyError}
-            </p>
-          )}
           {!hasTranscript && !hasOverview && (
             <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-              Add transcript or objective text (Overview tab) to enable AI
-              suggestions.
+              Add transcript or objective text (Overview tab) to generate content.
             </p>
           )}
           {ai.appliedAt && (
@@ -1135,7 +869,6 @@ function ObjectiveTemplateAEditor({
   const hasAnySuggestions = (sections.length + tags.length) > 0;
   const transcriptChars = transcriptText?.trim().length ?? 0;
   const overviewChars = overviewText?.trim().length ?? 0;
-  const copyLastRunAt = ai.copyLastRunAt ?? ai.lastRunAt ?? null;
   const photoLastRunAt = ai.photoLastRunAt ?? null;
 
   const updateObjective = (partial: Partial<ObjectivePageConfig>) => {
@@ -1428,11 +1161,9 @@ function ObjectiveTemplateAEditor({
                           ? "Connect project to use AI suggestions."
                           : !hasTranscript && !hasOverview
                             ? "AI suggestions are disabled until you add transcript or objective text."
-                            : !copyLastRunAt && (hasTranscript || hasOverview)
-                              ? "Ready to run – click Run AI Copy or wait for auto-run."
-                              : hasAnySuggestions
-                                ? "AI suggestions ready."
-                                : "No suggestions yet for current inputs."}
+                            : hasAnySuggestions
+                              ? "AI suggestions ready."
+                              : "No suggestions yet for current inputs."}
                       </span>
                     </p>
                     <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -1448,17 +1179,9 @@ function ObjectiveTemplateAEditor({
                           ? `Present (${overviewChars} chars)`
                           : "Empty (0)"}
                       </span>{" "}
-                      · lastRunAt:{" "}
-                      <span className="font-mono">
-                        {copyLastRunAt ?? "null"}
-                      </span>
                     </p>
                     <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                      copyLastRunAt:{" "}
-                      <span className="font-mono">
-                        {copyLastRunAt ?? "null"}
-                      </span>{" "}
-                      · photoLastRunAt:{" "}
+                      photoLastRunAt:{" "}
                       <span className="font-mono">
                         {photoLastRunAt ?? "null"}
                       </span>

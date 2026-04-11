@@ -7,6 +7,8 @@ import type {
   RiskBriefContent,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
 
 interface Props {
   slide: ProposalSlide;
@@ -40,13 +42,14 @@ function TwoColumnLayout({
   bottomStatement,
   branding,
   hasBg,
-  titleSize, titleColor, titleTextOutline,
-  headerSize, headerTextColor, headerTextOutline,
+  titleFont, titleSize, titleBold, titleItalic, titleUnderline, titleColor, titleTextOutline,
+  headerFont, headerSize, headerBold, headerItalic, headerUnderline, headerTextColor, headerTextOutline,
   crossColor, checkColor, iconSize, iconOutline,
-  bodySize, bodyTextColor, bodyTextOutline,
-  bottomSize, bottomColor, bottomTextOutline,
+  bodySize, bodyBold, bodyItalic, bodyUnderline, bodyTextColor, bodyTextOutline,
+  bottomFont, bottomSize, bottomBold, bottomItalic, bottomUnderline, bottomColor, bottomTextOutline,
   leftBoxColor,
   rightBoxColor,
+  content,
 }: {
   title: string;
   eyebrow?: string | null;
@@ -57,13 +60,14 @@ function TwoColumnLayout({
   bottomStatement: string;
   branding: DeckBranding;
   hasBg: boolean;
-  titleSize: number; titleColor: string; titleTextOutline: string | null;
-  headerSize: number; headerTextColor: string | null; headerTextOutline: string | null;
+  titleFont: string; titleSize: number; titleBold: boolean; titleItalic: boolean; titleUnderline: boolean; titleColor: string; titleTextOutline: string | null;
+  headerFont: string; headerSize: number; headerBold: boolean; headerItalic: boolean; headerUnderline: boolean; headerTextColor: string | null; headerTextOutline: string | null;
   crossColor: string | null; checkColor: string | null; iconSize: number; iconOutline: string | null;
-  bodySize: number; bodyTextColor: string | null; bodyTextOutline: string | null;
-  bottomSize: number; bottomColor: string; bottomTextOutline: string | null;
+  bodySize: number; bodyBold: boolean; bodyItalic: boolean; bodyUnderline: boolean; bodyTextColor: string | null; bodyTextOutline: string | null;
+  bottomFont: string; bottomSize: number; bottomBold: boolean; bottomItalic: boolean; bottomUnderline: boolean; bottomColor: string; bottomTextOutline: string | null;
   leftBoxColor: string;
   rightBoxColor: string;
+  content: RiskBriefContent;
 }) {
   const titleShadow   = makeOutlineShadow(titleTextOutline);
   const headerShadow  = makeOutlineShadow(headerTextOutline);
@@ -98,11 +102,12 @@ function TwoColumnLayout({
       >
         {/* Title */}
         <div style={{ flexShrink: 0, marginBottom: "4%" }}>
-          {eyebrow && (
+          {(eyebrow) && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em", fontWeight: 600,
+                fontSize: SECTION_LABEL_SIZE, fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
                 letterSpacing: "0.13em", color: branding.accentColor,
                 marginBottom: "0.35em",
               }}
@@ -111,8 +116,17 @@ function TwoColumnLayout({
             </p>
           )}
           <h2
-            className="font-serif"
-            style={{ fontSize: `${2.3 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.1, maxWidth: "75%", textShadow: titleShadow }}
+            style={{
+              fontSize: `${2.3 * titleSize}em`,
+              fontFamily: titleFont,
+              fontWeight: titleBold ? 800 : 400,
+              fontStyle: titleItalic ? "italic" : undefined,
+              textDecoration: titleUnderline ? "underline" : undefined,
+              color: titleColor,
+              lineHeight: 1.1,
+              maxWidth: "75%",
+              textShadow: titleShadow,
+            }}
           >
             {title}
           </h2>
@@ -142,9 +156,12 @@ function TwoColumnLayout({
             }}
           >
             <p
-              className="font-serif"
               style={{
-                fontSize: `${0.82 * headerSize}em`, fontWeight: 700,
+                fontFamily: headerFont,
+                fontSize: `${0.82 * headerSize}em`,
+                fontWeight: headerBold ? 700 : 400,
+                fontStyle: headerItalic ? "italic" : undefined,
+                textDecoration: headerUnderline ? "underline" : undefined,
                 color: headerTextColor ?? (hasBg ? "rgba(255,255,255,0.75)" : "#6B7280"),
                 letterSpacing: "0.01em", textTransform: "uppercase",
                 textShadow: headerShadow,
@@ -165,8 +182,11 @@ function TwoColumnLayout({
                   </span>
                   <p style={{
                     fontSize: `${0.72 * bodySize}em`,
+                    fontWeight: bodyBold ? 700 : 400,
+                    fontStyle: bodyItalic ? "italic" : undefined,
+                    textDecoration: bodyUnderline ? "underline" : undefined,
                     color: bodyTextColor ?? (hasBg ? "rgba(255,255,255,0.88)" : "#4B5563"),
-                    lineHeight: 1.65, fontWeight: 400,
+                    lineHeight: 1.65,
                     textShadow: outlineShadow,
                   }}>{bullet}</p>
                 </div>
@@ -191,9 +211,12 @@ function TwoColumnLayout({
             }}
           >
             <p
-              className="font-serif"
               style={{
-                fontSize: `${0.82 * headerSize}em`, fontWeight: 700,
+                fontFamily: headerFont,
+                fontSize: `${0.82 * headerSize}em`,
+                fontWeight: headerBold ? 700 : 400,
+                fontStyle: headerItalic ? "italic" : undefined,
+                textDecoration: headerUnderline ? "underline" : undefined,
                 color: headerTextColor ?? (hasBg ? "#FFFFFF" : branding.accentColor),
                 letterSpacing: "0.01em", textTransform: "uppercase",
                 textShadow: headerShadow,
@@ -214,8 +237,11 @@ function TwoColumnLayout({
                   </span>
                   <p style={{
                     fontSize: `${0.72 * bodySize}em`,
+                    fontWeight: bodyBold ? 700 : 500,
+                    fontStyle: bodyItalic ? "italic" : undefined,
+                    textDecoration: bodyUnderline ? "underline" : undefined,
                     color: bodyTextColor ?? (hasBg ? "#FFFFFF" : branding.textColor),
-                    lineHeight: 1.65, fontWeight: 500,
+                    lineHeight: 1.65,
                     textShadow: outlineShadow,
                   }}>{bullet}</p>
                 </div>
@@ -227,13 +253,31 @@ function TwoColumnLayout({
         {/* Bottom statement */}
         <div style={{ flexShrink: 0, borderTop: `1px solid ${branding.accentColor}33`, paddingTop: "3%" }}>
           <p
-            className="font-serif"
-            style={{ fontSize: `${0.82 * bottomSize}em`, fontWeight: 700, color: bottomColor, lineHeight: 1.5, textAlign: "center", fontStyle: "italic", textShadow: bottomShadow }}
+            style={{
+              fontFamily: bottomFont,
+              fontSize: `${0.82 * bottomSize}em`,
+              fontWeight: bottomBold ? 700 : 400,
+              fontStyle: bottomItalic ? "italic" : undefined,
+              textDecoration: bottomUnderline ? "underline" : undefined,
+              color: bottomColor,
+              lineHeight: 1.5,
+              textAlign: "center",
+              textShadow: bottomShadow,
+            }}
           >
             {bottomStatement}
           </p>
         </div>
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
@@ -251,13 +295,14 @@ function ComparisonTableLayout({
   bottomStatement,
   branding,
   hasBg,
-  titleSize, titleColor, titleTextOutline,
-  headerSize, headerTextColor, headerTextOutline,
+  titleFont, titleSize, titleBold, titleItalic, titleUnderline, titleColor, titleTextOutline,
+  headerFont, headerSize, headerBold, headerItalic, headerUnderline, headerTextColor, headerTextOutline,
   crossColor, checkColor, iconSize, iconOutline,
-  bodySize, bodyTextColor, bodyTextOutline,
-  bottomSize, bottomColor, bottomTextOutline,
+  bodySize, bodyBold, bodyItalic, bodyUnderline, bodyTextColor, bodyTextOutline,
+  bottomFont, bottomSize, bottomBold, bottomItalic, bottomUnderline, bottomColor, bottomTextOutline,
   leftBoxColor,
   rightBoxColor,
+  content,
 }: {
   title: string;
   eyebrow?: string | null;
@@ -269,13 +314,14 @@ function ComparisonTableLayout({
   bottomStatement: string;
   branding: DeckBranding;
   hasBg: boolean;
-  titleSize: number; titleColor: string; titleTextOutline: string | null;
-  headerSize: number; headerTextColor: string | null; headerTextOutline: string | null;
+  titleFont: string; titleSize: number; titleBold: boolean; titleItalic: boolean; titleUnderline: boolean; titleColor: string; titleTextOutline: string | null;
+  headerFont: string; headerSize: number; headerBold: boolean; headerItalic: boolean; headerUnderline: boolean; headerTextColor: string | null; headerTextOutline: string | null;
   crossColor: string | null; checkColor: string | null; iconSize: number; iconOutline: string | null;
-  bodySize: number; bodyTextColor: string | null; bodyTextOutline: string | null;
-  bottomSize: number; bottomColor: string; bottomTextOutline: string | null;
+  bodySize: number; bodyBold: boolean; bodyItalic: boolean; bodyUnderline: boolean; bodyTextColor: string | null; bodyTextOutline: string | null;
+  bottomFont: string; bottomSize: number; bottomBold: boolean; bottomItalic: boolean; bottomUnderline: boolean; bottomColor: string; bottomTextOutline: string | null;
   leftBoxColor: string;
   rightBoxColor: string;
+  content: RiskBriefContent;
 }) {
   const numRows = Math.max(leftBullets.length, rightBullets.length);
   const hasLabels = rowLabels.length > 0;
@@ -323,11 +369,12 @@ function ComparisonTableLayout({
       >
         {/* Title */}
         <div style={{ flexShrink: 0, marginBottom: "3.5%" }}>
-          {eyebrow && (
+          {(eyebrow) && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em", fontWeight: 600,
+                fontSize: SECTION_LABEL_SIZE, fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
                 letterSpacing: "0.13em", color: branding.accentColor,
                 marginBottom: "0.35em",
               }}
@@ -336,8 +383,17 @@ function ComparisonTableLayout({
             </p>
           )}
           <h2
-            className="font-serif"
-            style={{ fontSize: `${2.3 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.2, maxWidth: "80%", textShadow: titleShadow }}
+            style={{
+              fontSize: `${2.3 * titleSize}em`,
+              fontFamily: titleFont,
+              fontWeight: titleBold ? 800 : 400,
+              fontStyle: titleItalic ? "italic" : undefined,
+              textDecoration: titleUnderline ? "underline" : undefined,
+              color: titleColor,
+              lineHeight: 1.2,
+              maxWidth: "80%",
+              textShadow: titleShadow,
+            }}
           >
             {title}
           </h2>
@@ -380,9 +436,12 @@ function ComparisonTableLayout({
               }}
             >
               <span
-                className="font-serif"
                 style={{
-                  fontSize: `${0.74 * headerSize}em`, fontWeight: 700,
+                  fontFamily: headerFont,
+                  fontSize: `${0.74 * headerSize}em`,
+                  fontWeight: headerBold ? 700 : 400,
+                  fontStyle: headerItalic ? "italic" : undefined,
+                  textDecoration: headerUnderline ? "underline" : undefined,
                   color: headerTextColor ?? "rgba(255,255,255,0.65)",
                   textAlign: "center", letterSpacing: "0.04em",
                   textTransform: "uppercase",
@@ -405,9 +464,12 @@ function ComparisonTableLayout({
               }}
             >
               <span
-                className="font-serif"
                 style={{
-                  fontSize: `${0.74 * headerSize}em`, fontWeight: 800,
+                  fontFamily: headerFont,
+                  fontSize: `${0.74 * headerSize}em`,
+                  fontWeight: headerBold ? 800 : 400,
+                  fontStyle: headerItalic ? "italic" : undefined,
+                  textDecoration: headerUnderline ? "underline" : undefined,
                   color: headerTextColor ?? "#FFFFFF",
                   textAlign: "center", letterSpacing: "0.04em",
                   textTransform: "uppercase",
@@ -462,7 +524,15 @@ function ComparisonTableLayout({
                   >
                     <span style={{ flexShrink: 0, fontSize: `${0.6 * iconSize}em`, color: crossColor ?? "rgba(255,255,255,0.35)", lineHeight: 1, marginTop: "0.1em", textShadow: iconShadow }}>✕</span>
                     <span
-                      style={{ fontSize: `${0.65 * bodySize}em`, color: bodyTextColor ?? "rgba(255,255,255,0.55)", lineHeight: 1.6, fontStyle: "italic", textShadow: outlineShadow }}
+                      style={{
+                        fontSize: `${0.65 * bodySize}em`,
+                        fontWeight: bodyBold ? 700 : 400,
+                        fontStyle: bodyItalic ? "italic" : "italic",
+                        textDecoration: bodyUnderline ? "underline" : undefined,
+                        color: bodyTextColor ?? "rgba(255,255,255,0.55)",
+                        lineHeight: 1.6,
+                        textShadow: outlineShadow,
+                      }}
                     >
                       {leftBullets[i] ?? ""}
                     </span>
@@ -497,7 +567,15 @@ function ComparisonTableLayout({
                         />
                       </svg>
                     </div>
-                    <span style={{ fontSize: `${0.68 * bodySize}em`, fontWeight: 700, color: bodyTextColor ?? "#FFFFFF", lineHeight: 1.45, textShadow: outlineShadow }}>
+                    <span style={{
+                      fontSize: `${0.68 * bodySize}em`,
+                      fontWeight: bodyBold ? 700 : 700,
+                      fontStyle: bodyItalic ? "italic" : undefined,
+                      textDecoration: bodyUnderline ? "underline" : undefined,
+                      color: bodyTextColor ?? "#FFFFFF",
+                      lineHeight: 1.45,
+                      textShadow: outlineShadow,
+                    }}>
                       {rightBullets[i] ?? ""}
                     </span>
                   </div>
@@ -511,14 +589,31 @@ function ComparisonTableLayout({
         {bottomStatement && (
           <div style={{ flexShrink: 0, paddingTop: "3%", textAlign: "center" }}>
             <p
-              className="font-serif"
-              style={{ fontSize: `${0.73 * bottomSize}em`, fontWeight: 700, color: bottomColor, lineHeight: 1.5, fontStyle: "italic", textShadow: bottomShadow }}
+              style={{
+                fontFamily: bottomFont,
+                fontSize: `${0.73 * bottomSize}em`,
+                fontWeight: bottomBold ? 700 : 400,
+                fontStyle: bottomItalic ? "italic" : undefined,
+                textDecoration: bottomUnderline ? "underline" : undefined,
+                color: bottomColor,
+                lineHeight: 1.5,
+                textShadow: bottomShadow,
+              }}
             >
               {bottomStatement}
             </p>
           </div>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "dark"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
@@ -533,25 +628,51 @@ function makeOutlineShadow(color: string | null | undefined): string | undefined
 
 export function RiskBriefSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as RiskBriefContent;
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
   const layoutKey = slide.layoutKey as string;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
+  // Per-field: Title
+  const titleFont        = content.titleFont        ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const titleSize        = content.titleSize        ?? 1.5;
+  const titleBold        = content.titleBold        ?? true;
+  const titleItalic      = content.titleItalic      ?? false;
+  const titleUnderline   = content.titleUnderline   ?? false;
   const titleColor       = content.titleColor       ?? (layoutKey === "comparison-table" ? "#FFFFFF" : branding.textColor);
   const titleTextOutline = content.titleTextOutline ?? null;
+
+  // Per-field: Column headers
+  const headerFont       = content.headerFont       ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const headerSize       = content.headerSize       ?? 1.5;
+  const headerBold       = content.headerBold       ?? true;
+  const headerItalic     = content.headerItalic     ?? false;
+  const headerUnderline  = content.headerUnderline  ?? false;
   const headerTextColor  = content.headerTextColor  ?? null;
   const headerTextOutline = content.headerTextOutline ?? null;
+
+  // Per-field: Body / bullets
+  const bodySize         = content.bodySize         ?? 1.5;
+  const bodyBold         = content.bodyBold         ?? false;
+  const bodyItalic       = content.bodyItalic       ?? false;
+  const bodyUnderline    = content.bodyUnderline    ?? false;
+  const bodyTextColor    = content.bodyTextColor    ?? null;
+  const bodyTextOutline  = content.bodyTextOutline  ?? null;
+
+  // Per-field: Bottom statement
+  const bottomFont       = content.bottomFont       ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const bottomSize       = content.bottomSize       ?? 1.5;
+  const bottomBold       = content.bottomBold       ?? true;
+  const bottomItalic     = content.bottomItalic     ?? true;
+  const bottomUnderline  = content.bottomUnderline  ?? false;
+  const bottomColor      = content.bottomColor      ?? branding.accentColor;
+  const bottomTextOutline = content.bottomTextOutline ?? null;
+
+  // Icons & colors
   const crossColor       = content.crossColor       ?? null;
   const checkColor       = content.checkColor       ?? null;
   const iconSize         = content.iconSize         ?? 1.5;
   const iconOutline      = content.iconOutline      ?? null;
-  const bodySize         = content.bodySize         ?? 1.5;
-  const bodyTextColor    = content.bodyTextColor    ?? null;
-  const bodyTextOutline  = content.bodyTextOutline  ?? null;
-  const bottomSize       = content.bottomSize       ?? 1.5;
-  const bottomColor      = content.bottomColor      ?? branding.accentColor;
-  const bottomTextOutline = content.bottomTextOutline ?? null;
   const leftBoxColor     = content.leftBoxColor     ?? "#0D1B2A";
   const rightBoxColor    = content.rightBoxColor    ?? branding.accentColor;
   const showRowLabels    = content.showRowLabels    ?? false;
@@ -568,15 +689,18 @@ export function RiskBriefSlide({ slide, branding, hasAiBackground }: Props) {
     content.bottomStatement ??
     "You'll know exactly what's being built, what it costs, and what to expect — before construction starts.";
 
+  const effectiveBranding = accent !== branding.accentColor ? { ...branding, accentColor: accent } : branding;
+
   const sharedProps = {
-    branding, hasBg,
-    titleSize, titleColor, titleTextOutline,
-    headerSize, headerTextColor, headerTextOutline,
+    branding: effectiveBranding, hasBg,
+    titleFont, titleSize, titleBold, titleItalic, titleUnderline, titleColor, titleTextOutline,
+    headerFont, headerSize, headerBold, headerItalic, headerUnderline, headerTextColor, headerTextOutline,
     crossColor, checkColor, iconSize, iconOutline,
-    bodySize, bodyTextColor, bodyTextOutline,
-    bottomSize, bottomColor, bottomTextOutline,
+    bodySize, bodyBold, bodyItalic, bodyUnderline, bodyTextColor, bodyTextOutline,
+    bottomFont, bottomSize, bottomBold, bottomItalic, bottomUnderline, bottomColor, bottomTextOutline,
     leftBoxColor, rightBoxColor,
     leftBullets, rightBullets, bottomStatement,
+    content,
   };
 
   if (layoutKey === "comparison-table") {
@@ -585,7 +709,7 @@ export function RiskBriefSlide({ slide, branding, hasAiBackground }: Props) {
       <ComparisonTableLayout
         {...sharedProps}
         title={title}
-        eyebrow={slide.subheadline}
+        eyebrow={(content.showSectionLabel ?? true) ? slide.subheadline : null}
         leftColHeader={content.leftHeader || "Traditional Contracting"}
         rightColHeader={content.rightHeader || "HHI Design-Build"}
         rowLabels={rowLabels}
@@ -597,7 +721,7 @@ export function RiskBriefSlide({ slide, branding, hasAiBackground }: Props) {
     <TwoColumnLayout
       {...sharedProps}
       title={title}
-      eyebrow={slide.subheadline}
+      eyebrow={(content.showSectionLabel ?? true) ? slide.subheadline : null}
       leftHeader={content.leftHeader || "Why Remodels Go Wrong"}
       rightHeader={content.rightHeader || "How We Prevent That"}
     />

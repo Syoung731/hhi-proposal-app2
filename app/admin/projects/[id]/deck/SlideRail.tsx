@@ -26,6 +26,16 @@ const TYPE_ICON: Record<SlideType, string> = {
   "scope-breakdown": "📝",
   "risk-brief":      "🛡",
   "process":         "📐",
+  "core-values":     "💎",
+  "project-timeline": "📅",
+  "cope-page":        "🔧",
+  "design-retainer":  "📄",
+  "next-steps":       "➡",
+  "closing-slide":    "🏁",
+  "visual-inspiration": "🖼",
+  "client-testimonials": "💬",
+  "design-build-advantage": "🏗",
+  "addition-overview": "🏠",
 };
 
 // ─── Constraint helpers ───────────────────────────────────────────────────────

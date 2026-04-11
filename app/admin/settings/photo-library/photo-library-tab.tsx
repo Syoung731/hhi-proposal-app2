@@ -89,13 +89,12 @@ export function PhotoLibraryTab() {
 
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
-  const [metadataStepIndex, setMetadataStepIndex] = useState<number | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
   const [metadataDrafts, setMetadataDrafts] = useState<Record<number, Partial<FinalizeLibraryMediaInput>>>({});
 
   const [detailItem, setDetailItem] = useState<LibraryMediaItem | null>(null);
   const [detailDraft, setDetailDraft] = useState<Partial<LibraryMediaItem>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
-  const queuedFilesRef = useRef<QueuedFile[]>([]);
 
   const [filters, setFilters] = useState<ListLibraryMediaFilters>({
     sort: "newest",
@@ -162,7 +161,7 @@ export function PhotoLibraryTab() {
 
   const handleUploadClick = () => {
     setQueuedFiles([]);
-    setMetadataStepIndex(null);
+    setBatchMode(false);
     setMetadataDrafts({});
     setUploadModalOpen(true);
   };
@@ -181,18 +180,13 @@ export function PhotoLibraryTab() {
       delete out[index];
       return out;
     });
-    if (metadataStepIndex === index) setMetadataStepIndex(null);
-    else if (metadataStepIndex != null && metadataStepIndex > index)
-      setMetadataStepIndex(metadataStepIndex - 1);
   };
 
-  queuedFilesRef.current = queuedFiles;
 
   const startUploads = async () => {
     const queued = queuedFiles.filter((q) => q.status === "queued");
     if (queued.length === 0) {
-      const firstDone = queuedFiles.findIndex((q) => q.status === "done");
-      setMetadataStepIndex(firstDone >= 0 ? firstDone : 0);
+      setBatchMode(true);
       return;
     }
     for (let i = 0; i < queuedFiles.length; i++) {
@@ -249,45 +243,46 @@ export function PhotoLibraryTab() {
       );
     }
     setTimeout(() => {
-      const current = queuedFilesRef.current;
-      const firstDone = current.findIndex((q) => q.status === "done");
-      setMetadataStepIndex(firstDone >= 0 ? firstDone : 0);
+      setBatchMode(true);
     }, 0);
   };
 
-  const saveMetadataForIndex = async (index: number) => {
-    const q = queuedFiles[index];
-    if (!q || q.status !== "done" || !q.objectKey || !q.publicUrl) return;
-    const draft = metadataDrafts[index] ?? {};
-    const result = await finalizeLibraryMediaAction({
-      objectKey: q.objectKey,
-      publicUrl: q.publicUrl,
-      roomTypeIds: draft.roomTypeIds ?? [],
-      tags: draft.tags ?? [],
-      useType: draft.useType ?? "AFTER",
-      quality: draft.quality ?? "STANDARD",
-      orientation: q.detectedOrientation ?? "UNKNOWN",
-      marketingApproved: draft.marketingApproved ?? true,
-      sourceProjectName: draft.sourceProjectName ?? undefined,
-      sourceProjectId: draft.sourceProjectId ?? undefined,
-      photographer: draft.photographer ?? undefined,
-    });
-    if (result.error) {
-      showStatus(result.error, true);
-      return;
+  const saveAllMetadata = async () => {
+    let savedCount = 0;
+    let lastError: string | null = null;
+    for (let i = 0; i < queuedFiles.length; i++) {
+      const q = queuedFiles[i];
+      if (!q || q.status !== "done" || !q.objectKey || !q.publicUrl) continue;
+      const draft = metadataDrafts[i] ?? {};
+      const result = await finalizeLibraryMediaAction({
+        objectKey: q.objectKey,
+        publicUrl: q.publicUrl,
+        roomTypeIds: draft.roomTypeIds ?? [],
+        tags: draft.tags ?? [],
+        useType: draft.useType ?? "AFTER",
+        quality: draft.quality ?? "STANDARD",
+        orientation: q.detectedOrientation ?? "UNKNOWN",
+        marketingApproved: draft.marketingApproved ?? true,
+        sourceProjectName: draft.sourceProjectName ?? undefined,
+        sourceProjectId: draft.sourceProjectId ?? undefined,
+        photographer: draft.photographer ?? undefined,
+      });
+      if (result.error) {
+        lastError = result.error;
+      } else {
+        savedCount++;
+      }
     }
     await refreshLearnedTags();
-    setMetadataDrafts((d) => ({ ...d, [index]: {} }));
-    const nextIndex = queuedFiles.findIndex(
-      (f, i) => i > index && f.status === "done"
-    );
-    if (nextIndex >= 0) setMetadataStepIndex(nextIndex);
-    else {
-      setMetadataStepIndex(null);
-      setUploadModalOpen(false);
-      setQueuedFiles([]);
-      fetchList();
-      showStatus("Photos added to library.", false);
+    setBatchMode(false);
+    setUploadModalOpen(false);
+    setQueuedFiles([]);
+    setMetadataDrafts({});
+    fetchList();
+    if (lastError) {
+      showStatus(`Saved ${savedCount} photos. Last error: ${lastError}`, true);
+    } else {
+      showStatus(`${savedCount} photo${savedCount === 1 ? "" : "s"} added to library.`, false);
     }
   };
 
@@ -649,18 +644,18 @@ export function PhotoLibraryTab() {
       {uploadModalOpen && (
         <UploadModal
           queuedFiles={queuedFiles}
-          metadataStepIndex={metadataStepIndex}
+          batchMode={batchMode}
           metadataDrafts={metadataDrafts}
           setMetadataDrafts={setMetadataDrafts}
           onFilesSelected={handleFilesSelected}
           onRemove={removeQueued}
           onStartUploads={startUploads}
-          onSaveMetadata={saveMetadataForIndex}
+          onSaveAll={saveAllMetadata}
           learnedTags={learnedTags}
           onClose={() => {
             setUploadModalOpen(false);
             setQueuedFiles([]);
-            setMetadataStepIndex(null);
+            setBatchMode(false);
             setMetadataDrafts({});
           }}
         />
@@ -1334,125 +1329,116 @@ function buildSuggestSignature(parts: {
 
 function UploadModal({
   queuedFiles,
-  metadataStepIndex,
+  batchMode,
   metadataDrafts,
   setMetadataDrafts,
   onFilesSelected,
   onRemove,
   onStartUploads,
-  onSaveMetadata,
+  onSaveAll,
   onClose,
   learnedTags,
 }: {
   queuedFiles: QueuedFile[];
-  metadataStepIndex: number | null;
+  batchMode: boolean;
   metadataDrafts: Record<number, Partial<FinalizeLibraryMediaInput>>;
   setMetadataDrafts: React.Dispatch<React.SetStateAction<Record<number, Partial<FinalizeLibraryMediaInput>>>>;
   onFilesSelected: (files: File[]) => void;
   onRemove: (index: number) => void;
   onStartUploads: () => Promise<void>;
-  onSaveMetadata: (index: number) => Promise<void>;
+  onSaveAll: () => Promise<void>;
   onClose: () => void;
   learnedTags: string[];
 }) {
   const [saving, setSaving] = useState(false);
-  const [suggestLoading, setSuggestLoading] = useState(false);
-  const [suggestResult, setSuggestResult] = useState<SuggestLibraryMediaTagsResult | null>(null);
-  const [suggestError, setSuggestError] = useState<string | null>(null);
-  const [suggestionsDismissed, setSuggestionsDismissed] = useState<Set<string>>(new Set());
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  const [batchDraft, setBatchDraft] = useState<Partial<FinalizeLibraryMediaInput>>({
+    marketingApproved: true,
+  });
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [applyFlash, setApplyFlash] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isPickingRef = useRef(false);
-  const doneCount = queuedFiles.filter((q) => q.status === "done").length;
   const hasQueued = queuedFiles.some((q) => q.status === "queued");
 
-  const fetchSuggestionsForUpload = useCallback(
-    async (index: number) => {
-      const q = queuedFiles[index];
-      const draft = metadataDrafts[index] ?? {};
-      if (!q || q.status !== "done" || !q.publicUrl) return;
-      const mediaKey = q.objectKey ?? q.publicUrl ?? "";
-      const signature = buildSuggestSignature({
-        title: draft.title,
-        notes: draft.description,
-        sections: draft.roomTypeIds ?? [],
-        tags: draft.tags ?? [],
-        mediaKey,
-      });
-      const cached = suggestionsCache.get(mediaKey);
-      if (cached && cached.signature === signature) {
-        setSuggestResult(cached.data);
-        setSuggestError(null);
-        return;
-      }
-      setSuggestLoading(true);
-      setSuggestError(null);
-      const res = await suggestLibraryMediaTagsAction({
-        imageUrl: q.publicUrl,
-        fileKey: q.objectKey ?? undefined,
-        title: draft.title ?? undefined,
-        description: draft.description ?? undefined,
-        currentSectionIds: draft.roomTypeIds ?? [],
-        currentTags: draft.tags ?? [],
-      });
-      setSuggestLoading(false);
-      if (res.error) {
-        setSuggestError(res.error);
-        setSuggestResult(null);
-        return;
-      }
-      if (res.data) {
-        setSuggestResult(res.data);
-        setSuggestError(null);
-        suggestionsCache.set(mediaKey, { data: res.data, signature });
-      }
-    },
-    [queuedFiles, metadataDrafts]
+  const doneIndices = useMemo(
+    () => queuedFiles.map((q, i) => (q.status === "done" ? i : -1)).filter((i) => i >= 0),
+    [queuedFiles]
   );
 
-  useEffect(() => {
-    if (metadataStepIndex === null) return;
-    const q = queuedFiles[metadataStepIndex];
-    if (!q || q.status !== "done") return;
-    const mediaKey = q.objectKey ?? q.publicUrl ?? "";
-    setSuggestResult(null);
-    setSuggestError(null);
-    fetchSuggestionsForUpload(metadataStepIndex);
-  }, [metadataStepIndex, queuedFiles, fetchSuggestionsForUpload]);
+  const toggleSelect = (index: number) => {
+    setSelectedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
 
-  useEffect(() => {
-    if (metadataStepIndex === null) return;
-    const q = queuedFiles[metadataStepIndex];
-    const draft = metadataDrafts[metadataStepIndex] ?? {};
-    if (!q || q.status !== "done") return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-      fetchSuggestionsForUpload(metadataStepIndex);
-    }, SUGGEST_DEBOUNCE_MS);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [
-    metadataStepIndex,
-    metadataDrafts[metadataStepIndex ?? -1]?.title,
-    metadataDrafts[metadataStepIndex ?? -1]?.description,
-    metadataDrafts[metadataStepIndex ?? -1]?.roomTypeIds,
-    metadataDrafts[metadataStepIndex ?? -1]?.tags,
-  ]);
+  const toggleSelectAll = () => {
+    if (selectedIndices.size === doneIndices.length) {
+      setSelectedIndices(new Set());
+    } else {
+      setSelectedIndices(new Set(doneIndices));
+    }
+  };
 
-  const handleSaveMetadata = async (index: number) => {
+  const applyBatchToSelected = () => {
+    const count = selectedIndices.size;
+    if (count === 0) return;
+    const appliedSections = batchDraft.roomTypeIds ?? [];
+    const appliedTags = batchDraft.tags ?? [];
+    setMetadataDrafts((prev) => {
+      const next = { ...prev };
+      for (const idx of selectedIndices) {
+        const existing = next[idx] ?? {};
+        const merged: Partial<FinalizeLibraryMediaInput> = { ...existing };
+        if (appliedSections.length > 0) {
+          const existingSections = existing.roomTypeIds ?? [];
+          const combined = Array.from(new Set([...existingSections, ...appliedSections])).slice(0, 3);
+          merged.roomTypeIds = combined;
+        }
+        if (appliedTags.length > 0) {
+          const existingTags = existing.tags ?? [];
+          const combined = Array.from(new Set([...existingTags, ...appliedTags]));
+          merged.tags = combined;
+        }
+        if (batchDraft.useType) merged.useType = batchDraft.useType;
+        if (batchDraft.quality) merged.quality = batchDraft.quality;
+        if (batchDraft.marketingApproved !== undefined) merged.marketingApproved = batchDraft.marketingApproved;
+        next[idx] = merged;
+      }
+      return next;
+    });
+    // Build flash message
+    const parts: string[] = [];
+    if (appliedSections.length > 0) parts.push(appliedSections.join(", "));
+    if (appliedTags.length > 0) parts.push(appliedTags.length + " tag" + (appliedTags.length > 1 ? "s" : ""));
+    const label = parts.length > 0 ? parts.join(" + ") : "Settings";
+    setApplyFlash(`Applied ${label} to ${count} photo${count > 1 ? "s" : ""}`);
+    setTimeout(() => setApplyFlash(null), 3000);
+    // Reset controls for next batch
+    setBatchDraft({ marketingApproved: true });
+    setSelectedIndices(new Set());
+  };
+
+  const handleSaveAll = async () => {
     setSaving(true);
-    await onSaveMetadata(index);
+    await onSaveAll();
     setSaving(false);
   };
 
+  const taggedCount = doneIndices.filter((i) => {
+    const d = metadataDrafts[i];
+    return d && ((d.roomTypeIds && d.roomTypeIds.length > 0) || (d.tags && d.tags.length > 0));
+  }).length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-x-hidden overflow-y-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="sticky top-0 flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-x-hidden overflow-y-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            {metadataStepIndex !== null ? "Add metadata" : "Upload photos"}
+            {batchMode ? "Tag & Organize" : "Upload Photos"}
           </h2>
           <button
             type="button"
@@ -1463,7 +1449,7 @@ function UploadModal({
           </button>
         </div>
         <div className="min-w-0 p-6">
-          {metadataStepIndex === null ? (
+          {!batchMode ? (
             <>
               <div className="mb-3 block">
                 <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
@@ -1496,7 +1482,6 @@ function UploadModal({
                     if (!input) return;
                     isPickingRef.current = true;
                     input.click();
-                    // Fallback in case the user cancels the picker without triggering onChange
                     setTimeout(() => {
                       isPickingRef.current = false;
                     }, 0);
@@ -1562,98 +1547,43 @@ function UploadModal({
                   disabled={queuedFiles.length === 0}
                   className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                 >
-                  {hasQueued ? "Upload & add metadata" : "Add metadata"}
+                  {hasQueued ? "Upload & tag" : "Tag photos"}
                 </button>
               </div>
             </>
           ) : (
-            (() => {
-              const q = queuedFiles[metadataStepIndex!];
-              if (!q || q.status !== "done" || !q.publicUrl) return null;
-              const existingDraft = metadataDrafts[metadataStepIndex!] ?? {};
-              const draft: Partial<FinalizeLibraryMediaInput> = {
-                ...existingDraft,
-                marketingApproved:
-                  existingDraft.marketingApproved ?? true,
-              };
-              const setDraft = (up: Partial<FinalizeLibraryMediaInput>) =>
-                setMetadataDrafts((prev) => ({
-                  ...prev,
-                  [metadataStepIndex!]: { ...prev[metadataStepIndex!], ...up },
-                }));
-              return (
-                <div className="space-y-4">
-              <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-                <img
-                  src={q.publicUrl}
-                  alt="Preview"
-                  className="h-full w-full object-contain"
-                />
-              </div>
+            <div className="space-y-4">
+              {/* Batch controls */}
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
+                <p className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  {selectedIndices.size > 0
+                    ? `Apply to ${selectedIndices.size} selected photo${selectedIndices.size !== 1 ? "s" : ""}`
+                    : "Select photos below, then set tags here"}
+                </p>
+                <div className="space-y-3">
                   <SectionsField
-                    value={draft.roomTypeIds ?? []}
-                    onChange={(roomTypeIds) => setDraft({ roomTypeIds })}
+                    value={batchDraft.roomTypeIds ?? []}
+                    onChange={(roomTypeIds) => setBatchDraft((d) => ({ ...d, roomTypeIds }))}
                   />
                   <HybridTagsField
-                    value={draft.tags ?? []}
+                    value={batchDraft.tags ?? []}
                     learnedTags={learnedTags}
                     onChange={(updater) =>
-                      setMetadataDrafts((prev) => {
-                        const current = prev[metadataStepIndex!] ?? {};
-                        const prevTags = current.tags ?? [];
-                        const nextTags = updater(prevTags);
-                        return {
-                          ...prev,
-                          [metadataStepIndex!]: { ...current, tags: nextTags },
-                        };
-                      })
+                      setBatchDraft((d) => ({ ...d, tags: updater(d.tags ?? []) }))
                     }
                     maxChipsDisplay={12}
                   />
-                  {suggestLoading && (
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400">Suggesting…</p>
-                  )}
-                  {suggestError && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                      Couldn&apos;t load suggestions.{" "}
-                      <button
-                        type="button"
-                        onClick={() => fetchSuggestionsForUpload(metadataStepIndex!)}
-                        className="underline hover:no-underline"
-                      >
-                        Retry
-                      </button>
-                    </p>
-                  )}
-                  {suggestResult && !suggestionsDismissed.has(q.objectKey ?? q.publicUrl ?? "") && (
-                    <SuggestionsBlock
-                      result={suggestResult}
-                      currentSections={draft.roomTypeIds ?? []}
-                      currentTags={draft.tags ?? []}
-                      currentUseType={draft.useType ?? "AFTER"}
-                      currentQuality={draft.quality ?? "STANDARD"}
-                      onSectionsChange={(roomTypeIds) => setDraft({ roomTypeIds })}
-                      onTagsChange={(tags) => setDraft({ tags })}
-                      onUseTypeChange={(v) => setDraft({ useType: v as FinalizeLibraryMediaInput["useType"] })}
-                      onQualityChange={(v) => setDraft({ quality: v as FinalizeLibraryMediaInput["quality"] })}
-                      onDismiss={() =>
-                        setSuggestionsDismissed((prev) =>
-                          new Set(prev).add(q.objectKey ?? q.publicUrl ?? "")
-                        )
-                      }
-                    />
-                  )}
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-3">
                     <label className="block">
-                      <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
                         Use type
                       </span>
                       <select
-                        value={draft.useType ?? "AFTER"}
+                        value={batchDraft.useType ?? "AFTER"}
                         onChange={(e) =>
-                          setDraft({ useType: e.target.value as FinalizeLibraryMediaInput["useType"] })
+                          setBatchDraft((d) => ({ ...d, useType: e.target.value as FinalizeLibraryMediaInput["useType"] }))
                         }
-                        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
                       >
                         {USE_TYPE_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -1663,15 +1593,15 @@ function UploadModal({
                       </select>
                     </label>
                     <label className="block">
-                      <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
                         Quality
                       </span>
                       <select
-                        value={draft.quality ?? "STANDARD"}
+                        value={batchDraft.quality ?? "STANDARD"}
                         onChange={(e) =>
-                          setDraft({ quality: e.target.value as FinalizeLibraryMediaInput["quality"] })
+                          setBatchDraft((d) => ({ ...d, quality: e.target.value as FinalizeLibraryMediaInput["quality"] }))
                         }
-                        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
                       >
                         {QUALITY_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -1680,51 +1610,244 @@ function UploadModal({
                         ))}
                       </select>
                     </label>
-                  </div>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Orientation: <strong>{ORIENTATION_OPTIONS.find((o) => o.value === (q.detectedOrientation ?? "UNKNOWN"))?.label ?? (q.detectedOrientation ?? "Unknown")}</strong> (from image dimensions)
-                  </p>
-                  <label className="block">
-                    <div className="flex items-center gap-2">
+                    <label className="flex items-end gap-2 pb-1">
                       <input
                         type="checkbox"
-                        checked={draft.marketingApproved ?? false}
-                        onChange={(e) => setDraft({ marketingApproved: e.target.checked })}
+                        checked={batchDraft.marketingApproved ?? true}
+                        onChange={(e) => setBatchDraft((d) => ({ ...d, marketingApproved: e.target.checked }))}
                         className="rounded border-zinc-300 dark:border-zinc-600"
                       />
-                      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      <span className="text-sm text-zinc-700 dark:text-zinc-300">
                         Marketing approved
                       </span>
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={applyBatchToSelected}
+                    disabled={selectedIndices.size === 0}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                  >
+                    Apply to {selectedIndices.size} selected &rarr;
+                  </button>
+                </div>
+              </div>
+
+              {/* Flash notification */}
+              {applyFlash && (
+                <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
+                  <span>&#10003;</span>
+                  <span>{applyFlash}</span>
+                  <span className="ml-auto text-xs text-green-600 dark:text-green-500">Select next group below</span>
+                </div>
+              )}
+
+              {/* Selection header */}
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedIndices.size === doneIndices.length && doneIndices.length > 0}
+                    onChange={toggleSelectAll}
+                    className="rounded border-zinc-300 dark:border-zinc-600"
+                  />
+                  <span className="text-sm text-zinc-700 dark:text-zinc-300">Select all</span>
+                </label>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {taggedCount} of {doneIndices.length} tagged
+                </span>
+              </div>
+
+              {/* Photo grid */}
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
+                {doneIndices.map((i) => {
+                  const q = queuedFiles[i];
+                  if (!q || !q.publicUrl) return null;
+                  const draft = metadataDrafts[i] ?? {};
+                  const isSelected = selectedIndices.has(i);
+                  const isFocused = focusedIndex === i;
+                  const hasTags = (draft.roomTypeIds && draft.roomTypeIds.length > 0) || (draft.tags && draft.tags.length > 0);
+                  return (
+                    <div
+                      key={i}
+                      className={`relative cursor-pointer overflow-hidden rounded-lg border-2 transition-colors ${
+                        isFocused
+                          ? "border-blue-500 ring-2 ring-blue-200 dark:ring-blue-800"
+                          : isSelected
+                          ? "border-zinc-900 dark:border-zinc-100"
+                          : "border-zinc-200 dark:border-zinc-700"
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      <div className="absolute top-1.5 left-1.5 z-10">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(i)}
+                          className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
+                        />
+                      </div>
+                      {/* Thumbnail */}
+                      <div
+                        className="aspect-square bg-zinc-100 dark:bg-zinc-800"
+                        onClick={() => setFocusedIndex(isFocused ? null : i)}
+                      >
+                        <img
+                          src={q.publicUrl}
+                          alt={q.file.name}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                      {/* Tag chips overlay */}
+                      {hasTags && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-1">
+                          <div className="flex flex-wrap gap-0.5">
+                            {(draft.roomTypeIds ?? []).slice(0, 2).map((s) => (
+                              <span key={s} className="rounded bg-blue-500/80 px-1 py-0.5 text-[10px] text-white">
+                                {s}
+                              </span>
+                            ))}
+                            {(draft.tags ?? []).slice(0, 2).map((t) => (
+                              <span key={t} className="rounded bg-zinc-500/80 px-1 py-0.5 text-[10px] text-white">
+                                {t}
+                              </span>
+                            ))}
+                            {((draft.roomTypeIds?.length ?? 0) + (draft.tags?.length ?? 0)) > 4 && (
+                              <span className="text-[10px] text-zinc-300">
+                                +{(draft.roomTypeIds?.length ?? 0) + (draft.tags?.length ?? 0) - 4}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                      If checked, this photo can be used in client-facing presentations and marketing.
-                    </p>
-                  </label>
-                  <div className="flex justify-between pt-4">
-                    <span className="text-sm text-zinc-500">
-                      Photo {metadataStepIndex! + 1} of {queuedFiles.length}
-                    </span>
-                    <div className="flex gap-2">
+                  );
+                })}
+              </div>
+
+              {/* Focused photo inline editor */}
+              {focusedIndex !== null && (() => {
+                const q = queuedFiles[focusedIndex];
+                if (!q || !q.publicUrl) return null;
+                const draft = metadataDrafts[focusedIndex] ?? {};
+                const setDraft = (up: Partial<FinalizeLibraryMediaInput>) =>
+                  setMetadataDrafts((prev) => ({
+                    ...prev,
+                    [focusedIndex]: { ...prev[focusedIndex], ...up },
+                  }));
+                return (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-800 dark:bg-blue-950/20">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                        Editing: {q.file.name}
+                      </h3>
                       <button
                         type="button"
-                        onClick={onClose}
-                        className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
+                        onClick={() => setFocusedIndex(null)}
+                        className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
                       >
-                        Skip rest
+                        Close
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveMetadata(metadataStepIndex!)}
-                        disabled={saving}
-                        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-                      >
-                        {saving ? "Saving…" : doneCount === 1 ? "Save & close" : "Save & next"}
-                      </button>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-[200px_1fr]">
+                      <div className="aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                        <img
+                          src={q.publicUrl}
+                          alt={q.file.name}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <SectionsField
+                          value={draft.roomTypeIds ?? []}
+                          onChange={(roomTypeIds) => setDraft({ roomTypeIds })}
+                        />
+                        <HybridTagsField
+                          value={draft.tags ?? []}
+                          learnedTags={learnedTags}
+                          onChange={(updater) =>
+                            setMetadataDrafts((prev) => {
+                              const current = prev[focusedIndex] ?? {};
+                              const nextTags = updater(current.tags ?? []);
+                              return { ...prev, [focusedIndex]: { ...current, tags: nextTags } };
+                            })
+                          }
+                          maxChipsDisplay={8}
+                        />
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                              Use type
+                            </span>
+                            <select
+                              value={draft.useType ?? "AFTER"}
+                              onChange={(e) =>
+                                setDraft({ useType: e.target.value as FinalizeLibraryMediaInput["useType"] })
+                              }
+                              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                            >
+                              {USE_TYPE_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                              Quality
+                            </span>
+                            <select
+                              value={draft.quality ?? "STANDARD"}
+                              onChange={(e) =>
+                                setDraft({ quality: e.target.value as FinalizeLibraryMediaInput["quality"] })
+                              }
+                              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                            >
+                              {QUALITY_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex items-end gap-2 pb-1">
+                            <input
+                              type="checkbox"
+                              checked={draft.marketingApproved ?? true}
+                              onChange={(e) => setDraft({ marketingApproved: e.target.checked })}
+                              className="rounded border-zinc-300 dark:border-zinc-600"
+                            />
+                            <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                              Marketing approved
+                            </span>
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })()
+                );
+              })()}
+
+              {/* Footer actions */}
+              <div className="flex justify-between border-t border-zinc-200 pt-4 dark:border-zinc-700">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
+                >
+                  Skip tagging
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAll}
+                  disabled={saving || doneIndices.length === 0}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                >
+                  {saving ? "Saving…" : `Save all ${doneIndices.length} photos`}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

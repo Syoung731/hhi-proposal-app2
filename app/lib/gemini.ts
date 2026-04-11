@@ -370,6 +370,50 @@ Do not include any other text, headers, or numbering. Only the bullets or NONE.`
   };
 }
 
+// ─── CAD Overlay generation (image-in → image-out) ─────────────────────────────
+
+export type GenerateCadOverlayParams = {
+  sourcePhotoUrl: string;
+  overlayIntensity?: number;   // 0-1, default 0.7
+  transitionPosition?: number; // 0-100, default 45
+  cadSide?: "left" | "right";  // which side gets CAD, default "right"
+};
+
+/**
+ * Generate a CAD overlay composite: one side is realistic photo, the other
+ * transitions into architectural CAD line drawings. Uses image-in → image-out.
+ */
+export async function generateCadOverlay({
+  sourcePhotoUrl,
+  overlayIntensity = 0.7,
+  transitionPosition = 45,
+  cadSide = "right",
+}: GenerateCadOverlayParams): Promise<GenerateRoomRenderingResult> {
+  const ai = await getGeminiClient();
+  const { data: imageBase64, mimeType: sourceMimeType } = await fetchImageAsBase64(sourcePhotoUrl);
+
+  const intensityDesc = overlayIntensity >= 0.8 ? "very strong, highly detailed" :
+    overlayIntensity >= 0.5 ? "moderate, clearly visible" : "subtle, light";
+
+  const photoSide = cadSide === "left" ? "right" : "left";
+  const textPrompt = `Transform this interior room photograph into a premium architectural composite image. Keep the ${photoSide} portion (approximately ${transitionPosition}% of the width) as a high-quality realistic photograph. Gradually transition the ${cadSide} portion into precise architectural CAD line drawings — thin, clean, technical blueprint-style line art depicting the same space. The transition should be a soft gradient fade from photo to CAD drawings. The CAD drawing portion should show architectural details: wall lines, cabinet outlines, ceiling lines, structural elements, all rendered as thin precise lines on a white or very light background. The CAD line intensity should be ${intensityDesc}. The overall image should feel like a premium design-build company cover page — professional photography meeting architectural precision. Maintain the full original image dimensions and composition. Output exactly ONE image. No text overlays, no watermarks, no labels.`;
+
+  return callGeminiImageEdit(ai, [
+    {
+      role: "user",
+      parts: [
+        {
+          inlineData: {
+            mimeType: sourceMimeType,
+            data: imageBase64,
+          },
+        },
+        { text: textPrompt },
+      ],
+    },
+  ]);
+}
+
 // ─── Text-to-image generation ─────────────────────────────────────────────────
 
 export type GenerateSlideBackgroundResult = {

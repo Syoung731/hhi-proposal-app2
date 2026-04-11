@@ -1,4 +1,5 @@
 import type { SnapshotData } from "@/app/lib/snapshot";
+import { stripScopeClarifications } from "@/app/lib/scope-narrative";
 import { isBadPlaceholderUrl } from "@/app/lib/media";
 import { formatAddress, formatOwnerNames } from "@/app/lib/cover-display";
 import { formatInvestmentRange } from "@/app/lib/format-investment-range";
@@ -105,7 +106,7 @@ export function ProposalFromSnapshotView({ snapshot }: { snapshot: SnapshotData 
             {roomDisplayName(room)}
           </h2>
           <p className="mb-4 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
-            {room.scopeNarrative || "—"}
+            {stripScopeClarifications(room.scopeNarrative ?? "") || "—"}
           </p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {(mediaByRoom.get(room.id) ?? []).slice(0, 4).map((m) => (

@@ -2,11 +2,18 @@
 
 import type { ProposalSlide, DeckBranding, ProcessContent, ProcessStage } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SECTION_LABEL_SIZE, CARD_SHADOWS, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
 
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
   hasAiBackground?: boolean;
+}
+
+function makeOutlineShadow(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  return `-1px -1px 0 ${color}, 1px -1px 0 ${color}, -1px 1px 0 ${color}, 1px 1px 0 ${color}, 0 -1px 0 ${color}, 0 1px 0 ${color}`;
 }
 
 // ─── Default content ──────────────────────────────────────────────────────────
@@ -45,9 +52,23 @@ const DEFAULT_BOTTOM =
 
 export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
   const c = (slide.content ?? {}) as ProcessContent;
+  const resolvedAccent = c.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
   const stages = c.stages && c.stages.length > 0 ? c.stages : DEFAULT_STAGES;
   const bottomStatement = c.bottomStatement ?? DEFAULT_BOTTOM;
   const title = slide.headline ?? "Our Process: From Vision to Finished Home";
+
+  // Per-field: Slide title
+  const slideTitleFont = c.slideTitleFont ?? c.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const slideTitleSize = c.slideTitleSize ?? 1.0;
+  const slideTitleColor = c.slideTitleColor ?? c.headlineColor ?? branding.textColor;
+  const slideTitleShadow = makeOutlineShadow(c.slideTitleOutline);
+
+  // Per-field: Footer
+  const footerFont = c.footerFont ?? c.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const footerSize = c.footerSize ?? 1.0;
+  const footerColor = c.footerColor ?? c.bodyColor ?? branding.textColor;
+  const footerShadow = makeOutlineShadow(c.footerOutline);
 
   return (
     <div
@@ -62,7 +83,7 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
       >
         <defs>
           <pattern id="proc-dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-            <circle cx="1" cy="1" r="1" fill={branding.accentColor} opacity="0.12" />
+            <circle cx="1" cy="1" r="1" fill={accent} opacity="0.12" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#proc-dots)" />
@@ -74,7 +95,7 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
           position: "absolute",
           left: 0, top: 0, bottom: 0,
           width: "0.4%",
-          background: branding.accentColor,
+          background: accent,
         }}
       />
 
@@ -87,14 +108,15 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
       >
         {/* Title row */}
         <div style={{ flexShrink: 0, marginBottom: "3%" }}>
-          {slide.subheadline && (
+          {(c.showSectionLabel ?? true) && slide.subheadline && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em",
+                fontSize: SECTION_LABEL_SIZE,
                 fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
                 letterSpacing: "0.13em",
-                color: branding.accentColor,
+                color: accent,
                 marginBottom: "0.35em",
               }}
             >
@@ -102,15 +124,20 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
             </p>
           )}
           <h2
-            className="font-serif"
             style={{
-              fontSize: "2.4em", fontWeight: 800,
-              color: branding.textColor, lineHeight: 1.1,
+              fontSize: `${2.4 * slideTitleSize}em`,
+              fontWeight: (c.slideTitleBold ?? true) ? 800 : 400,
+              fontFamily: slideTitleFont,
+              fontStyle: c.slideTitleItalic ? "italic" : undefined,
+              textDecoration: c.slideTitleUnderline ? "underline" : undefined,
+              color: slideTitleColor,
+              lineHeight: 1.1,
+              textShadow: slideTitleShadow,
             }}
           >
             {title}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} />
+          <TitleAccentRule accentColor={accent} />
         </div>
 
         {/* Stage columns */}
@@ -126,6 +153,9 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
               stage={stage}
               isLast={i === stages.length - 1}
               branding={branding}
+              accent={accent}
+              fallbackHeadlineFont={c.headlineFont ?? SLIDE_FONTS.defaults.headline}
+              fallbackBodyFont={c.bodyFont ?? SLIDE_FONTS.defaults.body}
             />
           ))}
         </div>
@@ -135,17 +165,22 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
           <div
             style={{
               flexShrink: 0, marginTop: "3%",
-              borderTop: `1px solid ${branding.accentColor}40`,
+              borderTop: `1px solid ${accent}40`,
               paddingTop: "2%",
               textAlign: "center",
             }}
           >
             <p
-              className="font-serif"
               style={{
-                fontSize: "0.73em", fontWeight: 600,
-                color: branding.textColor, lineHeight: 1.5,
-                fontStyle: "italic", opacity: 0.75,
+                fontSize: `${0.73 * footerSize}em`,
+                fontWeight: (c.footerBold ?? false) ? 700 : 600,
+                fontFamily: footerFont,
+                fontStyle: c.footerItalic !== false ? "italic" : undefined,
+                textDecoration: c.footerUnderline ? "underline" : undefined,
+                color: footerColor,
+                lineHeight: 1.5,
+                opacity: 0.75,
+                textShadow: footerShadow,
               }}
             >
               {bottomStatement}
@@ -153,6 +188,15 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
           </div>
         )}
       </div>
+
+      <LogoOverlay
+        show={c.showLogo ?? false}
+        variant={c.logoVariant ?? "light"}
+        xPercent={c.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={c.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={c.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
@@ -164,13 +208,31 @@ function StageCard({
   stage,
   isLast,
   branding,
+  accent,
+  fallbackHeadlineFont,
+  fallbackBodyFont,
 }: {
   index: number;
   stage: ProcessStage;
   isLast: boolean;
   branding: DeckBranding;
+  accent: string;
+  fallbackHeadlineFont: string;
+  fallbackBodyFont: string;
 }) {
   const num = String(index + 1).padStart(2, "0");
+
+  // Per-item: stage name
+  const nameFont = stage.nameFont ?? fallbackHeadlineFont;
+  const nameSize = stage.nameSize ?? 1.0;
+  const nameColor = stage.nameColor ?? branding.textColor;
+  const nameShadow = makeOutlineShadow(stage.nameOutline);
+
+  // Per-item: bullets
+  const bulletsFont = stage.bulletsFont ?? fallbackBodyFont;
+  const bulletsSize = stage.bulletsSize ?? 1.0;
+  const bulletsColor = stage.bulletsColor ?? branding.textColor;
+  const bulletsShadow = makeOutlineShadow(stage.bulletsOutline);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative" }}>
@@ -183,7 +245,7 @@ function StageCard({
           padding: "7% 8% 6%",
           display: "flex",
           flexDirection: "column",
-          boxShadow: "0 2px 16px rgba(0,0,0,0.07)",
+          boxShadow: CARD_SHADOWS.elevated,
           border: `1px solid rgba(0,0,0,0.06)`,
         }}
       >
@@ -193,7 +255,7 @@ function StageCard({
             fontSize: "2.4em",
             fontWeight: 900,
             lineHeight: 1,
-            color: branding.accentColor,
+            color: accent,
             marginBottom: "6%",
             fontFamily: "serif",
             opacity: 0.9,
@@ -204,13 +266,16 @@ function StageCard({
 
         {/* Stage name */}
         <h3
-          className="font-serif"
           style={{
-            fontSize: "0.82em",
-            fontWeight: 800,
-            color: branding.textColor,
+            fontSize: `${0.82 * nameSize}em`,
+            fontWeight: (stage.nameBold ?? true) ? 800 : 400,
+            fontFamily: nameFont,
+            fontStyle: stage.nameItalic ? "italic" : undefined,
+            textDecoration: stage.nameUnderline ? "underline" : undefined,
+            color: nameColor,
             lineHeight: 1.2,
             marginBottom: "6%",
+            textShadow: nameShadow,
           }}
         >
           {stage.name}
@@ -221,7 +286,7 @@ function StageCard({
           style={{
             height: 2,
             width: "2.5em",
-            background: branding.accentColor,
+            background: accent,
             borderRadius: 1,
             marginBottom: "8%",
           }}
@@ -245,16 +310,21 @@ function StageCard({
                   width: "5px",
                   height: "5px",
                   borderRadius: "50%",
-                  background: branding.accentColor,
+                  background: accent,
                   marginTop: "0.45em",
                 }}
               />
               <span
                 style={{
-                  fontSize: "0.64em",
-                  color: branding.textColor,
+                  fontSize: `${0.64 * bulletsSize}em`,
+                  fontFamily: bulletsFont,
+                  fontWeight: stage.bulletsBold ? 700 : 400,
+                  fontStyle: stage.bulletsItalic ? "italic" : undefined,
+                  textDecoration: stage.bulletsUnderline ? "underline" : undefined,
+                  color: bulletsColor,
                   lineHeight: 1.65,
                   opacity: 0.78,
+                  textShadow: bulletsShadow,
                 }}
               >
                 {b}
@@ -280,7 +350,7 @@ function StageCard({
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path
               d="M4 10h12M12 5l5 5-5 5"
-              stroke={branding.accentColor}
+              stroke={accent}
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"

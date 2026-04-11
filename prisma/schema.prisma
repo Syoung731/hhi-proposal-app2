@@ -44,6 +44,9 @@ model Project {
   subtitle            String?
   coverHeroImageId    String?
   objective           String?
+  supportingText      String?
+  bullets             String[]             @default([])
+  scopeOverview       String?
   publishedVersion    Int                  @default(0)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
@@ -445,6 +448,10 @@ model CompanySettings {
   anthropicModel         String?  // selected Claude model ID (e.g. "claude-sonnet-4-6")
   geminiImageModel       String?  // Gemini image/vision model (e.g. "gemini-2.5-flash-image")
   geminiImageGenModel    String?  // Gemini text-to-image Imagen model (e.g. "imagen-4.0-fast-generate-001")
+  coreValuesDefaultsJson Json?   // GlobalCoreValuesSettings: default values, layout, headline for new core-values slides
+  copeDefaultsJson       Json?   // GlobalCopeSettings: default COPE items, layout, headline for new cope-page slides
+  nextStepsDefaultsJson  Json?   // GlobalNextStepsSettings: default steps, layout, headline for new next-steps slides
+  designBuildDefaultsJson Json?  // GlobalDesignBuildSettings: default pillars, guarantees, diagram for new design-build-advantage slides
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 }
@@ -670,6 +677,23 @@ model Integration {
   @@unique([provider, name])
   @@index([provider])
   @@index([isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Testimonial Library (curated testimonials for proposal slides)
+// ---------------------------------------------------------------------------
+
+model Testimonial {
+  id          String   @id @default(cuid())
+  quote       String
+  clientName  String
+  projectName String?
+  rating      Int      @default(5)        // 1–5
+  source      String   @default("manual") // "google" | "manual"
+  approved    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------

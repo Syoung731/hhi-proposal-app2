@@ -128,7 +128,7 @@ export function SlideCanvas({ slide, branding, brandBackgrounds = [] }: Props) {
               />
             </div>
             {/* Text zone overlay — only for slides that use zone positioning */}
-            {slide.textZone && slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && (
+            {slide.textZone && slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && slide.type !== "objective" && (
               <div
                 className="pointer-events-none absolute z-50"
                 style={{

@@ -6,8 +6,20 @@ import type {
   BeforeAfterContent,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SLIDE_PADDING, SLIDE_FONTS } from "@/app/lib/slide-constants";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
+
+function makeOutlineShadow(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  const d = 1;
+  return [
+    `${d}px 0 0 ${color}`, `${-d}px 0 0 ${color}`,
+    `0 ${d}px 0 ${color}`, `0 ${-d}px 0 ${color}`,
+    `${d}px ${d}px 0 ${color}`, `${-d}px ${-d}px 0 ${color}`,
+  ].join(", ");
+}
 
 interface LayoutProps {
   slide: ProposalSlide;
@@ -20,22 +32,41 @@ function Label({
   text,
   accent,
   dark = false,
+  font,
+  size,
+  bold,
+  italic,
+  underline,
+  color,
+  outline,
 }: {
   text: string;
   accent: string;
   dark?: boolean;
+  font?: string | null;
+  size?: number | null;
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  color?: string | null;
+  outline?: string | null;
 }) {
   return (
     <span
-      className="uppercase tracking-widest font-semibold"
+      className="uppercase tracking-widest"
       style={{
-        fontSize: "0.52em",
+        fontFamily: font ?? "'Jost', sans-serif",
+        fontSize: `${(size ?? 1.0) * 0.52}em`,
+        fontWeight: (bold !== false) ? 600 : 400,
+        fontStyle: italic ? "italic" : "normal",
+        textDecoration: underline ? "underline" : "none",
         letterSpacing: "0.16em",
-        color: dark ? "rgba(255,255,255,0.75)" : accent,
+        color: color ?? (dark ? "rgba(255,255,255,0.75)" : accent),
         background: dark ? "rgba(0,0,0,0.35)" : `${accent}14`,
         padding: "0.25em 0.7em",
         borderRadius: 2,
         display: "inline-block",
+        textShadow: makeOutlineShadow(outline),
       }}
     >
       {text}
@@ -77,12 +108,16 @@ function ImagePlaceholder({ label }: { label: string }) {
 
 function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as BeforeAfterContent;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
+  const accent = resolvedAccent;
   const roomName = content.roomName ?? slide.headline ?? "Room Overview";
   const caption = content.caption ?? null;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
-  const resolvedTitleColor   = content.headingColor ?? branding.textColor;
+  const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const resolvedTitleColor   = content.headlineColor ?? content.headingColor ?? branding.textColor;
   const resolvedCaptionColor = content.captionColor ?? "#9CA3AF";
-  const accentLineColor = hasBg ? `${resolvedTitleColor}55` : `${branding.accentColor}30`;
+  const accentLineColor = hasBg ? `${resolvedTitleColor}55` : `${accent}30`;
   const headingEm   = `${content.headingFontSize ?? 2.5}em`;
   const captionEmSz = `${content.captionFontSize ?? 1.5}em`;
 
@@ -95,19 +130,22 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
       <div
         style={{
           flexShrink: 0,
-          padding: "3.5% 5% 2.5%",
+          padding: SLIDE_PADDING.photo,
           display: "flex",
           alignItems: "baseline",
           gap: "1.2em",
         }}
       >
         <h2
-          className="font-serif"
           style={{
-            fontSize: headingEm,
-            fontWeight: 700,
-            color: resolvedTitleColor,
+            fontFamily: headlineFont,
+            fontSize: `${(content.headlineSize ?? content.headingFontSize ?? 2.0) * 1.25}em`,
+            fontWeight: (content.headlineBold !== false) ? 700 : 400,
+            fontStyle: content.headlineItalic ? "italic" : "normal",
+            textDecoration: content.headlineUnderline ? "underline" : "none",
+            color: content.headlineColor ?? content.headingColor ?? branding.textColor,
             lineHeight: 1.15,
+            textShadow: makeOutlineShadow(content.headlineOutline),
           }}
         >
           {roomName}
@@ -166,7 +204,11 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
                 justifyContent: "flex-start",
               }}
             >
-              <Label text="Before" accent={branding.accentColor} dark />
+              <Label text={content.beforeLabel ?? "Before"} accent={accent} dark
+                font={content.beforeLabelFont} size={content.beforeLabelSize}
+                bold={content.beforeLabelBold} italic={content.beforeLabelItalic}
+                underline={content.beforeLabelUnderline} color={content.beforeLabelColor}
+                outline={content.beforeLabelOutline} />
             </div>
           </div>
         </div>
@@ -208,7 +250,11 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
                 justifyContent: "flex-start",
               }}
             >
-              <Label text="After" accent={branding.accentColor} dark />
+              <Label text={content.afterLabel ?? "After"} accent={accent} dark
+                font={content.afterLabelFont} size={content.afterLabelSize}
+                bold={content.afterLabelBold} italic={content.afterLabelItalic}
+                underline={content.afterLabelUnderline} color={content.afterLabelColor}
+                outline={content.afterLabelOutline} />
             </div>
           </div>
         </div>
@@ -223,38 +269,28 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
       >
         <p
           style={{
-            fontSize: captionEmSz,
-            color: resolvedCaptionColor,
-            fontStyle: caption ? "italic" : "normal",
+            fontFamily: content.captionFont ?? bodyFont,
+            fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 1.0}em`,
+            fontWeight: content.captionBold ? 700 : 400,
+            fontStyle: content.captionItalic ?? (caption ? true : false) ? "italic" : "normal",
+            textDecoration: content.captionUnderline ? "underline" : "none",
+            color: content.captionColor ?? resolvedCaptionColor,
+            textShadow: makeOutlineShadow(content.captionOutline),
           }}
         >
           {caption ?? ""}
         </p>
       </div>
 
-      {/* Freely positioned logo */}
-      {(branding.logoLightUrl || branding.logoDarkUrl) && (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={
-            (content.logoVariant ?? "light") === "dark"
-              ? (branding.logoDarkUrl ?? branding.logoLightUrl ?? "")
-              : (branding.logoLightUrl ?? branding.logoDarkUrl ?? "")
-          }
-          alt={branding.companyName}
-          style={{
-            position: "absolute",
-            left: `${(content.logoX ?? 0.85) * 100}%`,
-            top: `${(content.logoY ?? 0.88) * 100}%`,
-            transform: "translate(-50%, -50%)",
-            height: `${content.logoSize ?? 4.0}em`,
-            objectFit: "contain",
-            opacity: 0.7,
-            zIndex: 100,
-            pointerEvents: "none",
-          }}
-        />
-      )}
+      {/* Logo overlay */}
+      <LogoOverlay
+        show={content.showLogo ?? !!(branding.logoLightUrl || branding.logoDarkUrl)}
+        variant={(content.logoVariant ?? "light") === "dark" ? "dark" : "light"}
+        xPercent={content.logoX != null ? (content.logoX <= 1 ? content.logoX * 100 : content.logoX) : 85}
+        yPercent={content.logoY != null ? (content.logoY <= 1 ? content.logoY * 100 : content.logoY) : 88}
+        scale={content.logoSize != null ? Math.min(content.logoSize, 4.0) : 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
@@ -265,9 +301,13 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 
 function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as BeforeAfterContent;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
+  const accent = resolvedAccent;
   const roomName = content.roomName ?? slide.headline ?? "Room Overview";
   const caption = content.caption ?? null;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const headingEm   = `${content.headingFontSize ?? 2.5}em`;
   const captionEmSz = `${content.captionFontSize ?? 1.5}em`;
   const resolvedTitleColor   = content.headingColor ?? "#F8F7F4";
@@ -278,10 +318,10 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
       className="relative w-full h-full flex"
       style={{ background: hasBg ? "transparent" : "#111827", overflow: "hidden" }}
     >
-      {/* ── Left panel (35%) ───────────────────────────────────────────── */}
+      {/* ── Left panel ────────────────────────────────────────────────── */}
       <div
         style={{
-          width: "35%",
+          width: `${content.leftPanelWidth ?? 35}%`,
           flexShrink: 0,
           display: "flex",
           flexDirection: "column",
@@ -293,49 +333,33 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
       >
         {/* Top block — room name + accent */}
         <div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6em",
-              marginBottom: "1.2em",
-            }}
-          >
-            <div
-              style={{
-                width: "1.4em",
-                height: 2,
-                background: branding.accentColor,
-                flexShrink: 0,
-              }}
-            />
-            <span
-              className="uppercase tracking-widest font-semibold"
-              style={{ fontSize: "0.5em", color: branding.accentColor, letterSpacing: "0.14em" }}
-            >
-              After
-            </span>
-          </div>
           <h2
-            className="font-serif"
             style={{
-              fontSize: headingEm,
-              fontWeight: 800,
-              color: resolvedTitleColor,
+              fontFamily: headlineFont,
+              fontSize: `${(content.headlineSize ?? content.headingFontSize ?? 2.0) * 1.25}em`,
+              fontWeight: (content.headlineBold !== false) ? 800 : 400,
+              fontStyle: content.headlineItalic ? "italic" : "normal",
+              textDecoration: content.headlineUnderline ? "underline" : "none",
+              color: content.headlineColor ?? content.headingColor ?? resolvedTitleColor,
               lineHeight: 1.2,
               marginBottom: "0.4em",
+              textShadow: makeOutlineShadow(content.headlineOutline),
             }}
           >
             {roomName}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} marginBottom={caption ? "0.8em" : "0"} />
+          <TitleAccentRule accentColor={accent} marginBottom={caption ? "0.8em" : "0"} />
           {caption && (
             <p
               style={{
-                fontSize: captionEmSz,
-                color: resolvedCaptionColor,
+                fontFamily: content.captionFont ?? bodyFont,
+                fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 1.0}em`,
+                fontWeight: content.captionBold ? 700 : 400,
+                fontStyle: content.captionItalic !== false ? "italic" : "normal",
+                textDecoration: content.captionUnderline ? "underline" : "none",
+                color: content.captionColor ?? resolvedCaptionColor,
                 lineHeight: 1.65,
-                fontStyle: "italic",
+                textShadow: makeOutlineShadow(content.captionOutline),
               }}
             >
               {caption}
@@ -354,15 +378,24 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
             }}
           >
             <span
-              className="uppercase tracking-widest font-semibold"
-              style={{ fontSize: "0.45em", color: "rgba(255,255,255,0.4)", letterSpacing: "0.14em" }}
+              className="uppercase tracking-widest"
+              style={{
+                fontFamily: content.beforeLabelFont ?? "'Jost', sans-serif",
+                fontSize: `${(content.beforeLabelSize ?? 1.0) * 0.45}em`,
+                fontWeight: (content.beforeLabelBold !== false) ? 600 : 400,
+                fontStyle: content.beforeLabelItalic ? "italic" : "normal",
+                color: content.beforeLabelColor ?? "rgba(255,255,255,0.4)",
+                letterSpacing: "0.14em",
+                textShadow: makeOutlineShadow(content.beforeLabelOutline),
+              }}
             >
-              Before
+              {content.beforeLabel ?? "Before"}
             </span>
             <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.1)" }} />
           </div>
           <div
             style={{
+              width: `${content.beforePhotoScale ?? 100}%`,
               aspectRatio: "4/3",
               borderRadius: 4,
               overflow: "hidden",
@@ -391,7 +424,7 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
         </div>
       </div>
 
-      {/* ── Right panel — hero after image (65%) ──────────────────────── */}
+      {/* ── Right panel — hero after image ────────────────────────────── */}
       <div style={{ flex: 1, position: "relative" }}>
         {content.afterImageUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
@@ -432,6 +465,42 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
           </div>
         )}
 
+        {/* "After" label overlay — bottom-left near dividing line */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: "4%",
+            left: "4%",
+            zIndex: 3,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5em",
+          }}
+        >
+          <div
+            style={{
+              width: "1.2em",
+              height: 2,
+              background: accent,
+              flexShrink: 0,
+            }}
+          />
+          <span
+            className="uppercase tracking-widest"
+            style={{
+              fontFamily: content.afterLabelFont ?? "'Jost', sans-serif",
+              fontSize: `${(content.afterLabelSize ?? 1.0) * 0.5}em`,
+              fontWeight: (content.afterLabelBold !== false) ? 600 : 400,
+              fontStyle: content.afterLabelItalic ? "italic" : "normal",
+              color: content.afterLabelColor ?? "rgba(255,255,255,0.85)",
+              letterSpacing: "0.14em",
+              textShadow: makeOutlineShadow(content.afterLabelOutline) ?? "0 1px 3px rgba(0,0,0,0.5)",
+            }}
+          >
+            {content.afterLabel ?? "After"}
+          </span>
+        </div>
+
         {/* Thin accent left edge over the photo */}
         <div
           style={{
@@ -440,35 +509,21 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
             left: 0,
             width: 3,
             bottom: 0,
-            background: branding.accentColor,
+            background: accent,
             opacity: 0.85,
           }}
         />
       </div>
 
-      {/* Freely positioned logo */}
-      {(branding.logoLightUrl || branding.logoDarkUrl) && (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={
-            (content.logoVariant ?? "light") === "dark"
-              ? (branding.logoDarkUrl ?? branding.logoLightUrl ?? "")
-              : (branding.logoLightUrl ?? branding.logoDarkUrl ?? "")
-          }
-          alt={branding.companyName}
-          style={{
-            position: "absolute",
-            left: `${(content.logoX ?? 0.85) * 100}%`,
-            top: `${(content.logoY ?? 0.88) * 100}%`,
-            transform: "translate(-50%, -50%)",
-            height: `${content.logoSize ?? 4.0}em`,
-            objectFit: "contain",
-            opacity: 0.7,
-            zIndex: 100,
-            pointerEvents: "none",
-          }}
-        />
-      )}
+      {/* Logo overlay */}
+      <LogoOverlay
+        show={content.showLogo ?? !!(branding.logoLightUrl || branding.logoDarkUrl)}
+        variant={(content.logoVariant ?? "light") === "dark" ? "dark" : "light"}
+        xPercent={content.logoX != null ? (content.logoX <= 1 ? content.logoX * 100 : content.logoX) : 85}
+        yPercent={content.logoY != null ? (content.logoY <= 1 ? content.logoY * 100 : content.logoY) : 88}
+        scale={content.logoSize != null ? Math.min(content.logoSize, 4.0) : 1.0}
+        branding={branding}
+      />
     </div>
   );
 }

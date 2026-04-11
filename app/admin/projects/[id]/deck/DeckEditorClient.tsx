@@ -8,6 +8,7 @@ import type {
   SlideType,
   WhyUsPillarItem,
   RoomWithMedia,
+  RoomMediaItem,
   BeforeAfterContent,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
@@ -18,6 +19,7 @@ import { SlideRail } from "./SlideRail";
 import { SlideCanvas } from "./SlideCanvas";
 import { InspectorPanel } from "./InspectorPanel";
 import type { BrandBackgroundForUI } from "@/app/admin/settings/settings-tabs";
+import type { GlobalDesignBuildSettings } from "@/app/lib/design-build-defaults";
 import { analyzeBackgroundTextZoneAction } from "@/app/admin/settings/branding/backgrounds/actions";
 
 interface Props {
@@ -28,8 +30,12 @@ interface Props {
   projectTitle: string;
   /** Value pillars resolved from DB at SSR time. Used when "+ Why Us" is added. */
   valuePillars: WhyUsPillarItem[];
+  /** Design-Build defaults from global settings. Used when "+ Design-Build" is added. */
+  designBuildDefaults: GlobalDesignBuildSettings;
   /** Rooms with resolved before/render media — powers the BeforeAfterInspector. */
   projectRoomsWithMedia: RoomWithMedia[];
+  /** Project-level media (Front Page photos — roomId null). */
+  projectLevelMedia?: RoomMediaItem[];
   /** Brand backgrounds for the per-slide background picker. */
   brandBackgrounds?: BrandBackgroundForUI[];
 }
@@ -48,6 +54,13 @@ const ADD_SLIDE_OPTIONS: { type: SlideType; label: string }[] = [
   { type: "scope-breakdown",  label: "+ Scope Breakdown" },
   { type: "risk-brief",      label: "+ Risk Brief"      },
   { type: "process",         label: "+ Our Process"     },
+  { type: "design-retainer", label: "+ Design Retainer" },
+  { type: "next-steps",      label: "+ Next Steps"      },
+  { type: "closing-slide",   label: "+ Closing"          },
+  { type: "visual-inspiration", label: "+ Inspiration"   },
+  { type: "client-testimonials", label: "+ Testimonials" },
+  { type: "design-build-advantage", label: "+ Design-Build" },
+  { type: "addition-overview", label: "+ Addition Overview" },
 ];
 
 // ─── Add-slide dropdown ───────────────────────────────────────────────────────
@@ -263,7 +276,9 @@ export function DeckEditorClient({
   projectId,
   projectTitle,
   valuePillars,
+  designBuildDefaults,
   projectRoomsWithMedia,
+  projectLevelMedia = [],
   brandBackgrounds = [],
 }: Props) {
   const [slides, setSlides] = useState<ProposalSlide[]>(
@@ -415,13 +430,20 @@ export function DeckEditorClient({
   const addSlide = useCallback((type: SlideType) => {
     const layoutKey =
       type === "cover"            ? "hero-image"     :
-      type === "objective"        ? "statement-left" :
+      type === "objective"        ? "light-statement" :
       type === "investment"       ? "table-callout"  :
       type === "why-us"           ? "pillars-grid"   :
       type === "scope-overview"   ? "split-panel"    :
       type === "scope-breakdown"  ? "text-grid"      :
       type === "risk-brief"       ? "two-column"        :
       type === "process"          ? "three-stages"      :
+      type === "design-retainer"  ? "centered-hero"     :
+      type === "next-steps"       ? "numbered-photo"    :
+      type === "closing-slide"    ? "dark-centered"     :
+      type === "visual-inspiration" ? "hero-plus-stacked" :
+      type === "client-testimonials" ? "quote-cards"     :
+      type === "design-build-advantage" ? designBuildDefaults.defaultLayout :
+      type === "addition-overview" ? "combined" :
       /* before-after */            "side-by-side";
 
     const headline =
@@ -433,6 +455,13 @@ export function DeckEditorClient({
       type === "scope-breakdown"  ? "Additional Areas Included"  :
       type === "risk-brief"       ? "The Stress-Free Remodel: How We Eliminate Common Risks" :
       type === "process"          ? "Our Process: From Vision to Finished Home" :
+      type === "design-retainer"  ? "Your Design Retainer" :
+      type === "next-steps"       ? "Your Path Forward"   :
+      type === "closing-slide"    ? "Let\u2019s Build Something Extraordinary" :
+      type === "visual-inspiration" ? "Design Inspiration" :
+      type === "client-testimonials" ? "What Our Clients Say" :
+      type === "design-build-advantage" ? designBuildDefaults.defaultHeadline :
+      type === "addition-overview" ? "The Vision: Expanding the Footprint" :
       /* before-after */            "Before & After";
 
     // Seed content per type
@@ -503,6 +532,67 @@ export function DeckEditorClient({
             bottomStatement:
               "Every detail is planned before we break ground—so the build stays on schedule, on budget, and free of surprises.",
           }
+        : type === "design-retainer"
+        ? {
+            sectionLabel: "DESIGN RETAINER",
+            tagline: "Your investment in certainty before construction begins.",
+            retainerAmount: "$22,000",
+            benefits: [
+              "Full architectural design and space planning",
+              "HOA / ARB submission and approval management",
+              "Complete material and finish specifications",
+              "Fixed-price build contract before construction begins",
+            ],
+          }
+        : type === "next-steps"
+        ? {
+            sectionLabel: "WHAT HAPPENS NEXT",
+            steps: [
+              { id: "sign-contract", number: 1, title: "Sign the Design Contract", description: "Formalize the relationship and secure your project start date with a signed design agreement." },
+              { id: "measure-meeting", number: 2, title: "Schedule Your Measure Meeting", description: "We visit the space, take precise measurements, and document existing conditions to begin the design process." },
+              { id: "feasibility-study", number: 3, title: "Complete the Feasibility Study", description: "Our team produces a detailed feasibility analysis confirming scope, budget alignment, and any structural considerations." },
+              { id: "proposed-plan", number: 4, title: "Receive Your Proposed Plan", description: "We present your full architectural design, material selections, and fixed-price build contract for your approval." },
+            ],
+          }
+        : type === "closing-slide"
+        ? {
+            tagline: "Design. Build. Remodel.",
+            validityNote: "This proposal is valid for 30 days.",
+          }
+        : type === "visual-inspiration"
+        ? {
+            subtitle: "A curated vision for your space.",
+            photos: [],
+          }
+        : type === "client-testimonials"
+        ? {
+            showStars: true,
+            testimonials: [],
+          }
+        : type === "design-build-advantage"
+        ? {
+            pillars: designBuildDefaults.defaultPillars,
+            guarantees: designBuildDefaults.defaultGuarantees,
+            diagramNodes: designBuildDefaults.defaultDiagramNodes,
+            supportColumns: designBuildDefaults.defaultSupportColumns,
+          }
+        : type === "addition-overview"
+        ? {
+            layout: "combined",
+            cadGenerationStatus: "idle",
+            boundingBoxX: 10,
+            boundingBoxY: 10,
+            boundingBoxWidth: 40,
+            boundingBoxHeight: 50,
+            calloutLabel: "Proposed Addition Area",
+            photoPanelWidth: 70,
+            cadOverlayIntensity: 70,
+            bullets: [
+              { id: "b1", label: "The Structure", description: "Foundations, structural framing, and all load-bearing elements engineered to current code standards." },
+              { id: "b2", label: "Engineering & Systems", description: "Mechanical, electrical, and plumbing systems designed to serve the new space seamlessly." },
+              { id: "b3", label: "Finishes & Site Work", description: "Interior finishes selected to complement the existing home, with exterior work matched to current materials." },
+            ],
+          }
         : undefined;
 
     const newSlide: ProposalSlide = {
@@ -517,7 +607,7 @@ export function DeckEditorClient({
 
     setSlides((prev) => [...prev, newSlide]);
     setActiveSlideId(newSlide.id);
-  }, [slides.length, valuePillars]);
+  }, [slides.length, valuePillars, designBuildDefaults]);
 
   // ── Auto-generate Before/After slides ────────────────────────────────────
   // Creates one slide per room that has at least 1 before photo + 1 completed
@@ -851,6 +941,7 @@ export function DeckEditorClient({
           onRemove={removeSlide}
           onToggleEnabled={toggleEnabled}
           projectRoomsWithMedia={projectRoomsWithMedia}
+          projectLevelMedia={projectLevelMedia}
           brandBackgrounds={brandBackgrounds}
           onBackgroundChange={handleBackgroundChange}
           onTextZoneChange={handleTextZoneChange}

@@ -26,6 +26,9 @@ type OverviewDraft = {
   client2First?: string;
   client2Last?: string;
   objective?: string;
+  supportingText?: string;
+  bullets?: string[];
+  scopeOverview?: string;
 };
 
 function normalize(s: string | null | undefined): string {
@@ -44,6 +47,9 @@ const DIFF_FIELD_IDS = [
   "title",
   "subtitle",
   "objective",
+  "supportingText",
+  "bullets",
+  "scopeOverview",
   "addressLine1",
   "addressLine2",
   "city",
@@ -61,6 +67,9 @@ const DIFF_FIELD_LABELS: Record<DiffFieldId, string> = {
   title: "Title",
   subtitle: "Subtitle",
   objective: "Objective",
+  supportingText: "Supporting Text",
+  bullets: "Bullets",
+  scopeOverview: "Scope Overview",
   addressLine1: "Address line 1",
   addressLine2: "Address line 2",
   city: "City",
@@ -91,6 +100,9 @@ type Props = {
     client2Last: string | null;
     transcriptText: string | null;
     objective: string | null;
+    supportingText: string | null;
+    bullets: string[];
+    scopeOverview: string | null;
     coverHeroImageId: string | null;
   };
 };
@@ -183,7 +195,11 @@ export function OverviewTab({ projectId, project }: Props) {
   }
 
   function getAiValueFromOverview(overview: OverviewDraft, field: DiffFieldId): string {
-    const v = overview[field];
+    if (field === "bullets") {
+      const arr = overview.bullets;
+      return Array.isArray(arr) ? arr.filter(Boolean).join("\n") : "";
+    }
+    const v = overview[field as Exclude<DiffFieldId, "bullets">];
     return v != null ? String(v).trim() : "";
   }
 
@@ -194,6 +210,7 @@ export function OverviewTab({ projectId, project }: Props) {
     const overviewFieldNames = [
       "title", "subtitle", "addressLine1", "addressLine2", "city", "state", "zip",
       "client1First", "client1Last", "client2First", "client2Last", "objective",
+      "supportingText", "bullets", "scopeOverview",
     ] as const;
     if (form) {
       for (const name of overviewFieldNames) {
@@ -217,6 +234,10 @@ export function OverviewTab({ projectId, project }: Props) {
     try {
       const result = await generateOverviewFromTranscriptAction(projectId);
       const overview = (result.overview ?? {}) as OverviewDraft;
+      // Merge scope overview (generated from rooms, returned at top level) into the draft
+      if (result.scopeOverview) {
+        overview.scopeOverview = result.scopeOverview;
+      }
       const changedFields = DIFF_FIELD_IDS.filter((field) => {
         const current = normalize(getCurrentValue(field));
         const ai = normalize(getAiValueFromOverview(overview, field));
@@ -249,7 +270,11 @@ export function OverviewTab({ projectId, project }: Props) {
 
   function getAiValue(field: DiffFieldId): string {
     if (!aiDraft?.overview) return "";
-    const v = aiDraft.overview[field];
+    if (field === "bullets") {
+      const arr = aiDraft.overview.bullets;
+      return Array.isArray(arr) ? arr.filter(Boolean).join("\n") : "";
+    }
+    const v = aiDraft.overview[field as Exclude<DiffFieldId, "bullets">];
     return v != null ? String(v).trim() : "";
   }
 
@@ -260,7 +285,7 @@ export function OverviewTab({ projectId, project }: Props) {
         ...prev,
         overview: {
           ...prev.overview,
-          [field]: value,
+          [field]: field === "bullets" ? value.split("\n").filter(Boolean) : value,
         },
       };
     });
@@ -622,10 +647,10 @@ export function OverviewTab({ projectId, project }: Props) {
                           <span className="text-xs text-zinc-500 dark:text-zinc-500">
                             AI suggestion:
                           </span>
-                          {field === "objective" ? (
+                          {(field === "objective" || field === "supportingText" || field === "bullets" || field === "scopeOverview") ? (
                             <textarea
                               className="mt-1 w-full rounded-md border border-amber-200 bg-white px-2 py-1 text-sm text-zinc-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400 dark:border-amber-700 dark:bg-zinc-900 dark:text-zinc-100"
-                              rows={3}
+                              rows={field === "objective" ? 3 : field === "scopeOverview" ? 4 : 2}
                               value={ai}
                               onChange={(e) => setAiValue(field, e.target.value)}
                             />
@@ -640,6 +665,17 @@ export function OverviewTab({ projectId, project }: Props) {
                           {field === "title" && (
                             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                               Format: Street - Project Type (e.g. 34 Sussex Lane - Multiple Bathroom + Laundry Updates)
+                            </p>
+                          )}
+                          {field === "scopeOverview" && ai && (
+                            <p className={`mt-1 text-xs ${
+                              ai.split(/\s+/).filter(Boolean).length > 250
+                                ? "text-red-600 dark:text-red-400"
+                                : ai.split(/\s+/).filter(Boolean).length > 200
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-zinc-500 dark:text-zinc-400"
+                            }`}>
+                              {ai.split(/\s+/).filter(Boolean).length} words
                             </p>
                           )}
                         </div>
@@ -659,6 +695,13 @@ export function OverviewTab({ projectId, project }: Props) {
                   );
                 })}
               </div>
+
+              {/* Note when scope overview was not generated (no rooms with scopes) */}
+              {aiDraft && !aiDraft.changedFields.includes("scopeOverview") && !aiDraft.overview.scopeOverview && (
+                <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500 italic">
+                  Scope Overview not generated — add room scopes in the Sections tab first.
+                </p>
+              )}
 
               <div className="mt-4 flex flex-row flex-wrap items-center justify-between gap-2">
                 <div>
@@ -908,6 +951,50 @@ export function OverviewTab({ projectId, project }: Props) {
             rows={4}
             className={inputClass}
           />
+        </div>
+
+        <div>
+          <label className={labelClass}>Supporting Text</label>
+          <textarea
+            name="supportingText"
+            defaultValue={project.supportingText ?? ""}
+            rows={3}
+            className={inputClass}
+            placeholder="AI-generated supporting paragraph — regenerate to populate"
+          />
+          {!project.supportingText && (
+            <p className="mt-1 text-xs text-zinc-400">Not yet generated — click Regenerate above to populate.</p>
+          )}
+        </div>
+
+        <div>
+          <label className={labelClass}>Bullets</label>
+          <textarea
+            name="bullets"
+            defaultValue={(project.bullets ?? []).join("\n")}
+            rows={3}
+            className={inputClass}
+            placeholder="One bullet per line (up to 3)"
+          />
+          {(!project.bullets || project.bullets.length === 0) && (
+            <p className="mt-1 text-xs text-zinc-400">Not yet generated — click Regenerate above to populate.</p>
+          )}
+        </div>
+
+        <div>
+          <label className={labelClass}>Scope Overview</label>
+          <textarea
+            name="scopeOverview"
+            defaultValue={project.scopeOverview ?? ""}
+            rows={5}
+            className={inputClass}
+            placeholder="AI-generated scope overview — summarizes all room scopes into a cohesive narrative"
+          />
+          {!project.scopeOverview && (
+            <p className="mt-1 text-xs text-zinc-400">
+              Not yet generated — click Generate Overview to create from your room scopes.
+            </p>
+          )}
         </div>
 
         <button

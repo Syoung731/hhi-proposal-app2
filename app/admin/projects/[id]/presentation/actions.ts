@@ -132,25 +132,6 @@ export async function savePresentationLayoutAction(
 
 // --- Objective Page AI helpers ------------------------------------------------
 
-export async function suggestObjectiveCopyAction(input: {
-  projectId: string;
-  transcriptText?: string | null;
-  overviewText?: string | null;
-}): Promise<{
-  objectiveParagraph: string;
-  commitments: string[];
-}> {
-  await requireAdmin();
-  const result = await suggestObjectiveContentFromText({
-    transcriptText: input.transcriptText,
-    overviewText: input.overviewText,
-  });
-  return {
-    objectiveParagraph: result.objectiveParagraph,
-    commitments: result.commitments.slice(0, 3),
-  };
-}
-
 export async function suggestObjectivePhotoFiltersAction(input: {
   projectId: string;
   transcriptText?: string | null;

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getPublicProposalSnapshot, roomSlugFromName } from "@/app/lib/public-proposal";
+import { stripScopeClarifications } from "@/app/lib/scope-narrative";
 import type { PresentationConfigSaved, PublicLayoutConfigSaved } from "@/app/lib/layout-config";
 import { isBadPlaceholderUrl } from "@/app/lib/media";
 
@@ -98,7 +99,7 @@ export default async function ScopePage({
                     {room.name}
                   </h2>
                   <p className="mt-1 line-clamp-2 text-sm text-zinc-500 dark:text-zinc-400">
-                    {room.scopeNarrative || "—"}
+                    {stripScopeClarifications(room.scopeNarrative ?? "") || "—"}
                   </p>
                 </div>
               </Link>

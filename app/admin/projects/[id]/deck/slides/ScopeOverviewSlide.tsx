@@ -4,13 +4,23 @@ import type {
   ProposalSlide,
   DeckBranding,
   ScopeOverviewContent,
+  ScopeOverviewSelectedPhoto,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
 
 interface LayoutProps {
   slide: ProposalSlide;
   branding: DeckBranding;
   hasAiBackground?: boolean;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeOutlineShadow(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  return `-1px -1px 0 ${color}, 1px -1px 0 ${color}, -1px 1px 0 ${color}, 1px 1px 0 ${color}, 0 -1px 0 ${color}, 0 1px 0 ${color}`;
 }
 
 // ─── Empty-state placeholder for image slots ─────────────────────────────────
@@ -53,25 +63,92 @@ function ImagePlaceholder({ label }: { label?: string }) {
   );
 }
 
+// ─── Positioned photo renderer ──────────────────────────────────────────────
+
+function PositionedPhoto({ photo }: { photo: ScopeOverviewSelectedPhoto }) {
+  const scalePct = photo.scale ?? 100;
+  const px = photo.positionX ?? 50;
+  const py = photo.positionY ?? 50;
+
+  // Uses background-image instead of <img> so we can control exactly how much
+  // of the source photo is visible — true camera-style zoom.
+  //
+  // background-size controls zoom:
+  //   100% → "cover" equivalent: photo fills container, edges cropped
+  //   200% → zoom IN: photo is 2× the container, tighter crop (see less)
+  //    50% → zoom OUT: photo is half the container, reveals more of the image
+  //
+  // background-position controls pan (which part of the photo is centered).
+
+  return (
+    <div
+      role="img"
+      style={{
+        width: "100%",
+        height: "100%",
+        backgroundImage: `url(${photo.url})`,
+        backgroundSize: `${scalePct}%`,
+        backgroundPosition: `${px}% ${py}%`,
+        backgroundRepeat: "no-repeat",
+        backgroundColor: "#1A1A1A",
+      }}
+    />
+  );
+}
+
 // ─── Layout 1: split-panel ───────────────────────────────────────────────────
 // Left 42 %: label + large serif title + accent rule + description
 // Right 58 %: 1 or 2 images stacked with a 2 px gap
 
 function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
-  const imageUrls = (content.selectedPhotos ?? []).map((p) => p.url).filter(Boolean).slice(0, 2);
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
+  const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 2);
   const title = slide.headline ?? "Scope Overview";
   const description = content.description ?? "";
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  const photoPanelPct = content.panelSplitRatio ?? 50;
+  const textPanelPct = 100 - photoPanelPct;
 
-  const titleSize  = content.titleSize  ?? 1.5;
+  // Per-field: Title
+  const titleFontFamily = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleSize  = content.titleSize  ?? 2.0;
   const titleColor = content.titleColor ?? branding.textColor;
+  const titleShadow = makeOutlineShadow(content.titleOutline);
   const titleX     = content.titleX     ?? 0.06;
   const titleY     = content.titleY     ?? 0.35;
-  const copySize   = content.copySize   ?? 1.5;
-  const copyColor  = content.copyColor  ?? "#4B5563";
+
+  // Per-field: Description (with deprecated copySize/copyColor fallbacks)
+  const descFontFamily = content.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const descSize   = content.descriptionSize ?? content.copySize ?? 1.0;
+  const descColor  = content.descriptionColor ?? content.copyColor ?? "#4B5563";
+  const descShadow = makeOutlineShadow(content.descriptionOutline);
   const copyX      = content.copyX      ?? 0.06;
   const copyY      = content.copyY      ?? 0.66;
+
+  const titleStyle: React.CSSProperties = {
+    fontSize: `${2.4 * titleSize}em`,
+    fontFamily: titleFontFamily,
+    fontWeight: (content.titleBold ?? true) ? 800 : 400,
+    fontStyle: content.titleItalic ? "italic" : undefined,
+    textDecoration: content.titleUnderline ? "underline" : undefined,
+    color: titleColor,
+    lineHeight: 1.15,
+    marginBottom: "0.5em",
+    textShadow: titleShadow,
+  };
+
+  const descStyle: React.CSSProperties = {
+    fontSize: `${0.73 * descSize}em`,
+    fontFamily: descFontFamily,
+    fontWeight: content.descriptionBold ? 700 : 400,
+    fontStyle: content.descriptionItalic ? "italic" : undefined,
+    textDecoration: content.descriptionUnderline ? "underline" : undefined,
+    color: descColor,
+    lineHeight: 1.85,
+    textShadow: descShadow,
+  };
 
   return (
     <div
@@ -79,29 +156,25 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
       style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}
     >
       {/* Left panel border */}
-      <div style={{ position: "absolute", left: 0, top: 0, width: "42%", height: "100%", borderRight: "1px solid #E5E3DF", pointerEvents: "none" }} />
+      <div style={{ position: "absolute", left: 0, top: 0, width: `${textPanelPct}%`, height: "100%", borderRight: "1px solid #E5E3DF", pointerEvents: "none" }} />
 
       {/* ── Right: image(s) ──────────────────────────────────────────────── */}
       <div
         style={{
           position: "absolute",
-          left: "42%", top: 0, right: 0, bottom: 0,
+          left: `${textPanelPct}%`, top: 0, right: 0, bottom: 0,
           display: "flex",
           flexDirection: "column",
           gap: 2,
           overflow: "hidden",
         }}
       >
-        {imageUrls.length === 0 ? (
+        {photos.length === 0 ? (
           <ImagePlaceholder label="Add images in the inspector" />
-        ) : imageUrls.length === 1 ? (
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <img src={imageUrls[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          </div>
         ) : (
-          imageUrls.map((url, i) => (
+          photos.map((photo, i) => (
             <div key={i} style={{ flex: 1, overflow: "hidden" }}>
-              <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <PositionedPhoto photo={photo} />
             </div>
           ))
         )}
@@ -114,17 +187,19 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           left: `${titleX * 100}%`,
           top: `${titleY * 100}%`,
           transform: "translateY(-50%)",
-          maxWidth: "36%",
+          maxWidth: `${Math.max(textPanelPct - 8, 20)}%`,
           zIndex: 2,
         }}
       >
-        <p style={{ fontSize: "0.6em", fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: branding.accentColor, marginBottom: "0.8em" }}>
-          Project Scope
-        </p>
-        <h2 className="font-serif" style={{ fontSize: `${2.4 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.15, marginBottom: "0.5em" }}>
+        {(content.showSectionLabel ?? true) && (
+          <p style={{ fontSize: SECTION_LABEL_SIZE, fontFamily: SLIDE_FONTS.defaults.label, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: accent, marginBottom: "0.8em" }}>
+            Project Scope
+          </p>
+        )}
+        <h2 style={titleStyle}>
           {title}
         </h2>
-        <TitleAccentRule accentColor={branding.accentColor} marginTop="0" />
+        <TitleAccentRule accentColor={accent} marginTop="0" />
       </div>
 
       {/* ── Description (absolutely positioned) ───────────────────────────── */}
@@ -134,12 +209,12 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           left: `${copyX * 100}%`,
           top: `${copyY * 100}%`,
           transform: "translateY(-50%)",
-          maxWidth: "36%",
+          maxWidth: `${Math.max(textPanelPct - 8, 20)}%`,
           zIndex: 2,
         }}
       >
         {description ? (
-          <p style={{ fontSize: `${0.73 * copySize}em`, color: copyColor, lineHeight: 1.85, fontWeight: 400 }}>
+          <p style={descStyle}>
             {description}
           </p>
         ) : (
@@ -148,6 +223,15 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           </p>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
@@ -158,19 +242,51 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 
 function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
-  const imageUrls = (content.selectedPhotos ?? []).map((p) => p.url).filter(Boolean).slice(0, 4);
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
+  const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 4);
   const title = slide.headline ?? "Scope Overview";
   const description = content.description ?? "";
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
-  const titleSize  = content.titleSize  ?? 1.5;
+  // Per-field: Title
+  const titleFontFamily = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleSize  = content.titleSize  ?? 2.0;
   const titleColor = content.titleColor ?? branding.textColor;
+  const titleShadow = makeOutlineShadow(content.titleOutline);
   const titleX     = content.titleX     ?? 0.06;
   const titleY     = content.titleY     ?? 0.16;
-  const copySize   = content.copySize   ?? 1.5;
-  const copyColor  = content.copyColor  ?? "#4B5563";
+
+  // Per-field: Description (with deprecated copySize/copyColor fallbacks)
+  const descFontFamily = content.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const descSize   = content.descriptionSize ?? content.copySize ?? 1.0;
+  const descColor  = content.descriptionColor ?? content.copyColor ?? "#4B5563";
+  const descShadow = makeOutlineShadow(content.descriptionOutline);
   const copyX      = content.copyX      ?? 0.06;
   const copyY      = content.copyY      ?? 0.33;
+
+  const titleStyle: React.CSSProperties = {
+    fontSize: `${2.2 * titleSize}em`,
+    fontFamily: titleFontFamily,
+    fontWeight: (content.titleBold ?? true) ? 800 : 400,
+    fontStyle: content.titleItalic ? "italic" : undefined,
+    textDecoration: content.titleUnderline ? "underline" : undefined,
+    color: titleColor,
+    lineHeight: 1.15,
+    marginBottom: "0.5em",
+    textShadow: titleShadow,
+  };
+
+  const descStyle: React.CSSProperties = {
+    fontSize: `${0.72 * descSize}em`,
+    fontFamily: descFontFamily,
+    fontWeight: content.descriptionBold ? 700 : 400,
+    fontStyle: content.descriptionItalic ? "italic" : undefined,
+    textDecoration: content.descriptionUnderline ? "underline" : undefined,
+    color: descColor,
+    lineHeight: 1.8,
+    textShadow: descShadow,
+  };
 
   return (
     <div
@@ -188,12 +304,12 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           overflow: "hidden",
         }}
       >
-        {imageUrls.length === 0 ? (
+        {photos.length === 0 ? (
           <ImagePlaceholder label="Add images in the inspector" />
         ) : (
-          imageUrls.map((url, i) => (
+          photos.map((photo, i) => (
             <div key={i} style={{ flex: 1, overflow: "hidden" }}>
-              <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <PositionedPhoto photo={photo} />
             </div>
           ))
         )}
@@ -210,13 +326,15 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           zIndex: 2,
         }}
       >
-        <p style={{ fontSize: "0.6em", fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: branding.accentColor, marginBottom: "0.8em" }}>
-          Project Scope
-        </p>
-        <h2 className="font-serif" style={{ fontSize: `${2.2 * titleSize}em`, fontWeight: 800, color: titleColor, lineHeight: 1.15, marginBottom: "0.5em" }}>
+        {(content.showSectionLabel ?? true) && (
+          <p style={{ fontSize: SECTION_LABEL_SIZE, fontFamily: SLIDE_FONTS.defaults.label, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: accent, marginBottom: "0.8em" }}>
+            Project Scope
+          </p>
+        )}
+        <h2 style={titleStyle}>
           {title}
         </h2>
-        <TitleAccentRule accentColor={branding.accentColor} marginTop="0" />
+        <TitleAccentRule accentColor={accent} marginTop="0" />
       </div>
 
       {/* ── Description (absolutely positioned) ───────────────────────────── */}
@@ -231,7 +349,7 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
         }}
       >
         {description ? (
-          <p style={{ fontSize: `${0.72 * copySize}em`, color: copyColor, lineHeight: 1.8 }}>
+          <p style={descStyle}>
             {description}
           </p>
         ) : (
@@ -240,6 +358,15 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           </p>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }

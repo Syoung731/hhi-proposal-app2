@@ -12,6 +12,7 @@ import {
 import { getPresignedUploadUrl, uploadBuffer } from "@/app/lib/s3";
 import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
+import { callClaude } from "@/app/lib/ai/model";
 import type { HeroPresetKey } from "./hero-presets";
 
 export async function getPresignedUploadUrlAction(
@@ -291,6 +292,8 @@ export async function deleteMediaAction(projectId: string, mediaId: string): Pro
   }
   // Remove this media from all section presentation configs (beforeSelectedMediaIds, etc.) so no broken refs remain.
   await removeMediaIdFromPresentationConfig(projectId, mediaId);
+  // Delete child renderings (versions) first to avoid orphans (schema uses onDelete: SetNull)
+  await prisma.media.deleteMany({ where: { parentMediaId: mediaId } });
   await prisma.media.delete({ where: { id: mediaId } });
   if (media.type === MediaType.HERO) {
     await prisma.project.update({
@@ -307,6 +310,76 @@ export async function deleteMediaAction(projectId: string, mediaId: string): Pro
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
+}
+
+/**
+ * Clean up orphaned rendering records:
+ * 1. Renderings with parentMediaId=null AND sourceMediaId=null — these are former children
+ *    that lost both their parent reference and their source reference. They're never valid roots.
+ * 2. For each (roomId, sourceMediaId) group with multiple roots, keep the one that is currently
+ *    selectedRenderMediaId (or oldest) and delete the rest.
+ */
+export async function cleanupOrphanedRenderingsAction(projectId: string): Promise<{ deleted: number }> {
+  await requireAdmin();
+
+  const potentialRoots = await prisma.media.findMany({
+    where: { projectId, type: MediaType.RENDERING, parentMediaId: null },
+    select: { id: true, roomId: true, sourceMediaId: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  // Also load rooms to know which renders are selected
+  const rooms = await prisma.room.findMany({
+    where: { projectId },
+    select: { id: true, selectedRenderMediaId: true },
+  });
+  const selectedIds = new Set(rooms.map((r) => r.selectedRenderMediaId).filter(Boolean) as string[]);
+
+  const orphanIds: string[] = [];
+
+  // Strategy 1: Any RENDERING with parentMediaId=null AND sourceMediaId=null is an orphan.
+  // Real root concepts always have a sourceMediaId pointing to the before photo.
+  for (const r of potentialRoots) {
+    if (r.sourceMediaId == null && r.roomId != null && !selectedIds.has(r.id)) {
+      orphanIds.push(r.id);
+    }
+  }
+
+  // Strategy 2: For each (roomId, sourceMediaId) group, if there are duplicate roots,
+  // keep the selected one (or oldest) and mark the rest as orphans.
+  const groups = new Map<string, typeof potentialRoots>();
+  for (const r of potentialRoots) {
+    if (r.sourceMediaId == null) continue; // already handled above
+    const key = `${r.roomId ?? "null"}::${r.sourceMediaId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(r);
+  }
+  for (const group of groups.values()) {
+    if (group.length <= 1) continue;
+    // Prefer the selected one; fall back to oldest
+    const keeper = group.find((r) => selectedIds.has(r.id)) ?? group[0];
+    for (const r of group) {
+      if (r.id !== keeper.id) orphanIds.push(r.id);
+    }
+  }
+
+  if (orphanIds.length === 0) return { deleted: 0 };
+
+  // Clear selectedRenderMediaId on rooms that reference orphans
+  await prisma.room.updateMany({
+    where: { projectId, selectedRenderMediaId: { in: orphanIds } },
+    data: { selectedRenderMediaId: null },
+  });
+
+  // Delete children of orphans first, then the orphans themselves
+  await prisma.media.deleteMany({ where: { parentMediaId: { in: orphanIds } } });
+  const result = await prisma.media.deleteMany({ where: { id: { in: orphanIds } } });
+
+  if (result.count > 0) {
+    revalidatePath(`/admin/projects/${projectId}`);
+  }
+
+  return { deleted: result.count };
 }
 
 /**
@@ -573,6 +646,111 @@ export async function moveMediaOrderAction(
 import { getGeminiImageModel as _getGeminiImgModel } from "@/app/lib/ai/gemini-models";
 // GEMINI_MODEL removed — now read from DB via getGeminiImageModel()
 
+// ---------------------------------------------------------------------------
+// Render checklist extraction — uses Claude to pull visual-only items from scope
+// ---------------------------------------------------------------------------
+
+const RENDER_CHECKLIST_SYSTEM = `You extract a rendering checklist from a room's scope of work. The checklist is for an AI image generator that will create a "before and after" rendering of the room renovation.
+
+RULES:
+1. Return ONLY a JSON array of short action strings. No explanation, no markdown.
+2. Include ONLY items that would be VISIBLE in a finished photo of the room:
+   - Fixture changes: tubs, showers, toilets, sinks, faucets, vanities
+   - Surface changes: tile, flooring, countertops, backsplash, paint, wall finishes
+   - Cabinetry and built-ins
+   - Lighting fixtures, mirrors, hardware
+   - Doors, trim, molding, wainscoting
+   - Heated towel racks, glass enclosures, shower niches, benches
+3. EXCLUDE anything invisible in a photo:
+   - Plumbing rough-in, supply lines, drain lines, valves
+   - Electrical wiring, circuits, panels
+   - Structural work: framing, joists, subfloor, blocking
+   - Substrate: waterproofing membrane, backer board, underlayment
+   - HVAC, insulation, vapor barriers
+   - Demolition, debris removal, protection
+   - Permits, inspections, code compliance
+   - Caulking, sealant, grout sealer
+4. Each item should be 3-8 words, starting with a verb (Remove, Install, Replace, Add, Paint).
+5. Group removals first, then new installations.
+6. Use the clarification answers to refine descriptions (e.g., if answer says "freestanding floor-mounted", say "Install freestanding soaking tub" not just "Install tub").
+7. Return 5-15 items. Combine related small items; split large compound items.
+
+Example output:
+["Remove heart-shaped jetted tub","Remove octagonal shower enclosure","Install freestanding soaking tub","Install walk-in tiled shower","Replace vanity with stone countertop","Install floor and wall tile","Replace toilet","Install recessed lighting","Install heated towel rack","Paint walls and ceiling"]`;
+
+/**
+ * Extract a visual-only rendering checklist from a room's scope narrative using Claude.
+ * Results are cached in the room's scopeQA JSON field under the key "renderChecklist".
+ * Returns the checklist items, or falls back to an empty array on error.
+ */
+export async function extractRenderChecklistAction(roomId: string): Promise<string[]> {
+  await requireAdmin();
+
+  const room = await prisma.room.findUnique({
+    where: { id: roomId },
+    select: { scopeNarrative: true, scopeQA: true },
+  });
+  if (!room?.scopeNarrative) return [];
+
+  // Check cache — stored in scopeQA.renderChecklist alongside a hash of the scope
+  const scopeHash = simpleHash(room.scopeNarrative);
+  const existingQA = room.scopeQA as Record<string, unknown> | null;
+  if (
+    existingQA?.renderChecklist &&
+    existingQA?.renderChecklistScopeHash === scopeHash
+  ) {
+    return existingQA.renderChecklist as string[];
+  }
+
+  // Call Claude to extract visual items
+  try {
+    const message = await callClaude({
+      system: RENDER_CHECKLIST_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: `Extract the visual rendering checklist from this room scope:\n\n${room.scopeNarrative}`,
+        },
+      ],
+      max_tokens: 1024,
+    });
+
+    const text = message.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("");
+
+    const items: string[] = JSON.parse(text);
+    if (!Array.isArray(items)) return [];
+
+    // Cache result
+    await prisma.room.update({
+      where: { id: roomId },
+      data: {
+        scopeQA: {
+          ...(existingQA ?? {}),
+          renderChecklist: items,
+          renderChecklistScopeHash: scopeHash,
+        },
+      },
+    });
+
+    return items;
+  } catch (err) {
+    console.error("[extractRenderChecklist] Error:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/** Fast non-crypto hash for cache invalidation. */
+function simpleHash(str: string): string {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
+}
+
 /**
  * Resolve effective style prompt for Media rendering: project-level preset only.
  * Returns null if no project preset; otherwise returns project.stylePreset.prompt.
@@ -586,26 +764,84 @@ function getEffectiveStylePromptForProject(project: {
   return project.stylePreset.prompt.trim() || null;
 }
 
-/** Phrases that indicate non-visual / construction language; exclude these from the render prompt. */
+/** Phrases that indicate non-visual / construction language; exclude these from the render prompt.
+ *  Server-side safety net — anything invisible in a finished photo gets stripped before Gemini sees it. */
 const NON_VISUAL_PATTERNS = [
-  /\bremain\b/i,
-  /\bexisting to remain\b/i,
-  /\bno change\b/i,
-  /\bas needed\b/i,
-  /\bdue to construction\b/i,
-  /\bconstruction impacts?\b/i,
+  // status-quo
+  /\bto\s+remain\b/i,
+  /\bno\s+change\b/i,
+  /\bno\s+work\b/i,
+  // demolition & protection
   /\bdemolition\b/i,
-  /\bwaterproofing\b/i,
-  /\bsubstrate\b/i,
+  /\bdemo\s/i,
+  /\bprotect(?:ion)?\b/i,
+  /\bclean-?up\b/i,
+  /\bdebris\b/i,
+  /\bhaul-?(?:off|away)\b/i,
+  // plumbing behind-wall
   /\brough-?in\b/i,
-  /\bper code\b/i,
-  /\bto be performed\b/i,
-  /\ball other .* (?:to )?remain\b/i,
-  /\bcomponents? to remain\b/i,
-  /\bpaint to be performed\b/i,
-  /\blight fixtures\), with paint\b/i,
-  /\b(?:as )?required\b/i,
-  /\b(?:as )?specified\b/i,
+  /\bsupply\s+line/i,
+  /\bdrain\s+line/i,
+  /\bp-?trap\b/i,
+  /\bshut-?off\s+valve/i,
+  /\bwater\s+supply\b/i,
+  /\bwater\s+line\b/i,
+  /\bwater\s+heater\b/i,
+  /\breconnect\s+plumbing\b/i,
+  /\bplumbing\s+(?:rough|connection|hook-?up|tie-?in|reroute|relocat)/i,
+  /\bgas\s+line\b/i,
+  /\bvent(?:ing)?\s+(?:pipe|stack|line)\b/i,
+  // electrical behind-wall
+  /\belectrical\s+(?:rough|circuit|panel|wire|wiring|hook-?up|connection|service)\b/i,
+  /\bjunction\s+box\b/i,
+  /\bGFCI\b/i,
+  // structural / framing
+  /\bframing\b/i,
+  /\bblocking\b/i,
+  /\bsistering\b/i,
+  /\bstructural\b/i,
+  /\bsub-?floor\b/i,
+  /\bjoist\b/i,
+  // substrate / prep
+  /\bsubstrate\b/i,
+  /\bwaterproofing\b/i,
+  /\bmembrane\b/i,
+  /\bunderlayment\b/i,
+  /\bbacker\s*board\b/i,
+  /\bdrywall\s+(?:repair|patch|tape|mud|finish|hang)\b/i,
+  /\bskim\s+coat\b/i,
+  /\bleveling\s+compound\b/i,
+  // HVAC / mechanical
+  /\bHVAC\b/i,
+  /\bductwork\b/i,
+  /\binsulation\b/i,
+  /\bvapor\s+barrier\b/i,
+  // permits / code
+  /\bpermit\b/i,
+  /\binspection\b/i,
+  /\bper\s+code\b/i,
+  /\bcode\s+complian/i,
+  /\b(?:as\s+)?required\b/i,
+  /\b(?:as\s+)?specified\b/i,
+  /\bto\s+be\s+performed\b/i,
+  /\bper\s+manufacturer\b/i,
+  // procedural / labor
+  /\binstallation\s+activities\b/i,
+  /\bconstruction\s+impacts?\b/i,
+  /\bdue\s+to\s+construction\b/i,
+  /\bcoordinate\s+with\b/i,
+  /\bfield\s+(?:verify|measure)\b/i,
+  /\btouch-?up\s+(?:as\s+)?needed\b/i,
+  /\bpaint\s+to\s+be\s+performed\b/i,
+  /\bpunch\s*list\b/i,
+  /\bfinal\s+clean\b/i,
+  // caulk / sealant
+  /\bcaulk(?:ing)?\b/i,
+  /\bsealant\b/i,
+  // misc
+  /\bshoring\b/i,
+  /\bflashing\b/i,
+  /\bas\s+needed\b/i,
 ];
 
 /**

@@ -6,6 +6,8 @@ import type {
   ScopeBreakdownContent,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SLIDE_PADDING, SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
 
 interface Props {
   slide: ProposalSlide;
@@ -14,6 +16,11 @@ interface Props {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function makeOutlineShadow(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  return `-1px -1px 0 ${color}, 1px -1px 0 ${color}, -1px 1px 0 ${color}, 1px 1px 0 ${color}, 0 -1px 0 ${color}, 0 1px 0 ${color}`;
+}
 
 function gridColumns(count: number): string {
   if (count <= 2) return "1fr";
@@ -44,6 +51,8 @@ function NoRooms() {
 
 export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
 
   const title =
     content.title || slide.headline || "Additional Areas Included";
@@ -92,19 +101,20 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
           height: "100%",
           display: "flex",
           flexDirection: "column",
-          padding: "5% 6% 4%",
+          padding: SLIDE_PADDING.content,
         }}
       >
         {/* ── Header ───────────────────────────────────────────────────── */}
         <div style={{ flexShrink: 0, marginBottom: "3%" }}>
-          {slide.subheadline && (
+          {(content.showSectionLabel ?? true) && slide.subheadline && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em",
+                fontSize: SECTION_LABEL_SIZE,
                 fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
                 letterSpacing: "0.13em",
-                color: branding.accentColor,
+                color: accent,
                 marginBottom: "0.35em",
               }}
             >
@@ -112,25 +122,33 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
             </p>
           )}
           <h2
-            className="font-serif"
             style={{
-              fontSize: "2.8em",
-              fontWeight: 800,
-              color: branding.textColor,
+              fontSize: `${2.8 * (content.titleSize ?? 1.0)}em`,
+              fontWeight: (content.titleBold ?? true) ? 800 : 400,
+              fontFamily: content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+              fontStyle: content.titleItalic ? "italic" : undefined,
+              textDecoration: content.titleUnderline ? "underline" : undefined,
+              color: content.titleColor ?? branding.textColor,
               lineHeight: 1.1,
+              textShadow: makeOutlineShadow(content.titleOutline),
             }}
           >
             {title}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} />
+          <TitleAccentRule accentColor={accent} />
           {introText && (
             <p
               style={{
-                fontSize: "0.72em",
-                color: "#6B7280",
+                fontSize: `${0.72 * (content.introSize ?? 1.0)}em`,
+                fontFamily: content.introFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body,
+                fontWeight: content.introBold ? 700 : 400,
+                fontStyle: content.introItalic ? "italic" : undefined,
+                textDecoration: content.introUnderline ? "underline" : undefined,
+                color: content.introColor ?? "#6B7280",
                 lineHeight: 1.65,
                 marginTop: "0.65em",
                 maxWidth: "72%",
+                textShadow: makeOutlineShadow(content.introOutline),
               }}
             >
               {introText}
@@ -153,42 +171,49 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
               marginBottom: hasPhotos ? "2.5%" : 0,
             }}
           >
-            {visibleRooms.map((room) => (
-              <div
-                key={room.id}
-                style={{
-                  borderLeft: `3px solid ${branding.accentColor}`,
-                  paddingLeft: "4%",
-                  paddingTop: "0.5%",
-                  paddingBottom: "0.5%",
-                }}
-              >
-                <p
-                  className="font-serif"
+            {visibleRooms.map((room) => {
+              const roomTitleStyle: React.CSSProperties = {
+                fontSize: `${0.82 * (room.titleSize ?? 1.0)}em`,
+                fontWeight: (room.titleBold ?? true) ? 700 : 400,
+                fontFamily: room.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+                fontStyle: room.titleItalic ? "italic" : undefined,
+                textDecoration: room.titleUnderline ? "underline" : undefined,
+                color: room.titleColor ?? branding.textColor,
+                lineHeight: 1.2,
+                marginBottom: "0.4em",
+                textShadow: makeOutlineShadow(room.titleOutline),
+              };
+              const roomDescStyle: React.CSSProperties = {
+                fontSize: `${0.63 * (room.descriptionSize ?? 1.0)}em`,
+                fontFamily: room.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body,
+                fontWeight: room.descriptionBold ? 700 : 400,
+                fontStyle: room.descriptionItalic ? "italic" : undefined,
+                textDecoration: room.descriptionUnderline ? "underline" : undefined,
+                color: room.descriptionColor ?? "#4B5563",
+                lineHeight: 1.75,
+                textShadow: makeOutlineShadow(room.descriptionOutline),
+              };
+              return (
+                <div
+                  key={room.id}
                   style={{
-                    fontSize: "0.82em",
-                    fontWeight: 700,
-                    color: branding.textColor,
-                    lineHeight: 1.2,
-                    marginBottom: "0.4em",
+                    borderLeft: `3px solid ${accent}`,
+                    paddingLeft: "4%",
+                    paddingTop: "0.5%",
+                    paddingBottom: "0.5%",
                   }}
                 >
-                  {room.name}
-                </p>
-                {room.description && (
-                  <p
-                    style={{
-                      fontSize: "0.63em",
-                      color: "#4B5563",
-                      lineHeight: 1.75,
-                      fontWeight: 400,
-                    }}
-                  >
-                    {room.description}
+                  <p style={roomTitleStyle}>
+                    {room.name}
                   </p>
-                )}
-              </div>
-            ))}
+                  {room.description && (
+                    <p style={roomDescStyle}>
+                      {room.description}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -228,6 +253,15 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
           </div>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }

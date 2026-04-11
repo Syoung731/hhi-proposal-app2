@@ -1,5 +1,6 @@
 import type { Project, Room, Media, TimelinePhase, InvestmentLineItem } from "@/app/generated/prisma";
 import { MediaKind, MediaType } from "@/app/generated/prisma";
+import { stripScopeClarifications } from "@/app/lib/scope-narrative";
 import { isBadPlaceholderUrl } from "@/app/lib/media";
 import { formatAddress, formatOwnerNames } from "@/app/lib/cover-display";
 import { formatInvestmentRange } from "@/app/lib/format-investment-range";
@@ -121,7 +122,7 @@ export function DraftProposalView({ project }: { project: ProjectWithRelations }
             {room.name}
           </h2>
           <p className="mb-4 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
-            {room.scopeNarrative || "—"}
+            {stripScopeClarifications(room.scopeNarrative ?? "") || "—"}
           </p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {(mediaByRoom.get(room.id) ?? [])

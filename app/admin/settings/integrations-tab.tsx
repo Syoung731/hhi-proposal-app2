@@ -21,6 +21,9 @@ import {
   getGooglePlacesIntegrationAction,
   saveGooglePlacesApiKeyAction,
   testGooglePlacesConnectionAction,
+  getGoogleReviewsIntegrationAction,
+  saveGoogleReviewsCredentialsAction,
+  testGoogleReviewsConnectionAction,
 } from "./actions";
 import type { CompanySettingsForUI } from "./settings-tabs";
 
@@ -630,6 +633,77 @@ export function IntegrationsTab({ settings }: Props) {
               ? "connected"
               : "not_connected";
 
+  // --- Google Reviews state ---
+  type GoogleReviewsState = Awaited<ReturnType<typeof getGoogleReviewsIntegrationAction>>;
+  const [googleReviews, setGoogleReviews] = useState<GoogleReviewsState | null>(null);
+  const [googleReviewsLoading, setGoogleReviewsLoading] = useState(true);
+  const [googleReviewsSaveStatus, setGoogleReviewsSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [googleReviewsSaveError, setGoogleReviewsSaveError] = useState<string | null>(null);
+  const [googleReviewsTestStatus, setGoogleReviewsTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [googleReviewsTestResult, setGoogleReviewsTestResult] = useState<string | null>(null);
+  const [googleReviewsTestError, setGoogleReviewsTestError] = useState<string | null>(null);
+
+  const refreshGoogleReviews = useCallback(async () => {
+    const data = await getGoogleReviewsIntegrationAction();
+    setGoogleReviews(data);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGoogleReviewsIntegrationAction().then((data) => {
+      if (!cancelled) {
+        setGoogleReviews(data);
+        setGoogleReviewsLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleGoogleReviewsSave(formData: FormData) {
+    setGoogleReviewsSaveStatus("saving");
+    setGoogleReviewsSaveError(null);
+    const result = await saveGoogleReviewsCredentialsAction(formData);
+    if (result.error) {
+      setGoogleReviewsSaveStatus("error");
+      setGoogleReviewsSaveError(result.error);
+      return;
+    }
+    setGoogleReviewsSaveStatus("saved");
+    await refreshGoogleReviews();
+    router.refresh();
+    setTimeout(() => setGoogleReviewsSaveStatus("idle"), 3000);
+  }
+
+  async function handleGoogleReviewsTest() {
+    setGoogleReviewsTestStatus("testing");
+    setGoogleReviewsTestError(null);
+    setGoogleReviewsTestResult(null);
+    const result = await testGoogleReviewsConnectionAction();
+    if (result.ok) {
+      setGoogleReviewsTestStatus("ok");
+      setGoogleReviewsTestResult("Connected");
+      await refreshGoogleReviews();
+      router.refresh();
+    } else {
+      setGoogleReviewsTestStatus("error");
+      setGoogleReviewsTestError(result.error ?? "Connection failed");
+    }
+    setTimeout(() => setGoogleReviewsTestStatus("idle"), 5000);
+  }
+
+  const googleReviewsBadge: "connected" | "error" | "not_connected" =
+    googleReviewsTestStatus === "ok"
+      ? "connected"
+      : googleReviewsTestStatus === "error"
+        ? "error"
+        : googleReviews?.lastStatus === "success"
+          ? "connected"
+          : googleReviews?.lastStatus === "error"
+            ? "error"
+            : googleReviews?.hasApiKey && googleReviews?.placeId
+              ? "connected"
+              : "not_connected";
+
   const badgeState = getConnectionBadgeState(jobTread);
 
   return (
@@ -1173,6 +1247,112 @@ export function IntegrationsTab({ settings }: Props) {
               {googlePlacesTestStatus === "idle" && googlePlaces?.lastStatus === "success" && (
                 <span className="text-sm text-zinc-500 dark:text-zinc-400">
                   Last tested: {googlePlaces.lastTestedAt ? new Date(googlePlaces.lastTestedAt).toLocaleString() : "\u2014"}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Google Reviews (testimonial sync) */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+            Google Reviews
+          </h3>
+          <span
+            className={
+              googleReviewsBadge === "connected"
+                ? "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-800/40 dark:text-green-200"
+                : googleReviewsBadge === "error"
+                  ? "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800/40 dark:text-red-200"
+                  : "inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+            }
+          >
+            {googleReviewsBadge === "connected"
+              ? "Connected"
+              : googleReviewsBadge === "error"
+                ? "Error"
+                : "Not configured"}
+          </span>
+        </div>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Sync Google Reviews into your Testimonial Library for use in proposal decks.
+        </p>
+
+        {googleReviewsLoading ? (
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading...</p>
+        ) : (
+          <div className="space-y-4">
+            <form
+              action={handleGoogleReviewsSave}
+              className="space-y-3"
+            >
+              <div>
+                <label className={labelClass}>API Key</label>
+                <input
+                  name="googleReviewsApiKey"
+                  type="password"
+                  placeholder={googleReviews?.hasApiKey ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (saved)" : "Enter Google Places API key"}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Place ID</label>
+                <input
+                  name="googleReviewsPlaceId"
+                  type="text"
+                  defaultValue={googleReviews?.placeId ?? ""}
+                  placeholder="ChIJ..."
+                  className={inputClass}
+                />
+                <p className="mt-1 text-xs text-zinc-400">
+                  Find yours at{" "}
+                  <a
+                    href="https://developers.google.com/maps/documentation/places/web-service/place-id"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    Google Place ID Finder
+                  </a>
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={googleReviewsSaveStatus === "saving"}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                >
+                  {googleReviewsSaveStatus === "saving" ? "Saving..." : "Save Credentials"}
+                </button>
+                {googleReviewsSaveStatus === "saved" && (
+                  <span className="text-sm text-green-600 dark:text-green-400">Saved</span>
+                )}
+                {googleReviewsSaveStatus === "error" && googleReviewsSaveError && (
+                  <span className="text-sm text-red-600 dark:text-red-400">{googleReviewsSaveError}</span>
+                )}
+              </div>
+            </form>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleGoogleReviewsTest}
+                disabled={googleReviewsTestStatus === "testing" || !googleReviews?.hasApiKey}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {googleReviewsTestStatus === "testing" ? "Testing..." : "Test Connection"}
+              </button>
+              {googleReviewsTestStatus === "ok" && googleReviewsTestResult && (
+                <span className="text-sm text-green-600 dark:text-green-400">{googleReviewsTestResult}</span>
+              )}
+              {googleReviewsTestStatus === "error" && googleReviewsTestError && (
+                <span className="text-sm text-red-600 dark:text-red-400">{googleReviewsTestError}</span>
+              )}
+              {googleReviewsTestStatus === "idle" && googleReviews?.lastStatus === "success" && (
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Last tested: {googleReviews.lastTestedAt ? new Date(googleReviews.lastTestedAt).toLocaleString() : "\u2014"}
                 </span>
               )}
             </div>

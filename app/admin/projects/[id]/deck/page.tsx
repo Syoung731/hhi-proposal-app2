@@ -4,12 +4,14 @@ import { requireAdmin } from "@/app/lib/auth";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getDeckForProject } from "@/app/lib/deck/db";
+import { getDesignBuildDefaults } from "@/app/lib/design-build-defaults.server";
 // Note: we fetch backgrounds directly with Prisma here (not via the server action)
 // so we stay within the server component request context for auth.
 import { DeckEditorClient } from "./DeckEditorClient";
 import type {
   WhyUsPillarItem,
   RoomWithMedia,
+  RoomMediaItem,
   WhyUsContent,
   ObjectiveContent,
   TextZoneSuggestion,
@@ -38,6 +40,8 @@ export default async function DeckEditorPage({ params }: PageProps) {
       title: true,
       subtitle: true,
       objective: true,
+      supportingText: true,
+      bullets: true,
       client1First: true,
       client1Last: true,
       client2First: true,
@@ -112,6 +116,28 @@ export default async function DeckEditorPage({ params }: PageProps) {
     project.media[0]?.url ??
     null;
 
+  // ── Clean up orphaned renderings ──────────────────────────────────────────
+  // Remove stale orphaned rendering children (parentMediaId nulled by cascade)
+  // before querying room media so the deck never sees phantom renders.
+  try {
+    const orphanRoots = await prisma.media.findMany({
+      where: { projectId: id, type: "RENDERING", parentMediaId: null, sourceMediaId: null, roomId: { not: null } },
+      select: { id: true },
+    });
+    if (orphanRoots.length > 0) {
+      const orphanIds = orphanRoots.map((r) => r.id);
+      // Don't delete if it's the selected render for any room
+      const rooms = await prisma.room.findMany({
+        where: { projectId: id, selectedRenderMediaId: { in: orphanIds } },
+        select: { id: true },
+      });
+      if (rooms.length === 0) {
+        await prisma.media.deleteMany({ where: { parentMediaId: { in: orphanIds } } });
+        await prisma.media.deleteMany({ where: { id: { in: orphanIds } } });
+      }
+    }
+  } catch { /* non-fatal */ }
+
   // ── Rooms with before/render media ─────────────────────────────────────────
   // Must be fetched BEFORE getDeckForProject so the sync engine can create
   // Before/After and Scope Breakdown slides on first load.
@@ -140,6 +166,8 @@ export default async function DeckEditorPage({ params }: PageProps) {
             type: true,
             renderStatus: true,
             caption: true,
+            parentMediaId: true,
+            sourceMediaId: true,
           },
           orderBy: { sortOrder: "asc" },
         },
@@ -161,18 +189,58 @@ export default async function DeckEditorPage({ params }: PageProps) {
           renderStatus: m.renderStatus,
           caption: m.caption,
         })),
-      renderMedia: room.media
-        .filter((m) => m.type === "RENDERING" && m.renderStatus === "DONE")
-        .map((m) => ({
-          id: m.id,
-          url: m.url,
-          kind: m.kind,
-          renderStatus: m.renderStatus,
-          caption: m.caption,
-        })),
+      renderMedia: (() => {
+        const doneRenders = room.media.filter((m) => m.type === "RENDERING" && m.renderStatus === "DONE");
+        // Exclude orphaned children whose parentMediaId was nulled when their parent was deleted.
+        const seenSources = new Set<string>();
+        return doneRenders
+          .filter((m) => {
+            if (m.parentMediaId != null) return true;
+            const key = m.sourceMediaId ?? m.id;
+            if (seenSources.has(key)) return false;
+            seenSources.add(key);
+            return true;
+          })
+          .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption }));
+      })(),
     }));
   } catch {
     // Non-fatal: room fetch failure shows empty room list in inspector
+  }
+
+  // ── Project-level media (Front Page photos — roomId is null) ────────────────
+  let projectLevelMedia: RoomMediaItem[] = [];
+  try {
+    const rawProjectMedia = await prisma.media.findMany({
+      where: {
+        projectId: id,
+        roomId: null,
+        OR: [
+          { type: "EXISTING" },
+          { type: "RENDERING", renderStatus: "DONE" },
+        ],
+      },
+      select: {
+        id: true,
+        url: true,
+        kind: true,
+        type: true,
+        renderStatus: true,
+        caption: true,
+      },
+      orderBy: { sortOrder: "asc" },
+    });
+    projectLevelMedia = rawProjectMedia
+      .filter((m) => m.url != null && m.url !== "")
+      .map((m) => ({
+        id: m.id,
+        url: m.url!,
+        kind: m.kind,
+        renderStatus: m.renderStatus,
+        caption: m.caption,
+      }));
+  } catch {
+    // Non-fatal
   }
 
   // ── Value Pillars ────────────────────────────────────────────────────────────
@@ -200,6 +268,9 @@ export default async function DeckEditorPage({ params }: PageProps) {
   } catch {
     // Non-fatal: pillar fetch failure just means an empty grid
   }
+
+  // ── Design-Build defaults for addSlide ─────────────────────────────────────
+  const designBuildDefaults = await getDesignBuildDefaults();
 
   // ── Proposal config (objective text, commitments) ────────────────────────────
   // Fetched before getDeckForProject so the objective slide injection below
@@ -266,10 +337,9 @@ export default async function DeckEditorPage({ params }: PageProps) {
 
   // ── Objective slide hydration ────────────────────────────────────────────────
   // Sources (in priority order):
-  //   1. Proposal.publicLayoutConfig.pages.objective  (Presentation tab editor)
-  //   2. project.objective                            (Overview tab plain text)
-  // Applied every load when isUserModified !== true, so edits made in the
-  // Presentation tab are automatically reflected on the next deck open.
+  //   1. Proposal.publicLayoutConfig.pages.objective  (Presentation tab title/subtitle)
+  //   2. Project.objective / .supportingText / .bullets (Overview tab, AI-generated)
+  // Applied every load when isUserModified !== true.
   // Once the user edits the slide in the deck inspector, isUserModified = true
   // and this injection is skipped — their deck-specific copy is preserved.
   for (const slide of slides) {
@@ -279,19 +349,19 @@ export default async function DeckEditorPage({ params }: PageProps) {
       objectiveConfig?.objectiveText?.trim() ||
       project.objective?.trim() ||
       null;
-    const bullets = (objectiveConfig?.commitments ?? []).filter(Boolean);
+    const supportingText = project.supportingText?.trim() || null;
+    const bullets = (project.bullets ?? []).filter(Boolean);
     const title = objectiveConfig?.title?.trim() || null;
-    const subtitle = objectiveConfig?.subtitle?.trim() || null;
 
     // Only hydrate when there is at least some real content to inject.
-    if (!statementText && bullets.length === 0 && !title) continue;
+    if (!statementText && !supportingText && bullets.length === 0 && !title) continue;
 
     const existingContent = (slide.content ?? {}) as ObjectiveContent;
     slide.headline = title ?? slide.headline ?? "Project Objective";
-    if (subtitle) slide.subheadline = subtitle;
     slide.content = {
       ...existingContent,
       statementText,
+      supportingText,
       bullets,
     };
   }
@@ -303,7 +373,9 @@ export default async function DeckEditorPage({ params }: PageProps) {
       projectId={project.id}
       projectTitle={project.title}
       valuePillars={valuePillars}
+      designBuildDefaults={designBuildDefaults}
       projectRoomsWithMedia={projectRoomsWithMedia}
+      projectLevelMedia={projectLevelMedia}
       brandBackgrounds={brandBackgrounds}
     />
   );

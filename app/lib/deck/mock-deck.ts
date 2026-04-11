@@ -23,7 +23,7 @@ export function getMockDeck(
       {
         id: "slide-cover",
         type: "cover",
-        layoutKey: "hero-image",
+        layoutKey: "right-panel-overlay",
         order: 0,
         isEnabled: true,
         isLocked: true,
@@ -39,7 +39,7 @@ export function getMockDeck(
       {
         id: "slide-objective",
         type: "objective",
-        layoutKey: "statement-left",
+        layoutKey: "light-statement",
         order: 1,
         isEnabled: true,
         headline: "Project Objective",

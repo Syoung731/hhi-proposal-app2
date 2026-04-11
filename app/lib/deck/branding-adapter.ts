@@ -16,6 +16,7 @@ export function adaptBrandingForDeck(
     textColorHex?: string | null;
     companyName?: string | null;
     addressLine1?: string | null;
+    addressLine2?: string | null;
     city?: string | null;
     state?: string | null;
     zip?: string | null;
@@ -23,8 +24,11 @@ export function adaptBrandingForDeck(
     email?: string | null;
   } | null
 ): DeckBranding {
+  const street = [settings?.addressLine1, settings?.addressLine2]
+    .filter(Boolean)
+    .join(", ");
   const parts = [
-    settings?.addressLine1,
+    street || null,
     settings?.city,
     [settings?.state, settings?.zip].filter(Boolean).join(" "),
   ]

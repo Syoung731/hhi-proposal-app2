@@ -9,36 +9,16 @@ import type {
   WhyUsLayoutKey,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
-
-// ─── Stub testimonials ─────────────────────────────────────────────────────────
-// Used by testimonials-split when no real reviews are wired yet.
-// Phase 2: replace with real project review data from DB.
-
-const STUB_TESTIMONIALS: WhyUsTestimonial[] = [
-  {
-    id: "stub-1",
-    quote:
-      "Just as important, what we agreed to upfront is exactly what we were charged at the end. Having that clarity made it much easier to make confident decisions.",
-    author: "Christina Galbreath-Gonzalez",
-    location: "Hilton Head, SC",
-  },
-  {
-    id: "stub-2",
-    quote:
-      "They found structural issues during design that would have cost us tens of thousands mid-project. That feasibility process alone paid for itself.",
-    author: "Robert & Lynn Tanner",
-    location: "Bluffton, SC",
-  },
-  {
-    id: "stub-3",
-    quote:
-      "We've worked with other contractors who padded material costs. HHI charged us exactly what they paid. No surprises, no markup.",
-    author: "James Whitfield",
-    location: "Hilton Head Island, SC",
-  },
-];
+import { StarRating } from "./shared/StarRating";
+import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
+import { SLIDE_PADDING, SECTION_LABEL_SIZE, ACCENT_RULE_WIDTH, SLIDE_FONTS, LOGO_POSITION_DEFAULTS, CARD_SHADOWS, CARD_PADDING, CARD_BORDER } from "@/app/lib/slide-constants";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
+
+function makeOutlineShadow(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  return `-1px -1px 0 ${color}, 1px -1px 0 ${color}, -1px 1px 0 ${color}, 1px 1px 0 ${color}, 0 -1px 0 ${color}, 0 1px 0 ${color}`;
+}
 
 interface LayoutProps {
   slide: ProposalSlide;
@@ -79,15 +59,23 @@ function NoPillars() {
 }
 
 // ─── Layout 1: pillars-grid ────────────────────────────────────────────────────
-// Icon-forward columns with full-height separators. Left-aligned large serif title.
 
 function PillarCard({
   pillar,
   branding,
+  content,
 }: {
   pillar: WhyUsPillarItem;
   branding: DeckBranding;
+  content: WhyUsContent;
 }) {
+  const titleFont = pillar.titleFont ?? SLIDE_FONTS.defaults.headline;
+  const titleSize = pillar.titleSize ?? 1.0;
+  const titleColor = pillar.titleColor ?? branding.textColor;
+  const descFont = pillar.descriptionFont ?? SLIDE_FONTS.defaults.body;
+  const descSize = pillar.descriptionSize ?? 0.72;
+  const descColor = pillar.descriptionColor ?? "#4B5563";
+
   return (
     <div
       style={{
@@ -131,17 +119,30 @@ function PillarCard({
       <p
         className="font-serif"
         style={{
-          fontSize: "1.0em",
-          fontWeight: 700,
-          color: branding.textColor,
+          fontSize: `${titleSize}em`,
+          fontWeight: (pillar.titleBold ?? true) ? 700 : 400,
+          fontStyle: pillar.titleItalic ? "italic" : undefined,
+          textDecoration: pillar.titleUnderline ? "underline" : undefined,
+          fontFamily: titleFont,
+          color: titleColor,
           lineHeight: 1.25,
           marginBottom: "0.55em",
+          textShadow: makeOutlineShadow(pillar.titleOutline),
         }}
       >
         {pillar.title}
       </p>
 
-      <p style={{ fontSize: "0.72em", color: "#4B5563", lineHeight: 1.7, fontWeight: 400 }}>
+      <p style={{
+        fontSize: `${descSize}em`,
+        fontFamily: descFont,
+        fontWeight: pillar.descriptionBold ? 700 : 400,
+        fontStyle: pillar.descriptionItalic ? "italic" : undefined,
+        textDecoration: pillar.descriptionUnderline ? "underline" : undefined,
+        color: descColor,
+        lineHeight: 1.7,
+        textShadow: makeOutlineShadow(pillar.descriptionOutline),
+      }}>
         {pillar.body}
       </p>
     </div>
@@ -150,11 +151,18 @@ function PillarCard({
 
 function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
 
+  // Per-field: section title
+  const stFont = content.sectionTitleFont ?? SLIDE_FONTS.defaults.headline;
+  const stSize = content.sectionTitleSize ?? 3.6;
+  const stColor = content.sectionTitleColor ?? branding.textColor;
+
   const pillarRow = visiblePillars.flatMap((pillar, i) => {
-    const card = <PillarCard key={pillar.id} pillar={pillar} branding={branding} />;
+    const card = <PillarCard key={pillar.id} pillar={pillar} branding={branding} content={content} />;
     if (i === 0) return [card];
     return [
       <div
@@ -211,12 +219,13 @@ function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
       >
         {/* Header — left-aligned */}
         <div style={{ textAlign: "left", marginBottom: "4%" }}>
-          {slide.subheadline && (
+          {(content.showSectionLabel ?? true) && slide.subheadline && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em", fontWeight: 600,
-                letterSpacing: "0.13em", color: branding.accentColor,
+                fontSize: SECTION_LABEL_SIZE, fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
+                letterSpacing: "0.13em", color: accent,
                 marginBottom: "0.35em",
               }}
             >
@@ -225,11 +234,20 @@ function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           )}
           <h2
             className="font-serif"
-            style={{ fontSize: "3.6em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
+            style={{
+              fontSize: `${stSize / 3.6 * 3.6}em`,
+              fontFamily: stFont,
+              fontWeight: (content.sectionTitleBold ?? true) ? 800 : 400,
+              fontStyle: content.sectionTitleItalic ? "italic" : undefined,
+              textDecoration: content.sectionTitleUnderline ? "underline" : undefined,
+              color: stColor,
+              lineHeight: 1.15,
+              textShadow: makeOutlineShadow(content.sectionTitleOutline),
+            }}
           >
             {sectionTitle}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} />
+          <TitleAccentRule accentColor={accent} />
         </div>
 
         {/* Pillar row */}
@@ -243,18 +261,40 @@ function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           </div>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
 
 // ─── Layout 2: editorial-cards ─────────────────────────────────────────────────
-// Text-forward. Centered headline. Soft warm-gray cards. Accent rule per card.
-// Optional testimonial quote band at bottom when content.testimonials is set.
 
 function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
+  const cardShadowKey = content.cardShadow ?? "normal";
+  const cardShadow = cardShadowKey === "none" ? "none" : (CARD_SHADOWS[cardShadowKey as keyof typeof CARD_SHADOWS] ?? CARD_SHADOWS.normal);
+  const cardPad = CARD_PADDING[content.cardSpacing ?? "normal"] ?? CARD_PADDING.normal;
+  const cardBorder = content.cardBorderStyle === "accent"
+    ? `2px solid ${accent}`
+    : content.cardBorderStyle === "subtle"
+    ? CARD_BORDER.subtle
+    : CARD_BORDER.none;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
+
+  // Per-field: section title
+  const stFont = content.sectionTitleFont ?? SLIDE_FONTS.defaults.headline;
+  const stSize = content.sectionTitleSize ?? 3.2;
+  const stColor = content.sectionTitleColor ?? branding.textColor;
 
   // Only show the testimonial band when real testimonials have been wired
   const testimonials = content.testimonials ?? [];
@@ -298,12 +338,13 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
       >
         {/* Centered headline */}
         <div style={{ textAlign: "center", marginBottom: hasTestimonial ? "3.5%" : "4.5%" }}>
-          {slide.subheadline && (
+          {(content.showSectionLabel ?? true) && slide.subheadline && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em", fontWeight: 600,
-                letterSpacing: "0.13em", color: branding.accentColor,
+                fontSize: SECTION_LABEL_SIZE, fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
+                letterSpacing: "0.13em", color: accent,
                 marginBottom: "0.35em",
               }}
             >
@@ -312,11 +353,20 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
           )}
           <h2
             className="font-serif"
-            style={{ fontSize: "3.2em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
+            style={{
+              fontSize: `${stSize / 3.2 * 3.2}em`,
+              fontFamily: stFont,
+              fontWeight: (content.sectionTitleBold ?? true) ? 800 : 400,
+              fontStyle: content.sectionTitleItalic ? "italic" : undefined,
+              textDecoration: content.sectionTitleUnderline ? "underline" : undefined,
+              color: stColor,
+              lineHeight: 1.15,
+              textShadow: makeOutlineShadow(content.sectionTitleOutline),
+            }}
           >
             {sectionTitle}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} marginTop="0.6em" marginBottom="0" width="2.5em" />
+          <TitleAccentRule accentColor={accent} marginTop="0.6em" marginBottom="0" width={ACCENT_RULE_WIDTH.narrow} />
         </div>
 
         {/* Cards row */}
@@ -332,83 +382,101 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
               marginBottom: hasTestimonial ? "3%" : 0,
             }}
           >
-            {visiblePillars.map((pillar) => (
-              <div
-                key={pillar.id}
-                style={{
-                  flex: 1,
-                  background: "#EEECEA",
-                  borderRadius: 6,
-                  padding: "4% 5%",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                {/* Icon — centered at top of card */}
+            {visiblePillars.map((pillar) => {
+              const tFont = pillar.titleFont ?? SLIDE_FONTS.defaults.headline;
+              const tSize = pillar.titleSize ?? 0.95;
+              const tColor = pillar.titleColor ?? branding.textColor;
+              const dFont = pillar.descriptionFont ?? SLIDE_FONTS.defaults.body;
+              const dSize = pillar.descriptionSize ?? 0.68;
+              const dColor = pillar.descriptionColor ?? "#4B5563";
+              return (
                 <div
+                  key={pillar.id}
                   style={{
+                    flex: 1,
+                    background: "#EEECEA",
+                    borderRadius: 6,
+                    padding: cardPad,
                     display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    height: "3.6em",
-                    marginBottom: "1.4em",
-                    flexShrink: 0,
+                    flexDirection: "column",
+                    boxShadow: cardShadow,
+                    border: cardBorder,
                   }}
                 >
-                  {pillar.iconUrl ? (
-                    <img
-                      src={pillar.iconUrl}
-                      alt={pillar.title}
-                      style={{ maxHeight: "3.4em", maxWidth: "3.4em", objectFit: "contain" }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "3em",
-                        height: "3em",
-                        borderRadius: "50%",
-                        border: `2px solid ${branding.accentColor}`,
-                        background: `${branding.accentColor}12`,
-                      }}
-                    />
-                  )}
-                </div>
+                  {/* Icon — centered at top of card */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      height: "3.6em",
+                      marginBottom: "1.4em",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {pillar.iconUrl ? (
+                      <img
+                        src={pillar.iconUrl}
+                        alt={pillar.title}
+                        style={{ maxHeight: "3.4em", maxWidth: "3.4em", objectFit: "contain" }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "3em",
+                          height: "3em",
+                          borderRadius: "50%",
+                          border: `2px solid ${accent}`,
+                          background: `${accent}12`,
+                        }}
+                      />
+                    )}
+                  </div>
 
-                {/* Accent rule */}
-                <div
-                  style={{
-                    width: "1.6em",
-                    height: 2,
-                    background: branding.accentColor,
-                    marginBottom: "0.8em",
-                    flexShrink: 0,
-                  }}
-                />
-                <p
-                  className="font-serif"
-                  style={{
-                    fontSize: "0.95em",
-                    fontWeight: 700,
-                    color: branding.textColor,
-                    lineHeight: 1.25,
-                    marginBottom: "0.65em",
-                    flexShrink: 0,
-                  }}
-                >
-                  {pillar.title}
-                </p>
-                <p
-                  style={{
-                    fontSize: "0.68em",
-                    color: "#4B5563",
-                    lineHeight: 1.75,
-                    fontWeight: 400,
-                  }}
-                >
-                  {pillar.body}
-                </p>
-              </div>
-            ))}
+                  {/* Accent rule */}
+                  <div
+                    style={{
+                      width: "1.6em",
+                      height: 2,
+                      background: accent,
+                      marginBottom: "0.8em",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <p
+                    className="font-serif"
+                    style={{
+                      fontSize: `${tSize}em`,
+                      fontWeight: (pillar.titleBold ?? true) ? 700 : 400,
+                      fontStyle: pillar.titleItalic ? "italic" : undefined,
+                      textDecoration: pillar.titleUnderline ? "underline" : undefined,
+                      fontFamily: tFont,
+                      color: tColor,
+                      lineHeight: 1.25,
+                      marginBottom: "0.65em",
+                      flexShrink: 0,
+                      textShadow: makeOutlineShadow(pillar.titleOutline),
+                    }}
+                  >
+                    {pillar.title}
+                  </p>
+                  <p
+                    style={{
+                      fontSize: `${dSize}em`,
+                      fontFamily: dFont,
+                      fontWeight: pillar.descriptionBold ? 700 : 400,
+                      fontStyle: pillar.descriptionItalic ? "italic" : undefined,
+                      textDecoration: pillar.descriptionUnderline ? "underline" : undefined,
+                      color: dColor,
+                      lineHeight: 1.75,
+                      textShadow: makeOutlineShadow(pillar.descriptionOutline),
+                    }}
+                  >
+                    {pillar.body}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -419,7 +487,7 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
               background: "#EEECEA",
               borderRadius: 4,
               padding: "2.5% 4%",
-              borderLeft: `3px solid ${branding.accentColor}`,
+              borderLeft: `3px solid ${accent}`,
             }}
           >
             <p
@@ -441,24 +509,39 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
           </div>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
 
 // ─── Layout 3: stacked-list ────────────────────────────────────────────────────
-// Vertical rows. Icon left, title + body right. Row dividers. Polished hierarchy.
 
 function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
+
+  // Per-field: section title
+  const stFont = content.sectionTitleFont ?? SLIDE_FONTS.defaults.headline;
+  const stSize = content.sectionTitleSize ?? 3.2;
+  const stColor = content.sectionTitleColor ?? branding.textColor;
 
   return (
     <div
       className="relative w-full h-full"
       style={{ background: hasAiBackground ? "transparent" : "#FFFFFF", overflow: "hidden" }}
     >
-      {/* Faint vertical accent guide — gives the layout a quiet structure line */}
+      {/* Faint vertical accent guide */}
       <div
         style={{
           position: "absolute",
@@ -466,7 +549,7 @@ function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           bottom: 0,
           left: "7.5%",
           width: 1,
-          background: `${branding.accentColor}18`,
+          background: `${accent}18`,
           pointerEvents: "none",
         }}
       />
@@ -483,25 +566,37 @@ function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
       >
         {/* Header */}
         <div style={{ marginBottom: "3.5%" }}>
-          <p
-            style={{
-              fontSize: "0.65em",
-              fontWeight: 600,
-              letterSpacing: "0.13em",
-              textTransform: "uppercase",
-              color: branding.accentColor,
-              marginBottom: "0.35em",
-            }}
-          >
-            Why Choose Us
-          </p>
+          {(content.showSectionLabel ?? true) && (
+            <p
+              style={{
+                fontSize: SECTION_LABEL_SIZE,
+                fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
+                letterSpacing: "0.13em",
+                textTransform: "uppercase",
+                color: accent,
+                marginBottom: "0.35em",
+              }}
+            >
+              Why Choose Us
+            </p>
+          )}
           <h2
             className="font-serif"
-            style={{ fontSize: "3.2em", fontWeight: 800, color: branding.textColor, lineHeight: 1.15 }}
+            style={{
+              fontSize: `${stSize / 3.2 * 3.2}em`,
+              fontFamily: stFont,
+              fontWeight: (content.sectionTitleBold ?? true) ? 800 : 400,
+              fontStyle: content.sectionTitleItalic ? "italic" : undefined,
+              textDecoration: content.sectionTitleUnderline ? "underline" : undefined,
+              color: stColor,
+              lineHeight: 1.15,
+              textShadow: makeOutlineShadow(content.sectionTitleOutline),
+            }}
           >
             {sectionTitle}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} />
+          <TitleAccentRule accentColor={accent} />
         </div>
 
         {/* Stacked rows */}
@@ -511,104 +606,137 @@ function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           <div
             style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}
           >
-            {visiblePillars.map((pillar, i) => (
-              <div key={pillar.id}>
-                {/* Row */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: "4%",
-                    paddingTop: i === 0 ? 0 : "2.6%",
-                    paddingBottom: "2.6%",
-                  }}
-                >
-                  {/* Icon container */}
+            {visiblePillars.map((pillar, i) => {
+              const tFont = pillar.titleFont ?? SLIDE_FONTS.defaults.headline;
+              const tSize = pillar.titleSize ?? 0.95;
+              const tColor = pillar.titleColor ?? branding.textColor;
+              const dFont = pillar.descriptionFont ?? SLIDE_FONTS.defaults.body;
+              const dSize = pillar.descriptionSize ?? 0.78;
+              const dColor = pillar.descriptionColor ?? "#374151";
+              return (
+                <div key={pillar.id}>
+                  {/* Row */}
                   <div
                     style={{
-                      flexShrink: 0,
-                      width: "3.4em",
-                      height: "3.4em",
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      alignItems: "flex-start",
+                      gap: "4%",
+                      paddingTop: i === 0 ? 0 : "2.6%",
+                      paddingBottom: "2.6%",
                     }}
                   >
-                    {pillar.iconUrl ? (
-                      <img
-                        src={pillar.iconUrl}
-                        alt={pillar.title}
-                        style={{ maxWidth: "3.2em", maxHeight: "3.2em", objectFit: "contain" }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: "2.8em",
-                          height: "2.8em",
-                          borderRadius: "50%",
-                          background: `${branding.accentColor}14`,
-                          border: `1.5px solid ${branding.accentColor}50`,
-                        }}
-                      />
-                    )}
-                  </div>
-
-                  {/* Title + body */}
-                  <div style={{ flex: 1 }}>
-                    <p
-                      className="font-serif"
+                    {/* Icon container */}
+                    <div
                       style={{
-                        fontSize: "0.95em",
-                        fontWeight: 700,
-                        color: branding.textColor,
-                        lineHeight: 1.25,
-                        marginBottom: "0.4em",
+                        flexShrink: 0,
+                        width: "3.4em",
+                        height: "3.4em",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                     >
-                      {pillar.title}
-                    </p>
-                    <p
-                      style={{ fontSize: "0.78em", color: "#374151", lineHeight: 1.65, fontWeight: 500 }}
-                    >
-                      {pillar.body}
-                    </p>
-                  </div>
-                </div>
+                      {pillar.iconUrl ? (
+                        <img
+                          src={pillar.iconUrl}
+                          alt={pillar.title}
+                          style={{ maxWidth: "3.2em", maxHeight: "3.2em", objectFit: "contain" }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: "2.8em",
+                            height: "2.8em",
+                            borderRadius: "50%",
+                            background: `${accent}14`,
+                            border: `1.5px solid ${accent}50`,
+                          }}
+                        />
+                      )}
+                    </div>
 
-                {/* Row divider — inset to align with text column */}
-                {i < visiblePillars.length - 1 && (
-                  <div
-                    style={{
-                      height: 1,
-                      background: "rgba(0,0,0,0.07)",
-                      marginLeft: "calc(3.4em + 4%)",
-                    }}
-                  />
-                )}
-              </div>
-            ))}
+                    {/* Title + body */}
+                    <div style={{ flex: 1 }}>
+                      <p
+                        className="font-serif"
+                        style={{
+                          fontSize: `${tSize}em`,
+                          fontWeight: (pillar.titleBold ?? true) ? 700 : 400,
+                          fontStyle: pillar.titleItalic ? "italic" : undefined,
+                          textDecoration: pillar.titleUnderline ? "underline" : undefined,
+                          fontFamily: tFont,
+                          color: tColor,
+                          lineHeight: 1.25,
+                          marginBottom: "0.4em",
+                          textShadow: makeOutlineShadow(pillar.titleOutline),
+                        }}
+                      >
+                        {pillar.title}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: `${dSize}em`,
+                          fontFamily: dFont,
+                          fontWeight: pillar.descriptionBold ? 700 : 500,
+                          fontStyle: pillar.descriptionItalic ? "italic" : undefined,
+                          textDecoration: pillar.descriptionUnderline ? "underline" : undefined,
+                          color: dColor,
+                          lineHeight: 1.65,
+                          textShadow: makeOutlineShadow(pillar.descriptionOutline),
+                        }}
+                      >
+                        {pillar.body}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Row divider */}
+                  {i < visiblePillars.length - 1 && (
+                    <div
+                      style={{
+                        height: 1,
+                        background: "rgba(0,0,0,0.07)",
+                        marginLeft: "calc(3.4em + 4%)",
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }
 
 // ─── Layout 4: testimonials-split ─────────────────────────────────────────────
 // Two-column. Left: client quote cards. Right: dark panel with pillar highlights.
-// Uses content.testimonials when wired; falls back to STUB_TESTIMONIALS.
+// Uses content.testimonials when wired; falls back to empty state.
+// NOTE: Testimonial styling is NOT changed per task spec.
 
 function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
 
-  const testimonials =
-    (content.testimonials?.length ?? 0) > 0
-      ? content.testimonials!
-      : STUB_TESTIMONIALS;
+  // Per-field: section title
+  const stFont = content.sectionTitleFont ?? SLIDE_FONTS.defaults.headline;
+  const stSize = content.sectionTitleSize ?? 3.0;
+  const stColor = content.sectionTitleColor ?? branding.textColor;
 
-  const displayedTestimonials = testimonials.slice(0, 3);
+  const displayedTestimonials = (content.testimonials ?? []).slice(0, 3);
   const displayedPillars = visiblePillars.slice(0, 4);
 
   return (
@@ -641,12 +769,13 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
       >
         {/* Full-width headline */}
         <div style={{ padding: "0 6%", marginBottom: "3%" }}>
-          {slide.subheadline && (
+          {(content.showSectionLabel ?? true) && slide.subheadline && (
             <p
               className="uppercase tracking-widest"
               style={{
-                fontSize: "0.65em", fontWeight: 600,
-                letterSpacing: "0.13em", color: branding.accentColor,
+                fontSize: SECTION_LABEL_SIZE, fontWeight: 600,
+                fontFamily: SLIDE_FONTS.defaults.label,
+                letterSpacing: "0.13em", color: accent,
                 marginBottom: "0.35em",
               }}
             >
@@ -656,21 +785,25 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
           <h2
             className="font-serif"
             style={{
-              fontSize: "3.0em",
-              fontWeight: 800,
-              color: branding.textColor,
+              fontSize: `${stSize / 3.0 * 3.0}em`,
+              fontFamily: stFont,
+              fontWeight: (content.sectionTitleBold ?? true) ? 800 : 400,
+              fontStyle: content.sectionTitleItalic ? "italic" : undefined,
+              textDecoration: content.sectionTitleUnderline ? "underline" : undefined,
+              color: stColor,
               lineHeight: 1.15,
+              textShadow: makeOutlineShadow(content.sectionTitleOutline),
             }}
           >
             {sectionTitle}
           </h2>
-          <TitleAccentRule accentColor={branding.accentColor} />
+          <TitleAccentRule accentColor={accent} />
         </div>
 
         {/* Two-column body */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-          {/* LEFT — testimonial quote cards (60%) */}
+          {/* LEFT — testimonial quote cards (60%) — NOT CHANGED */}
           <div
             style={{
               width: "60%",
@@ -681,43 +814,52 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
               gap: "3%",
             }}
           >
-            {displayedTestimonials.map((t) => (
-              <div
-                key={t.id}
-                style={{
-                  background: "#EEECEA",
-                  borderRadius: 4,
-                  padding: "3% 4%",
-                  borderLeft: `3px solid ${branding.accentColor}`,
-                }}
-              >
-                <p
-                  className="font-serif"
+            {displayedTestimonials.length === 0 ? (
+              <div style={{ flex: 1 }} />
+            ) : (
+              displayedTestimonials.map((t) => (
+                <div
+                  key={t.id}
                   style={{
-                    fontSize: "0.63em",
-                    fontStyle: "italic",
-                    color: branding.textColor,
-                    lineHeight: 1.7,
-                    marginBottom: "0.5em",
+                    background: "#EEECEA",
+                    borderRadius: 4,
+                    padding: "3% 4%",
+                    borderLeft: `3px solid ${accent}`,
                   }}
                 >
-                  &ldquo;{t.quote}&rdquo;
-                </p>
-                <p
-                  style={{
-                    fontSize: "0.54em",
-                    color: "#6B7280",
-                    fontWeight: 600,
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  — {t.author}
-                  {t.location ? (
-                    <span style={{ fontWeight: 400 }}>, {t.location}</span>
-                  ) : null}
-                </p>
-              </div>
-            ))}
+                  <p
+                    className="font-serif"
+                    style={{
+                      fontSize: "0.63em",
+                      fontStyle: "italic",
+                      color: branding.textColor,
+                      lineHeight: 1.7,
+                      marginBottom: "0.5em",
+                    }}
+                  >
+                    &ldquo;{t.quote}&rdquo;
+                  </p>
+                  {t.rating != null && t.rating > 0 && (
+                    <div style={{ marginBottom: "0.4em" }}>
+                      <StarRating rating={t.rating} size="sm" />
+                    </div>
+                  )}
+                  <p
+                    style={{
+                      fontSize: "0.54em",
+                      color: "#6B7280",
+                      fontWeight: 600,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    — {t.author}
+                    {t.location ? (
+                      <span style={{ fontWeight: 400 }}>, {t.location}</span>
+                    ) : null}
+                  </p>
+                </div>
+              ))
+            )}
           </div>
 
           {/* RIGHT — pillar highlights on dark panel (40%) */}
@@ -738,7 +880,7 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
                 fontWeight: 600,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
-                color: branding.accentColor,
+                color: accent,
               }}
             >
               Why Clients Choose Us
@@ -749,67 +891,93 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
                 No pillars selected.
               </p>
             ) : (
-              displayedPillars.map((pillar) => (
-                <div
-                  key={pillar.id}
-                  style={{ display: "flex", alignItems: "flex-start", gap: "1em" }}
-                >
-                  {/* Icon — inverted for dark background */}
-                  {pillar.iconUrl ? (
-                    <img
-                      src={pillar.iconUrl}
-                      alt={pillar.title}
-                      style={{
-                        width: "2.4em",
-                        height: "2.4em",
-                        objectFit: "contain",
-                        flexShrink: 0,
-                        filter: "brightness(0) invert(1)",
-                        opacity: 0.8,
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        flexShrink: 0,
-                        width: "2.2em",
-                        height: "2.2em",
-                        borderRadius: "50%",
-                        border: `1.5px solid ${branding.accentColor}`,
-                      }}
-                    />
-                  )}
+              displayedPillars.map((pillar) => {
+                const tFont = pillar.titleFont ?? SLIDE_FONTS.defaults.headline;
+                const tSize = pillar.titleSize ?? 0.82;
+                const tColor = pillar.titleColor ?? "#FFFFFF";
+                const dFont = pillar.descriptionFont ?? SLIDE_FONTS.defaults.body;
+                const dSize = pillar.descriptionSize ?? 0.6;
+                const dColor = pillar.descriptionColor ?? "rgba(255,255,255,0.6)";
+                return (
+                  <div
+                    key={pillar.id}
+                    style={{ display: "flex", alignItems: "flex-start", gap: "1em" }}
+                  >
+                    {/* Icon — inverted for dark background */}
+                    {pillar.iconUrl ? (
+                      <img
+                        src={pillar.iconUrl}
+                        alt={pillar.title}
+                        style={{
+                          width: "2.4em",
+                          height: "2.4em",
+                          objectFit: "contain",
+                          flexShrink: 0,
+                          filter: "brightness(0) invert(1)",
+                          opacity: 0.8,
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          flexShrink: 0,
+                          width: "2.2em",
+                          height: "2.2em",
+                          borderRadius: "50%",
+                          border: `1.5px solid ${accent}`,
+                        }}
+                      />
+                    )}
 
-                  {/* Title + body */}
-                  <div>
-                    <p
-                      className="font-serif"
-                      style={{
-                        fontSize: "0.82em",
-                        fontWeight: 700,
-                        color: "#FFFFFF",
-                        lineHeight: 1.25,
-                        marginBottom: "0.3em",
-                      }}
-                    >
-                      {pillar.title}
-                    </p>
-                    <p
-                      style={{
-                        fontSize: "0.6em",
-                        color: "rgba(255,255,255,0.6)",
-                        lineHeight: 1.65,
-                      }}
-                    >
-                      {pillar.body}
-                    </p>
+                    {/* Title + body */}
+                    <div>
+                      <p
+                        className="font-serif"
+                        style={{
+                          fontSize: `${tSize}em`,
+                          fontWeight: (pillar.titleBold ?? true) ? 700 : 400,
+                          fontStyle: pillar.titleItalic ? "italic" : undefined,
+                          textDecoration: pillar.titleUnderline ? "underline" : undefined,
+                          fontFamily: tFont,
+                          color: tColor,
+                          lineHeight: 1.25,
+                          marginBottom: "0.3em",
+                          textShadow: makeOutlineShadow(pillar.titleOutline),
+                        }}
+                      >
+                        {pillar.title}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: `${dSize}em`,
+                          fontFamily: dFont,
+                          fontWeight: pillar.descriptionBold ? 700 : 400,
+                          fontStyle: pillar.descriptionItalic ? "italic" : undefined,
+                          textDecoration: pillar.descriptionUnderline ? "underline" : undefined,
+                          color: dColor,
+                          lineHeight: 1.65,
+                          textShadow: makeOutlineShadow(pillar.descriptionOutline),
+                        }}
+                      >
+                        {pillar.body}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
       </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
     </div>
   );
 }

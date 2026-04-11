@@ -132,6 +132,212 @@ export async function saveBrandingLogosAction(
   return {};
 }
 
+/** Save global Core Values defaults (JSON blob). */
+export async function saveCoreValuesDefaultsAction(
+  json: import("@/app/lib/core-values-defaults").GlobalCoreValuesSettings
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const settings = await prisma.companySettings.findFirst();
+  if (!settings) return { error: "Settings not found" };
+  await prisma.companySettings.update({
+    where: { id: settings.id },
+    data: { coreValuesDefaultsJson: json as unknown as Prisma.JsonObject },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Save global COPE defaults (JSON blob). */
+export async function saveCopeDefaultsAction(
+  json: import("@/app/lib/cope-defaults").GlobalCopeSettings
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const settings = await prisma.companySettings.findFirst();
+  if (!settings) return { error: "Settings not found" };
+  await prisma.companySettings.update({
+    where: { id: settings.id },
+    data: { copeDefaultsJson: json as unknown as Prisma.JsonObject },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Save global Next Steps defaults (JSON blob). */
+/** Save global Design-Build Advantage defaults (JSON blob). */
+export async function saveDesignBuildDefaultsAction(
+  json: import("@/app/lib/design-build-defaults").GlobalDesignBuildSettings
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const settings = await prisma.companySettings.findFirst();
+  if (!settings) return { error: "Settings not found" };
+  await prisma.companySettings.update({
+    where: { id: settings.id },
+    data: { designBuildDefaultsJson: json as unknown as Prisma.JsonObject },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+export async function saveNextStepsDefaultsAction(
+  json: import("@/app/lib/next-steps-defaults").GlobalNextStepsSettings
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const settings = await prisma.companySettings.findFirst();
+  if (!settings) return { error: "Settings not found" };
+  await prisma.companySettings.update({
+    where: { id: settings.id },
+    data: { nextStepsDefaultsJson: json as unknown as Prisma.JsonObject },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Testimonial Library
+// ---------------------------------------------------------------------------
+
+/** Fetch all approved testimonials for use in the slide editor. */
+export async function getApprovedTestimonialsAction() {
+  await requireAdmin();
+  return prisma.testimonial.findMany({
+    where: { approved: true },
+    orderBy: { sortOrder: "asc" },
+  });
+}
+
+/** Fetch all testimonials for the settings library UI. */
+export async function getAllTestimonialsAction() {
+  await requireAdmin();
+  return prisma.testimonial.findMany({
+    orderBy: { sortOrder: "asc" },
+  });
+}
+
+/** Create a new testimonial. */
+export async function createTestimonialAction(data: {
+  quote: string;
+  clientName: string;
+  projectName?: string;
+  rating?: number;
+  source?: string;
+  approved?: boolean;
+}): Promise<{ error?: string }> {
+  await requireAdmin();
+  const maxSort = await prisma.testimonial.aggregate({ _max: { sortOrder: true } });
+  await prisma.testimonial.create({
+    data: {
+      quote: data.quote,
+      clientName: data.clientName,
+      projectName: data.projectName || null,
+      rating: data.rating ?? 5,
+      source: data.source ?? "manual",
+      approved: data.approved ?? true,
+      sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
+    },
+  });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Update an existing testimonial. */
+export async function updateTestimonialAction(
+  id: string,
+  data: {
+    quote?: string;
+    clientName?: string;
+    projectName?: string | null;
+    rating?: number;
+    approved?: boolean;
+    sortOrder?: number;
+  }
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  await prisma.testimonial.update({ where: { id }, data });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Delete a testimonial. */
+export async function deleteTestimonialAction(id: string): Promise<{ error?: string }> {
+  await requireAdmin();
+  await prisma.testimonial.delete({ where: { id } });
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Reorder testimonials by ID array. */
+export async function reorderTestimonialsAction(ids: string[]): Promise<{ error?: string }> {
+  await requireAdmin();
+  await prisma.$transaction(
+    ids.map((id, i) => prisma.testimonial.update({ where: { id }, data: { sortOrder: i } }))
+  );
+  revalidatePath("/admin/settings");
+  return {};
+}
+
+/** Seed default testimonials if library is empty. */
+export async function seedTestimonialsIfEmptyAction(): Promise<void> {
+  await requireAdmin();
+  const count = await prisma.testimonial.count();
+  if (count > 0) return;
+  await prisma.testimonial.createMany({
+    data: [
+      {
+        quote: "From the very first meeting, we knew we were in good hands. The team was professional, communicative, and delivered exactly what they promised \u2014 on time and on budget.",
+        clientName: "Christina Galbreath-Gonzalez",
+        rating: 5,
+        source: "manual",
+        approved: true,
+        sortOrder: 0,
+      },
+      {
+        quote: "What impressed us most was the planning. There were no surprises, no change orders we didn\u2019t initiate. The finished result exceeded everything we imagined.",
+        clientName: "Diane Zalewski",
+        rating: 5,
+        source: "manual",
+        approved: true,
+        sortOrder: 1,
+      },
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Google Reviews Integration
+// ---------------------------------------------------------------------------
+
+import {
+  getOrCreateGoogleReviewsIntegration,
+  saveGoogleReviewsCredentials,
+  testGoogleReviewsConnection,
+} from "@/app/integrations/google-reviews";
+
+export async function getGoogleReviewsIntegrationAction() {
+  await requireAdmin();
+  return getOrCreateGoogleReviewsIntegration();
+}
+
+export async function saveGoogleReviewsCredentialsAction(formData: FormData): Promise<{ error?: string }> {
+  await requireAdmin();
+  const apiKey = (formData.get("googleReviewsApiKey") as string)?.trim() ?? "";
+  const placeId = (formData.get("googleReviewsPlaceId") as string)?.trim() ?? "";
+  if (!apiKey) return { error: "API key is required" };
+  if (!placeId) return { error: "Place ID is required" };
+  try {
+    await saveGoogleReviewsCredentials(apiKey, placeId);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to save" };
+  }
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/settings/integrations");
+  return {};
+}
+
+export async function testGoogleReviewsConnectionAction(): Promise<{ ok: boolean; error?: string }> {
+  await requireAdmin();
+  return testGoogleReviewsConnection();
+}
+
 export async function saveProposalDefaultsAction(
   formData: FormData
 ): Promise<{ error?: string }> {
@@ -2684,4 +2890,49 @@ export async function deleteBrandIcon(id: string): Promise<{ error?: string }> {
   await prisma.brandIcon.delete({ where: { id } });
   revalidatePath("/admin/settings/branding/icons");
   return {};
+}
+
+// ---------------------------------------------------------------------------
+// Seed default icons into BrandIcon library
+// ---------------------------------------------------------------------------
+
+import { DEFAULT_ICON_SVGS } from "@/app/lib/default-icon-svgs";
+
+/**
+ * Seed default Lucide-style icons into the BrandIcon library.
+ * Uploads SVG strings to R2 and creates BrandIcon records.
+ * Skips icons whose slugs already exist.
+ * Returns the count of newly created icons.
+ */
+export async function seedDefaultBrandIconsAction(): Promise<{ created: number; error?: string }> {
+  await requireAdmin();
+  let created = 0;
+
+  for (const [slug, { name, svg }] of Object.entries(DEFAULT_ICON_SVGS)) {
+    const existing = await prisma.brandIcon.findUnique({ where: { slug } });
+    if (existing) continue;
+
+    const objectKey = `brand-icons/global/default-${slug}.svg`;
+    try {
+      const buffer = Buffer.from(svg, "utf-8");
+      const { publicUrl } = await uploadBuffer(objectKey, buffer, "image/svg+xml");
+      await prisma.brandIcon.create({
+        data: {
+          slug,
+          name,
+          imageUrl: publicUrl,
+          imageKey: objectKey,
+          tags: ["default", "lucide"],
+          category: "default",
+          isActive: true,
+        },
+      });
+      created++;
+    } catch {
+      // Skip failed icons, continue with rest
+    }
+  }
+
+  revalidatePath("/admin/settings/branding/icons");
+  return { created };
 }

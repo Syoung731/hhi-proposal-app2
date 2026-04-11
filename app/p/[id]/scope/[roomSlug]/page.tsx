@@ -3,6 +3,7 @@ import {
   getPublicProposalSnapshot,
   getRoomBySlug,
 } from "@/app/lib/public-proposal";
+import { stripScopeClarifications } from "@/app/lib/scope-narrative";
 import {
   EditorialSectionHeading,
   EditorialGallery,
@@ -36,7 +37,7 @@ export default async function ScopeRoomPage({
       <EditorialSectionHeading kicker="Scope" title={room.name} />
       {room.scopeNarrative ? (
         <p className="max-w-2xl whitespace-pre-wrap text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-          {room.scopeNarrative}
+          {stripScopeClarifications(room.scopeNarrative)}
         </p>
       ) : (
         <p className="max-w-2xl text-zinc-500 dark:text-zinc-500">—</p>

@@ -72,8 +72,12 @@ export type ObjectivePageConfig = {
   };
   /** AI helper state for suggested copy / filters / photos (editor-only). */
   ai?: {
-    /** Suggested objective paragraph (2–3 concise sentences) from AI. */
+    /** Suggested objective paragraph from AI. */
     suggestedObjectiveParagraph?: string;
+    /** Suggested supporting text paragraph from AI. */
+    suggestedSupportingText?: string;
+    /** Suggested bullet points (up to 3) from AI. */
+    suggestedBullets?: string[];
     /** Suggested key commitments (up to 3 short phrases) from AI. */
     suggestedCommitments?: string[];
     /** Suggested sections used to filter photos. */

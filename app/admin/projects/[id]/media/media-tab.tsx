@@ -16,6 +16,8 @@ import {
   startDirectConnectionAction,
   getConnectionStatusAction,
   markConnectionFailedAction,
+  extractRenderChecklistAction,
+  cleanupOrphanedRenderingsAction,
 } from "./actions";
 import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
@@ -185,12 +187,37 @@ function setStoredRenderChangesChecklist(projectId: string, byRoom: Record<strin
 }
 
 /**
+ * @deprecated — rendering checklist now uses AI extraction (extractRenderChecklistAction).
  * Extract raw scope fragments (bullets/phrases) from the CURRENT ROOM's scope only.
  * Used as input for normalizeRemodelBullets. Do NOT pass full project transcript.
  */
 function extractRemodelBullets(roomScopeOnly: string): string[] {
   const raw = roomScopeOnly?.trim() ?? "";
   if (!raw) return [];
+
+  // Separate base scope from AI Review clarifications section.
+  // The clarifications section has Q&A lines like "- Question?: Answer".
+  // We extract ONLY the answer portions — those contain real scope details.
+  const clarificationsMarker = "--- Scope Clarifications";
+  const markerIdx = raw.indexOf(clarificationsMarker);
+  const baseScope = markerIdx !== -1 ? raw.slice(0, markerIdx).trim() : raw;
+  const clarificationsBlock = markerIdx !== -1 ? raw.slice(markerIdx) : "";
+
+  // Extract answer portions from "- Question?: Answer" lines
+  const clarificationAnswers: string[] = [];
+  if (clarificationsBlock) {
+    for (const line of clarificationsBlock.split("\n")) {
+      // Match "- Some question?: Some answer" — grab only the answer after "?: "
+      const qaMatch = line.match(/^-\s*.+\?:\s*(.+)$/);
+      if (qaMatch) {
+        const answer = qaMatch[1].trim();
+        // Only keep answers that describe something visual (not just "Yes", "No", "8 ft", "2", etc.)
+        if (answer.length > 10 && !/^\d+(\.\d+)?\s*(ft|sf|lf|inches|count)?$/i.test(answer) && !/^(yes|no)$/i.test(answer)) {
+          clarificationAnswers.push(answer);
+        }
+      }
+    }
+  }
 
   const splitByDelimiters = (text: string): string[] => {
     return text
@@ -199,7 +226,8 @@ function extractRemodelBullets(roomScopeOnly: string): string[] {
       .filter((s) => s.length > 0);
   };
 
-  const phrases = splitByDelimiters(raw);
+  // Combine base scope fragments + clarification answers
+  const phrases = [...splitByDelimiters(baseScope), ...clarificationAnswers];
   const rawFragments: string[] = [];
   const seen = new Set<string>();
 
@@ -219,27 +247,131 @@ function extractRemodelBullets(roomScopeOnly: string): string[] {
   return rawFragments;
 }
 
-/** Non-visual / construction-only phrases to exclude from the checklist. */
+/** Non-visual / construction-only phrases to exclude from the checklist.
+ *  Only items you would SEE in a finished photo belong on the checklist.
+ *  Everything below is invisible in a rendering (behind walls, under floors, procedural). */
 const NON_VISUAL_PATTERNS = [
-  /\bdemolition\b/i,
-  /\bremove\s*$/i, // "Remove" with no object
-  /\breconnect\s+plumbing\b/i,
-  /\bwaterproofing\b/i,
-  /\brough-?in\b/i,
-  /\binstallation\s+activities\b/i,
-  /\bper\s+code\b/i,
-  /\bas\s+required\b/i,
-  /\btouch-?up\s+(?:as\s+)?needed\b/i,
-  /\btouch-?up\s+due\s+to\s+demolition\b/i,
-  /\bto\s+be\s+performed\s+as\s+needed\b/i,
+  // --- status-quo / no-work indicators ---
+  /\bto\s+remain\b/i,
+  /\bexisting\s+to\s+remain\b/i,
   /\bcomponents?\s+to\s+remain\b/i,
   /\ball\s+other\s+.*\s+remain\b/i,
-  /\bexisting\s+to\s+remain\b/i,
   /\bno\s+change\b/i,
+  /\bno\s+work\b/i,
+  /\bremove\s*$/i, // bare "Remove" with no object
+
+  // --- demolition & protection ---
+  /\bdemolition\b/i,
+  /\bdemo\s/i, // "demo work" but not "demonstrate"
+  /\bprotect(?:ion)?\b/i,
+  /\bclean-?up\b/i,
+  /\bdust\s+barrier\b/i,
+  /\bdebris\b/i,
+  /\bhaul-?(?:off|away)\b/i,
+  /\bdumpster\b/i,
+
+  // --- plumbing (behind-wall) ---
+  /\brough-?in\b/i,
+  /\bsupply\s+line/i,
+  /\bdrain\s+line/i,
+  /\bp-?trap\b/i,
+  /\bshut-?off\s+valve/i,
+  /\bwater\s+supply\b/i,
+  /\bwater\s+line\b/i,
+  /\bwater\s+heater\b/i,
+  /\breconnect\s+plumbing\b/i,
+  /\bplumbing\s+(?:rough|connection|hook-?up|tie-?in|reroute|relocat)/i,
+  /\bgas\s+line\b/i,
+  /\bvent(?:ing)?\s+(?:pipe|stack|line)\b/i,
+
+  // --- electrical (behind-wall) ---
+  /\belectrical\s+(?:rough|circuit|panel|wire|wiring|hook-?up|connection|service)\b/i,
+  /\bjunction\s+box\b/i,
+  /\bcircuit\s+breaker\b/i,
+  /\bwire\s+(?:run|pull)\b/i,
+  /\bamp\s+service\b/i,
+  /\bGFCI\b/i,
+  /\barc[- ]?fault\b/i,
+
+  // --- structural / framing ---
+  /\bframing\b/i,
+  /\bblocking\b/i,
+  /\bsistering\b/i,
+  /\bload[- ]?bearing\b/i,
+  /\bstructural\b/i,
+  /\bsub-?floor\b/i,
+  /\bjoist\b/i,
+
+  // --- substrate / prep ---
+  /\bsubstrate\b/i,
+  /\bwaterproofing\b/i,
+  /\bmembrane\b/i,
+  /\bunderlayment\b/i,
+  /\bconcrete\s+board\b/i,
+  /\bbacker\s*board\b/i,
+  /\bcement\s+board\b/i,
+  /\bdrywall\s+(?:repair|patch|tape|mud|finish|hang)\b/i,
+  /\bskim\s+coat\b/i,
+  /\bleveling\s+compound\b/i,
+  /\bfurring\s+strip\b/i,
+  /\bshim(?:s|ming)?\b/i,
+
+  // --- HVAC / mechanical ---
+  /\bHVAC\b/i,
+  /\bductwork\b/i,
+  /\bduct\s+(?:run|routing)\b/i,
+  /\brefrigerant\b/i,
+  /\bcondensate\b/i,
+
+  // --- insulation ---
+  /\binsulation\b/i,
+  /\bvapor\s+barrier\b/i,
+  /\bfire\s*(?:stop|block|caulk)\b/i,
+
+  // --- permits / inspections / code ---
+  /\bpermit\b/i,
+  /\binspection\b/i,
+  /\bper\s+code\b/i,
+  /\bcode\s+complian/i,
+  /\bas\s+required\b/i,
+  /\b(?:as\s+)?specified\b/i,
+  /\bto\s+be\s+performed\b/i,
+  /\bper\s+manufacturer\b/i,
+
+  // --- procedural / labor descriptions ---
+  /\binstallation\s+activities\b/i,
   /\bconstruction\s+impacts?\b/i,
   /\bdue\s+to\s+construction\b/i,
-  /\bsubstrate\b/i,
-  /\b(?:as\s+)?specified\b/i,
+  /\bcoordinate\s+with\b/i,
+  /\bfield\s+(?:verify|measure)\b/i,
+  /\btouch-?up\s+(?:as\s+)?needed\b/i,
+  /\btouch-?up\s+due\s+to\b/i,
+  /\bpaint\s+to\s+be\s+performed\b/i,
+  /\btemporary\b/i,
+  /\bpunch\s*list\b/i,
+  /\bfinal\s+clean\b/i,
+
+  // --- caulk / sealant (prep, not visible finish) ---
+  /\bcaulk(?:ing)?\b/i,
+  /\bsealant\b/i,
+  /\bgrout\s+seal/i,
+
+  // --- misc behind-the-scenes ---
+  /\bshoring\b/i,
+  /\bbracing\b/i,
+  /\banchoring\b/i,
+  /\bfastener/i,
+  /\blag\s+bolt/i,
+  /\bflashing\b/i,
+
+  // --- ventilation / exhaust (mechanical, not visible finish) ---
+  /\bventilation\s+system\b/i,
+  /\bPanasonic\b/i, // brand name for mechanical spec, not visual
+  /\bwhisper\b/i, // Panasonic Whisper fan model name
+
+  // --- AI review question residue (safety net — extractor strips most of these) ---
+  /\?\s*:/i, // "Question?: Answer" format leftover
+  /^scope\s+clarification/i,
 ];
 
 /** Incomplete fragments (single word or too short) that should be dropped unless we expand them. */
@@ -259,6 +391,18 @@ const INCOMPLETE_FRAGMENTS = new Set([
   "demolition",
   "waterproofing",
   "rough-in",
+  "framing",
+  "insulation",
+  "wiring",
+  "ductwork",
+  "substrate",
+  "permit",
+  "inspection",
+  "debris",
+  "protection",
+  "cleanup",
+  "caulking",
+  "sealant",
 ]);
 
 /** Map fragment (lowercase) or short phrase to a clear visible action. */
@@ -292,6 +436,22 @@ const FRAGMENT_TO_ACTION: Record<string, string> = {
   toilet: "Replace toilet",
   "mirror": "Install mirror",
   "hardware": "Replace hardware",
+  "freestanding tub": "Install freestanding tub",
+  "soaking tub": "Install freestanding soaking tub",
+  "freestanding soaking tub": "Install freestanding soaking tub",
+  "wall tile": "Install wall tile",
+  "floor-to-ceiling tile": "Install floor-to-ceiling tile",
+  "door casing": "Install door casing",
+  "crown molding": "Install crown molding",
+  "baseboards": "Install baseboards",
+  "wainscoting": "Install wainscoting",
+  "accent wall": "Install accent wall",
+  "shower door": "Install shower door",
+  "glass enclosure": "Install glass enclosure",
+  "niche": "Install shower niche",
+  "shower niche": "Install shower niche",
+  "bench": "Install shower bench",
+  "shower bench": "Install shower bench",
 };
 
 /**
@@ -311,6 +471,11 @@ function normalizeRemodelBullets(rawBullets: string[]): string[] {
 
     // Drop if matches non-visual construction language
     if (NON_VISUAL_PATTERNS.some((re) => re.test(lower))) continue;
+
+    // Drop fragments that are clearly truncated mid-sentence (end with dangling articles/conjunctions)
+    if (/\b(?:the|a|an)\s*$/i.test(raw)) continue;
+    // Drop items that are just "Configuration" or similar section headers with no action
+    if (/^(?:configuration|specifications?|options?|notes?|scope\s+clarifications?)$/i.test(lower)) continue;
 
     const words = lower.split(/\s+/).filter(Boolean);
     // Drop standalone incomplete fragments that we don't have an expansion for (e.g. "Remove", "Installation activities")
@@ -769,6 +934,20 @@ export function MediaTab({
     setOptimisticRenderMedia((prev) => prev.filter((o) => !serverIds.has(o.id)));
   }, [media]);
 
+  // One-time cleanup: remove orphaned rendering children that lost their parent.
+  // These are legacy orphans created before cascade-delete was added to deleteMediaAction.
+  const orphanCleanupRanRef = useRef(false);
+  useEffect(() => {
+    if (orphanCleanupRanRef.current) return;
+    orphanCleanupRanRef.current = true;
+    cleanupOrphanedRenderingsAction(projectId).then((result) => {
+      if (result.deleted > 0) {
+        console.log(`[media-tab] Cleaned up ${result.deleted} orphaned rendering(s)`);
+        router.refresh();
+      }
+    }).catch(() => {/* non-fatal */});
+  }, [projectId, router]);
+
   useEffect(() => {
     if (!activeRoomId || !hasPendingRenders) return;
     const t = setInterval(() => router.refresh(), POLL_INTERVAL_MS);
@@ -845,11 +1024,35 @@ export function MediaTab({
     };
   }, [router]);
 
-  /** Current room: extracted and normalized remodel bullets from this room's scope only (no project transcript). */
-  const activeRoomBullets: string[] =
-    activeRoomId && activeRoom
-      ? normalizeRemodelBullets(extractRemodelBullets(activeRoom.scopeNarrative ?? ""))
-      : [];
+  /** Current room: AI-extracted visual rendering checklist from scope narrative. */
+  const [activeRoomBullets, setActiveRoomBullets] = useState<string[]>([]);
+  const [bulletsLoading, setBulletsLoading] = useState(false);
+  const prevActiveRoomIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (activeRoomId === prevActiveRoomIdRef.current) return;
+    prevActiveRoomIdRef.current = activeRoomId;
+
+    if (!activeRoomId || !activeRoom?.scopeNarrative) {
+      setActiveRoomBullets([]);
+      return;
+    }
+
+    let cancelled = false;
+    setBulletsLoading(true);
+    extractRenderChecklistAction(activeRoomId)
+      .then((items) => {
+        if (!cancelled) setActiveRoomBullets(items);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveRoomBullets([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBulletsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [activeRoomId, activeRoom?.scopeNarrative]);
 
   /** Current room: checked state per bullet (stored + defaults). New bullets default checked. */
   const activeRoomBulletChecked = (bullet: string): boolean => {
@@ -1151,7 +1354,18 @@ export function MediaTab({
             </button>
             {rooms.map((room) => {
               const roomRenders = renderingsByRoom(room.id);
-              const roots = roomRenders.filter((r) => r.parentMediaId == null).length;
+              // Count distinct root concepts: group by sourceMediaId and keep only one per source.
+              // This excludes orphaned children whose parentMediaId was set to null when their parent was deleted.
+              const potentialRoots = roomRenders.filter((r) => r.parentMediaId == null);
+              const seenSources = new Set<string>();
+              let roots = 0;
+              for (const r of potentialRoots) {
+                const key = r.sourceMediaId ?? r.id; // unique per source photo
+                if (!seenSources.has(key)) {
+                  seenSources.add(key);
+                  roots++;
+                }
+              }
               const isSelected = room.selectedRenderMediaId != null;
               const active = room.id === activeRoomId;
               return (
@@ -1713,7 +1927,11 @@ export function MediaTab({
                       <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                         These changes will be applied to the new render generated from this photo.
                       </p>
-                      {activeRoomBullets.length === 0 ? (
+                      {bulletsLoading ? (
+                        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400 animate-pulse">
+                          Extracting visual changes from scope...
+                        </p>
+                      ) : activeRoomBullets.length === 0 ? (
                         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                           No scope for this section. Add a renovation description in the Sections tab to see specific changes here.
                         </p>

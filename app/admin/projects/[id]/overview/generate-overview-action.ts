@@ -2,6 +2,7 @@
 
 import { prisma } from "@/app/lib/prisma";
 import { extractFromTranscript, type TranscriptExtraction } from "@/app/lib/ai/extract-from-transcript";
+import { generateLuxuryObjectiveParagraph, generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
 
 function classifyRoomCategory(name: string): "kitchen" | "bath" | "laundry" | "bedroom" | "living" | "dining" | "office" | "other" {
   const n = name.toLowerCase();
@@ -101,7 +102,53 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
     throw new Error("No transcript available.");
   }
 
-  const result = await extractFromTranscript(project.transcriptText);
+  // Fetch company name for the luxury objective prompt
+  const settings = await prisma.companySettings.findFirst({ select: { companyName: true } });
+  const companyName = (settings?.companyName ?? "").trim() || "HHI Builders";
+
+  const addressParts = [
+    project.addressLine1,
+    project.addressLine2,
+    [project.city, project.state].filter(Boolean).join(", "),
+    project.zip,
+  ].filter(Boolean);
+  const projectAddress = addressParts.join(", ");
+  const clientName = [project.client1First, project.client1Last].filter(Boolean).join(" ");
+
+  // Fetch rooms for scope overview generation (non-overhead, with scope text)
+  const rooms = await prisma.room.findMany({
+    where: {
+      projectId,
+      isProjectOverhead: false,
+      scopeNarrative: { not: "" },
+    },
+    select: {
+      name: true,
+      scopeNarrative: true,
+      bucket: true,
+      sortOrder: true,
+    },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  // Run transcript extraction, luxury objective, and scope overview generation in parallel
+  const [result, luxuryResult, scopeOverviewResult] = await Promise.all([
+    extractFromTranscript(project.transcriptText),
+    generateLuxuryObjectiveParagraph({
+      transcriptText: project.transcriptText,
+      companyName,
+      projectAddress: projectAddress || null,
+      clientName: clientName || null,
+    }).catch(() => null), // Don't fail the whole generation if luxury prompt fails
+    rooms.length > 0
+      ? generateScopeOverviewNarrative({
+          rooms,
+          companyName,
+          projectAddress: projectAddress || "Unknown Address",
+          clientName: clientName || "the homeowner",
+        }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
   const overview = result.overview ?? {};
   // projectType: concise label for title only (never the subtitle text)
@@ -113,6 +160,13 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
   overview.workSummary = projectType;
   // subtitle: keep AI's descriptive sentence (required from extractFromTranscript); do not overwrite
 
+  // Replace the short extracted objective with the luxury narrative version
+  if (luxuryResult) {
+    overview.objective = luxuryResult.objective;
+    (overview as Record<string, unknown>).supportingText = luxuryResult.supportingText;
+    (overview as Record<string, unknown>).bullets = luxuryResult.bullets;
+  }
+
   // Regression: title (address — projectType) must not equal subtitle (summary sentence)
   if (overview.title != null && overview.subtitle != null && overview.title === overview.subtitle) {
     throw new Error("Overview title and subtitle must differ; title should be address — project type.");
@@ -121,5 +175,6 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
   return {
     ...result,
     overview,
+    scopeOverview: scopeOverviewResult ?? null,
   };
 }

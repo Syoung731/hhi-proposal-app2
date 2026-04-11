@@ -1,5 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { getProposalSnapshotForViewer, getRoomBySlug } from "@/app/lib/public-proposal";
+import { stripScopeClarifications } from "@/app/lib/scope-narrative";
 import { getLibraryMediaByIds } from "@/app/lib/library-media";
 import type { PresentationConfigSaved, SectionPageConfig } from "@/app/lib/layout-config";
 import type { SnapshotData } from "@/app/lib/snapshot";
@@ -174,7 +175,7 @@ export default async function SectionPage({
           beforeImage={beforeForCollage[0] ?? null}
           afterImage={afterForCollage[0] ?? null}
           referenceImages={referenceImages}
-          scopeText={room.scopeNarrative ?? ""}
+          scopeText={stripScopeClarifications(room.scopeNarrative ?? "")}
           titleScale={titleScale}
           photoAreaPct={photoAreaPct}
           scopeTextScale={scopeTextScale}
@@ -198,7 +199,7 @@ export default async function SectionPage({
         onlyAfter={onlyAfter}
         onlyBefore={onlyBefore}
         splitDensity={splitDensity}
-        scopeText={room.scopeNarrative ?? ""}
+        scopeText={stripScopeClarifications(room.scopeNarrative ?? "")}
         titleScale={titleScale}
         photoAreaPct={photoAreaPct}
         scopeTextScale={scopeTextScale}
