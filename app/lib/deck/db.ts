@@ -442,7 +442,8 @@ async function syncScopeBreakdownSlide(
   rooms: RoomWithMedia[]
 ): Promise<void> {
   // Rooms without a selected render need written scope coverage.
-  const unrendered = rooms.filter((r) => !r.selectedRenderMediaId);
+  // Exclude project-overhead (COPE) rooms — they have their own dedicated slide.
+  const unrendered = rooms.filter((r) => !r.selectedRenderMediaId && !r.isProjectOverhead);
   if (unrendered.length === 0) return;
 
   // Find the auto scope-breakdown slide (at most one per deck).

@@ -56,7 +56,7 @@ export type WhyUsLayoutKey =
   | "testimonials-split";
 export type ScopeOverviewLayoutKey = "split-panel" | "image-row";
 export type BeforeAfterLayoutKey = "side-by-side" | "after-emphasis";
-export type ScopeBreakdownLayoutKey = "text-grid";
+export type ScopeBreakdownLayoutKey = "text-grid" | "dark-table" | "icon-columns" | "cards-split" | "photo-grid" | "three-pillars";
 export type RiskBriefLayoutKey = "two-column" | "comparison-table";
 export type ProcessLayoutKey = "three-stages";
 export type CoreValuesLayoutKey = "quad-grid" | "cards-row" | "labeled-list" | "icon-cards";
@@ -582,6 +582,8 @@ export interface RoomWithMedia {
   selectedRenderMediaId: string | null;
   /** Room.scopeNarrative — used to auto-populate caption text on generated slides. */
   scopeNarrative?: string;
+  /** True when the room represents project-level overhead (COPE). */
+  isProjectOverhead?: boolean;
   /** Uploaded/existing photos for this room (type=EXISTING, excludes HERO). */
   beforeMedia: RoomMediaItem[];
   /** Completed AI renders for this room (type=RENDERING, renderStatus=DONE). */
@@ -1823,6 +1825,11 @@ export const BEFORE_AFTER_LAYOUTS: { key: BeforeAfterLayoutKey; label: string }[
 
 export const SCOPE_BREAKDOWN_LAYOUTS: { key: ScopeBreakdownLayoutKey; label: string }[] = [
   { key: "text-grid", label: "Text Grid" },
+  { key: "dark-table", label: "Dark Table" },
+  { key: "icon-columns", label: "Icon Columns" },
+  { key: "cards-split", label: "Cards Split" },
+  { key: "photo-grid", label: "Photo Grid" },
+  { key: "three-pillars", label: "Three Pillars" },
 ];
 
 export const RISK_BRIEF_LAYOUTS: { key: RiskBriefLayoutKey; label: string }[] = [

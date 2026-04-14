@@ -152,6 +152,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
         sortOrder: true,
         selectedRenderMediaId: true,
         scopeNarrative: true,
+        isProjectOverhead: true,
         media: {
           where: {
             OR: [
@@ -180,6 +181,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       sortOrder: room.sortOrder,
       selectedRenderMediaId: room.selectedRenderMediaId,
       scopeNarrative: room.scopeNarrative ?? undefined,
+      isProjectOverhead: room.isProjectOverhead,
       beforeMedia: room.media
         .filter((m) => m.type === "EXISTING")
         .map((m) => ({
