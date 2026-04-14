@@ -167,10 +167,13 @@ export function SlideRail({
     const [moved] = reordered.splice(dragIndex, 1);
     reordered.splice(index, 0, moved);
     onReorder(reordered.map((s, i) => ({ ...s, order: i })));
+    // Clear state so handleDragEnd (which always fires after drop) doesn't reorder again
+    setDragIndex(null);
+    setDropIndex(null);
   }
 
   function handleDragEnd() {
-    // Fallback commit — fires on every dragend even without a drop event
+    // Fallback commit — only fires the reorder if handleDrop didn't already run
     if (dragIndex !== null && dropIndex !== null && canDrop(slides, dragIndex, dropIndex)) {
       const reordered = [...slides];
       const [moved] = reordered.splice(dragIndex, 1);

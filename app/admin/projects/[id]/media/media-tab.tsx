@@ -1287,10 +1287,10 @@ export function MediaTab({
             }}
             className="w-fit rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            Connect Browser
+            Import Photos
           </button>
           <span className="text-xs text-zinc-500 dark:text-zinc-400">
-            Securely connects this browser to Zillow Import so listing photos and details can be brought into this project.
+            Import photos from a Zillow listing into this project.
           </span>
         </div>
         {/* Later: Import Selected status (Phase 4) */}
@@ -2377,7 +2377,11 @@ export function MediaTab({
                       <p className="text-sm font-medium text-green-700 dark:text-green-400">
                         Browser connected. Zillow Import is ready.
                       </p>
-                      {!projectAddress?.trim() && (
+                      {projectAddress?.trim() ? (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          Opening Zillow for <strong>{projectAddress}</strong>… Photos will be captured automatically when the listing loads.
+                        </p>
+                      ) : (
                         <p className="text-xs text-zinc-500 dark:text-zinc-400">
                           No project address on Overview. Open Zillow manually to import listing photos.
                         </p>

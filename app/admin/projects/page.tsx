@@ -17,7 +17,6 @@ export default async function AdminProjectsPage({
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
-      slug: true,
       title: true,
       status: true,
       updatedAt: true,
@@ -56,9 +55,6 @@ export default async function AdminProjectsPage({
                 Title
               </th>
               <th className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
-                Slug
-              </th>
-              <th className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
                 Status
               </th>
               <th className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
@@ -72,7 +68,7 @@ export default async function AdminProjectsPage({
           <tbody>
             {projects.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">
                   {includeArchived
                     ? "No projects yet. Create one to get started."
                     : "No active projects. Create one or show archived."}
@@ -91,9 +87,6 @@ export default async function AdminProjectsPage({
                     >
                       {p.title}
                     </Link>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-zinc-600 dark:text-zinc-400">
-                    {p.slug}
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -114,7 +107,6 @@ export default async function AdminProjectsPage({
                   <td className="px-4 py-3">
                     <ProjectListActions
                       projectId={p.id}
-                      slug={p.slug}
                       proposalId={p.proposal?.id ?? null}
                       status={p.status}
                       title={p.title}

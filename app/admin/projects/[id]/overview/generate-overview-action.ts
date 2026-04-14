@@ -156,7 +156,10 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
   const derivedWorkSummary = deriveWorkSummary(result);
   const projectType = aiWorkSummary || derivedWorkSummary || "Remodel";
 
-  overview.title = buildOverviewTitle(project, projectType);
+  // Use AI-extracted address if the DB doesn't have one yet
+  const aiAddress = (overview.addressLine1 ?? "").trim();
+  const effectiveAddress = aiAddress || (project.addressLine1 ?? "").trim();
+  overview.title = buildOverviewTitle({ addressLine1: effectiveAddress || null }, projectType);
   overview.workSummary = projectType;
   // subtitle: keep AI's descriptive sentence (required from extractFromTranscript); do not overwrite
 

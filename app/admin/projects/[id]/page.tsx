@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/app/lib/prisma";
 import { listActiveStylePresets, listSectionTypes, getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
+import { isRendrConfigured } from "@/app/lib/rendr/rendrClient";
 import { ProjectTabs } from "./tabs";
 
 const TAB = "tab";
@@ -59,11 +60,12 @@ export default async function AdminProjectPage({
   // investmentLineItems returned by getProject always reflect the latest SectionType
   // rates — even for rooms whose totalLow/totalHigh was never written (stale rows
   // set via updateRoomsSectionType before Fix A).
-  const [project, stylePresets, sectionTypes, companySettings] = await Promise.all([
+  const [project, stylePresets, sectionTypes, companySettings, rendrConfigured] = await Promise.all([
     recomputeInvestmentRollups(id).catch(() => null).then(() => getProject(id)),
     listActiveStylePresets(),
     listSectionTypes(),
     getOrCreateCompanySettings(),
+    isRendrConfigured().catch(() => false),
   ]);
   if (!project) notFound();
   const roomTypeLowPct = companySettings.roomTypeLowPct ?? -10;
@@ -91,6 +93,7 @@ export default async function AdminProjectPage({
         roomTypeLowPct={roomTypeLowPct}
         roomTypeHighPct={roomTypeHighPct}
         initialMediaRoomId={roomIdFromUrl}
+        rendrConfigured={rendrConfigured}
       />
     </div>
   );

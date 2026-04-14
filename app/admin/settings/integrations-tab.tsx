@@ -1360,6 +1360,192 @@ export function IntegrationsTab({ settings }: Props) {
         )}
       </section>
 
+      {/* ------------------------------------------------------------------ */}
+      {/* Rendr LiDAR Integration                                            */}
+      {/* ------------------------------------------------------------------ */}
+      <RendrIntegrationCard />
+
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rendr LiDAR Integration Card
+// ---------------------------------------------------------------------------
+
+function RendrIntegrationCard() {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [testMessage, setTestMessage] = useState<string | null>(null);
+  const [isActive, setIsActive] = useState(false);
+  const [lastTestedAt, setLastTestedAt] = useState<string | null>(null);
+  const [lastTestResult, setLastTestResult] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/integrations/rendr/credentials")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.configured) {
+          setClientId(data.clientId ?? "");
+          setIsActive(data.isActive ?? false);
+          setLastTestedAt(data.lastTestedAt ?? null);
+          setLastTestResult(data.lastTestResult ?? null);
+        }
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  const handleSave = async () => {
+    setSaveStatus("saving");
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/admin/integrations/rendr/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, clientSecret }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setSaveStatus("error");
+        setSaveError(data.error ?? "Failed to save");
+        return;
+      }
+      setSaveStatus("saved");
+      setIsActive(false);
+      setLastTestResult(null);
+      setLastTestedAt(null);
+      setClientSecret("");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch {
+      setSaveStatus("error");
+      setSaveError("Network error");
+    }
+  };
+
+  const handleTest = async () => {
+    setTestStatus("testing");
+    setTestMessage(null);
+    try {
+      const res = await fetch("/api/admin/integrations/rendr/test", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setTestStatus("ok");
+        setTestMessage(data.message);
+        setIsActive(true);
+        setLastTestedAt(new Date().toISOString());
+        setLastTestResult("success");
+      } else {
+        setTestStatus("error");
+        setTestMessage(data.message);
+        setLastTestResult("failed");
+      }
+    } catch {
+      setTestStatus("error");
+      setTestMessage("Network error");
+    }
+  };
+
+  const connectionStatus = isActive && lastTestResult === "success"
+    ? "Connected"
+    : lastTestResult === "failed"
+      ? "Connection failed"
+      : "Not connected";
+
+  const statusColor = isActive && lastTestResult === "success"
+    ? "text-green-600 dark:text-green-400"
+    : lastTestResult === "failed"
+      ? "text-red-600 dark:text-red-400"
+      : "text-zinc-500 dark:text-zinc-400";
+
+  if (!loaded) return null;
+
+  return (
+    <section className="space-y-4 border-t border-zinc-200 pt-6 dark:border-zinc-800">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Rendr LiDAR</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Connect your Rendr account to import LiDAR scan data into project rooms.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-medium ${statusColor}`}>{connectionStatus}</span>
+          {lastTestedAt && lastTestResult === "success" && (
+            <span className="text-xs text-zinc-400">
+              {new Date(lastTestedAt).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className={labelClass}>Client ID</label>
+          <input
+            type="text"
+            className={inputClass}
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            placeholder="Enter Rendr Client ID"
+          />
+        </div>
+        <div>
+          <label className={labelClass}>Client Secret</label>
+          <div className="relative max-w-xl">
+            <input
+              type={showSecret ? "text" : "password"}
+              className={inputClass}
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder={isActive ? "********** (saved)" : "Enter Rendr Client Secret"}
+            />
+            <button
+              type="button"
+              onClick={() => setShowSecret((s) => !s)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+              {showSecret ? "Hide" : "Show"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveStatus === "saving" || !clientId.trim() || !clientSecret.trim()}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          {saveStatus === "saving" ? "Saving..." : "Save Credentials"}
+        </button>
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={testStatus === "testing" || !clientId.trim()}
+          className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+        >
+          {testStatus === "testing" ? "Testing..." : "Test Connection"}
+        </button>
+        {saveStatus === "saved" && (
+          <span className="text-sm text-green-600 dark:text-green-400">Saved</span>
+        )}
+        {saveStatus === "error" && saveError && (
+          <span className="text-sm text-red-600 dark:text-red-400">{saveError}</span>
+        )}
+        {testStatus === "ok" && testMessage && (
+          <span className="text-sm text-green-600 dark:text-green-400">{testMessage}</span>
+        )}
+        {testStatus === "error" && testMessage && (
+          <span className="text-sm text-red-600 dark:text-red-400">{testMessage}</span>
+        )}
+      </div>
+    </section>
   );
 }

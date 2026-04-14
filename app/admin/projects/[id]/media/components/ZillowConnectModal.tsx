@@ -379,7 +379,11 @@
                          <p className="text-sm font-medium text-green-700 dark:text-green-400">
                            Browser connected. Zillow Import is ready.
                          </p>
-                         {!projectAddress?.trim() && (
+                         {projectAddress?.trim() ? (
+                           <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                             Opening Zillow for <strong>{projectAddress}</strong>… Photos will be captured automatically when the listing loads.
+                           </p>
+                         ) : (
                            <p className="text-xs text-zinc-500 dark:text-zinc-400">
                              No project address on Overview. Open Zillow manually to import
                              listing photos.

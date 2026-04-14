@@ -672,7 +672,7 @@ RULES:
    - Caulking, sealant, grout sealer
 4. Each item should be 3-8 words, starting with a verb (Remove, Install, Replace, Add, Paint).
 5. Group removals first, then new installations.
-6. Use the clarification answers to refine descriptions (e.g., if answer says "freestanding floor-mounted", say "Install freestanding soaking tub" not just "Install tub").
+6. When CLARIFICATION ANSWERS are provided, use them to refine descriptions with specific details (e.g., if answer says "freestanding floor-mounted", say "Install freestanding soaking tub" not just "Install tub"). Answers override or supplement the scope narrative.
 7. Return 5-15 items. Combine related small items; split large compound items.
 
 Example output:
@@ -692,14 +692,32 @@ export async function extractRenderChecklistAction(roomId: string): Promise<stri
   });
   if (!room?.scopeNarrative) return [];
 
-  // Check cache — stored in scopeQA.renderChecklist alongside a hash of the scope
-  const scopeHash = simpleHash(room.scopeNarrative);
+  // Build structured Q&A text from scopeQA.questions (if answers exist)
   const existingQA = room.scopeQA as Record<string, unknown> | null;
+  const qaQuestions = Array.isArray(existingQA?.questions) ? existingQA.questions as { question: string; answer: unknown; unit?: string | null }[] : [];
+  const answeredQA = qaQuestions.filter((q) => q.answer != null && q.answer !== "");
+  const qaText = answeredQA.length > 0
+    ? answeredQA.map((q) => {
+        const unit = q.unit ? ` ${q.unit}` : "";
+        const answer = typeof q.answer === "boolean" ? (q.answer ? "Yes" : "No") : q.answer;
+        return `- ${q.question}: ${answer}${unit}`;
+      }).join("\n")
+    : "";
+
+  // Check cache — hash includes both scope narrative and Q&A answers
+  const cacheInput = room.scopeNarrative + (qaText ? `\n---QA---\n${qaText}` : "");
+  const scopeHash = simpleHash(cacheInput);
   if (
     existingQA?.renderChecklist &&
     existingQA?.renderChecklistScopeHash === scopeHash
   ) {
     return existingQA.renderChecklist as string[];
+  }
+
+  // Build user prompt with scope + structured Q&A
+  let userContent = `Extract the visual rendering checklist from this room scope:\n\n${room.scopeNarrative}`;
+  if (qaText) {
+    userContent += `\n\nCLARIFICATION ANSWERS (use these to refine checklist items with specific details):\n${qaText}`;
   }
 
   // Call Claude to extract visual items
@@ -709,7 +727,7 @@ export async function extractRenderChecklistAction(roomId: string): Promise<stri
       messages: [
         {
           role: "user",
-          content: `Extract the visual rendering checklist from this room scope:\n\n${room.scopeNarrative}`,
+          content: userContent,
         },
       ],
       max_tokens: 1024,

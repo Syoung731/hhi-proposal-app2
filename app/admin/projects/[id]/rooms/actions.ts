@@ -18,6 +18,7 @@ import {
   rewriteRoomScopeNarrative,
   mergeRoomScopesNarrative,
 } from "@/app/lib/ai/extract-from-transcript";
+import { generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
 import { z } from "zod";
 
 export type UnmatchedRoomItem = { name: string; roomIds: string[] };
@@ -753,6 +754,46 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
   }
 
   await ensureCopeRoom(projectId);
+
+  // Auto-generate scope overview if rooms were created and project doesn't have one yet
+  if (toCreate.length > 0) {
+    try {
+      const proj = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          scopeOverview: true,
+          addressLine1: true,
+          addressLine2: true,
+          city: true,
+          state: true,
+          zip: true,
+          client1First: true,
+          client1Last: true,
+        },
+      });
+      if (proj && !proj.scopeOverview) {
+        const rooms = await prisma.room.findMany({
+          where: { projectId, isProjectOverhead: false, scopeNarrative: { not: "" } },
+          select: { name: true, scopeNarrative: true, bucket: true, sortOrder: true },
+          orderBy: { sortOrder: "asc" },
+        });
+        if (rooms.length > 0) {
+          const settings = await prisma.companySettings.findFirst({ select: { companyName: true } });
+          const companyName = (settings?.companyName ?? "").trim() || "HHI Builders";
+          const addressParts = [proj.addressLine1, proj.addressLine2, [proj.city, proj.state].filter(Boolean).join(", "), proj.zip].filter(Boolean);
+          const projectAddress = addressParts.join(", ") || "Unknown Address";
+          const clientName = [proj.client1First, proj.client1Last].filter(Boolean).join(" ") || "the homeowner";
+
+          const scopeOverview = await generateScopeOverviewNarrative({ rooms, companyName, projectAddress, clientName });
+          if (scopeOverview) {
+            await prisma.project.update({ where: { id: projectId }, data: { scopeOverview } });
+          }
+        }
+      }
+    } catch {
+      // Non-critical — scope overview can be generated later from Overview tab
+    }
+  }
 
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);

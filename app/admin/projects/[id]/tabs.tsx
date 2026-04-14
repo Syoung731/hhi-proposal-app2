@@ -8,6 +8,7 @@ import { RoomsTab } from "./rooms/rooms-tab";
 import { TimelineTab } from "./timeline/timeline-tab";
 import { InvestmentTab } from "./investment/investment-tab";
 import { PublishTab } from "./publish/publish-tab";
+import { RendrTab } from "./rendr/rendr-tab";
 
 /** Build full address string from project Overview fields for Zillow search. */
 function buildProjectAddress(project: {
@@ -30,7 +31,7 @@ function buildProjectAddress(project: {
   return parts.join(", ");
 }
 
-const TABS: { slug: string; label: string; hrefOnly?: boolean }[] = [
+const BASE_TABS: { slug: string; label: string; hrefOnly?: boolean }[] = [
   { slug: "overview", label: "Overview" },
   { slug: "rooms", label: "Sections" },
   { slug: "media", label: "Media" },
@@ -51,6 +52,7 @@ export function ProjectTabs({
   roomTypeLowPct,
   roomTypeHighPct,
   initialMediaRoomId,
+  rendrConfigured,
   children,
 }: {
   project: ProjectForTabs;
@@ -61,9 +63,16 @@ export function ProjectTabs({
   roomTypeHighPct?: number;
   /** When opening Media tab via URL ?tab=media&roomId=..., preselect this room. */
   initialMediaRoomId?: string;
+  /** Whether Rendr integration is configured — controls tab visibility. */
+  rendrConfigured?: boolean;
   children?: React.ReactNode;
 }) {
   const base = `/admin/projects/${project.id}`;
+
+  // Conditionally include the Rendr tab
+  const TABS = rendrConfigured
+    ? [...BASE_TABS.slice(0, 5), { slug: "rendr", label: "Rendr" }, ...BASE_TABS.slice(5)]
+    : BASE_TABS;
 
   return (
     <div className="space-y-6">
@@ -231,6 +240,15 @@ export function ProjectTabs({
               includeInTotals: i.includeInTotals,
               sortOrder: i.sortOrder,
             }))}
+          />
+        )}
+        {currentTab === "rendr" && rendrConfigured && (
+          <RendrTab
+            projectId={project.id}
+            rendrSpaceId={project.rendrSpaceId ?? null}
+            rendrProjectId={project.rendrProjectId ?? null}
+            rendrImportedAt={project.rendrImportedAt?.toISOString() ?? null}
+            rooms={project.rooms.map((r) => ({ id: r.id, name: r.name }))}
           />
         )}
         {currentTab === "publish" && (

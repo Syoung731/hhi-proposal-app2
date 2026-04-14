@@ -4,6 +4,11 @@
  * No next/prev walker. Normalize URLs, dedupe by canonical key, preserve gallery order.
  */
 (function () {
+  /** Returns true if the extension context has been invalidated (e.g. after extension reload). */
+  function isContextInvalidated() {
+    try { return !chrome.runtime || !chrome.runtime.id; } catch (e) { return true; }
+  }
+
   if (typeof console !== "undefined" && console.log) {
     console.log("[ZI] content script loaded");
   }
@@ -30,6 +35,19 @@
 
   var SIZE_VARIANTS = ["-cc_ft_192", "-cc_ft_384", "-cc_ft_576", "-cc_ft_768", "-cc_ft_960"];
   var QUALITY_ORDER = { "-cc_ft_960": 5, "-cc_ft_768": 4, "-cc_ft_576": 3, "-cc_ft_384": 2, "-cc_ft_192": 1 };
+  // Showcase listings use different size suffixes; rank them for quality selection
+  var SHOWCASE_SUFFIXES_RANK = {
+    "-uncropped_scaled_within_1536_1024": 10,
+    "-h_l": 9,
+    "-p_e": 8,
+    "-cc_ft_960": 5,
+    "-cc_ft_768": 4,
+    "-cc_ft_576": 3,
+    "-cc_ft_384": 2,
+    "-sc_384_256": 2,
+    "-cc_ft_192": 1,
+    "-sc_192_128": 1,
+  };
 
   function sleep(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -164,22 +182,33 @@
   }
 
   /**
-   * Canonical identity key: URL without size variant suffix (for dedupe).
+   * Canonical identity key: extract the unique photo fingerprint hash from a Zillow photo URL.
+   * Zillow URLs follow the pattern: .../fp/<hash>-<size_suffix>.<ext>
+   * The hash is the unique photo identifier; size suffix and extension vary per variant.
    */
   function getCanonicalKey(url) {
     if (!url) return "";
-    var key = url;
-    for (var i = 0; i < SIZE_VARIANTS.length; i++) {
-      key = key.replace(new RegExp(SIZE_VARIANTS[i].replace(/[-.]/g, "\\$&") + "(\\.webp|\\.jpg|\\.jpeg)?", "gi"), "");
+    // Strip query string
+    var clean = url.replace(/\?.*$/, "");
+    // Extract the hash portion: everything between last "/" and the size/ext suffix
+    // Pattern: /fp/<32-char-hex-hash>-<suffix>.<ext>
+    var fpMatch = clean.match(/\/fp\/([a-f0-9]+)/i);
+    if (fpMatch) return fpMatch[1];
+    // Fallback: strip all known size suffixes and extensions
+    var key = clean;
+    var allSuffixes = Object.keys(SHOWCASE_SUFFIXES_RANK);
+    for (var i = 0; i < allSuffixes.length; i++) {
+      key = key.replace(new RegExp(allSuffixes[i].replace(/[-.]/g, "\\$&") + "(\\.webp|\\.jpg|\\.jpeg|\\.png)?$", "i"), "");
     }
-    return key.replace(/\?.*$/, "");
+    return key;
   }
 
   function getQualityRank(url) {
     var r = 0;
-    for (var i = 0; i < SIZE_VARIANTS.length; i++) {
-      if (url.indexOf(SIZE_VARIANTS[i]) !== -1) {
-        var q = QUALITY_ORDER[SIZE_VARIANTS[i]];
+    var allSuffixes = Object.keys(SHOWCASE_SUFFIXES_RANK);
+    for (var i = 0; i < allSuffixes.length; i++) {
+      if (url.indexOf(allSuffixes[i]) !== -1) {
+        var q = SHOWCASE_SUFFIXES_RANK[allSuffixes[i]];
         if (q > r) r = q;
       }
     }
@@ -713,9 +742,163 @@
   }
 
   /**
-   * CAPTURE_GALLERY: open modal, extract wall, auto-scroll to load more, normalize; else fallback to listing preview.
+   * Detect Showcase-style listing (immersive lightbox with carousel, no vertical media wall).
+   */
+  function isShowcaseListing() {
+    return !!document.querySelector('[data-testid="showcase-action-bar-container"]') ||
+           !!document.querySelector('[data-testid="persistent-tab-photos"]');
+  }
+
+  /**
+   * Extract photos from a Showcase-style listing by reading the structured
+   * gdpClientCache JSON embedded in the page, which contains the authoritative
+   * photo list for this property (property.photos array with URLs and mixedSources).
+   * Falls back to DOM scraping if the JSON data isn't found.
+   */
+  function extractShowcasePhotos() {
+    // 1) Try structured JSON extraction from gdpClientCache
+    var jsonUrls = extractShowcasePhotosFromJSON();
+    if (jsonUrls && jsonUrls.length > 0) {
+      if (typeof console !== "undefined" && console.log) {
+        console.log("[ZI] showcase extraction (JSON): " + jsonUrls.length + " photos");
+      }
+      return jsonUrls;
+    }
+
+    // 2) Fallback: scrape only from the lightbox container to avoid ads/similar homes
+    if (typeof console !== "undefined" && console.log) {
+      console.log("[ZI] showcase JSON not found, falling back to DOM scraping");
+    }
+    var container = document.querySelector('[data-testid="home-detail-lightbox-container"]') || document;
+    var entries = [];
+    var imgs = container.querySelectorAll("img");
+    for (var i = 0; i < imgs.length; i++) {
+      var src = imgs[i].getAttribute("src") || "";
+      if (src.indexOf("photos.zillowstatic.com") !== -1) {
+        entries.push({ url: src, ordinal: entries.length });
+      }
+    }
+    var sources = container.querySelectorAll("picture source[srcset]");
+    for (var j = 0; j < sources.length; j++) {
+      var parts = (sources[j].getAttribute("srcset") || "").split(",");
+      for (var k = 0; k < parts.length; k++) {
+        var url = parts[k].trim().split(/\s+/)[0];
+        if (url && url.indexOf("photos.zillowstatic.com") !== -1) {
+          entries.push({ url: url, ordinal: entries.length });
+        }
+      }
+    }
+    var urls = normalizeAndDedupe(entries);
+    if (typeof console !== "undefined" && console.log) {
+      console.log("[ZI] showcase extraction (DOM fallback): " + urls.length + " unique photos");
+    }
+    return urls;
+  }
+
+  /**
+   * Parse the gdpClientCache from the page's embedded JSON to get the
+   * property's photo list directly. Returns array of best-quality URLs
+   * in gallery order, or null if the data isn't available.
+   */
+  function extractShowcasePhotosFromJSON() {
+    try {
+      var jsonScripts = document.querySelectorAll('script[type="application/json"]');
+      for (var s = 0; s < jsonScripts.length; s++) {
+        var text = jsonScripts[s].textContent || "";
+        if (text.indexOf("gdpClientCache") === -1) continue;
+        var parsed = JSON.parse(text);
+
+        // Walk to find gdpClientCache
+        var cacheStr = findNestedValue(parsed, "gdpClientCache", 4);
+        if (!cacheStr) continue;
+        var cache = typeof cacheStr === "string" ? JSON.parse(cacheStr) : cacheStr;
+
+        // Find the key containing the current listing's zpid
+        var zpid = extractZpidFromUrl();
+        if (!zpid) continue;
+        var cacheKeys = Object.keys(cache);
+        var propData = null;
+        for (var k = 0; k < cacheKeys.length; k++) {
+          if (cacheKeys[k].indexOf(zpid) !== -1) {
+            propData = cache[cacheKeys[k]];
+            break;
+          }
+        }
+        if (!propData || !propData.property) continue;
+
+        // Use property.photos (has url + mixedSources with quality variants)
+        var photos = propData.property.photos;
+        if (!Array.isArray(photos) || photos.length === 0) continue;
+
+        var urls = [];
+        for (var p = 0; p < photos.length; p++) {
+          var photo = photos[p];
+          var bestUrl = pickBestPhotoUrl(photo);
+          if (bestUrl) urls.push(bestUrl);
+        }
+        return urls.length > 0 ? urls : null;
+      }
+    } catch (e) {
+      if (typeof console !== "undefined" && console.log) {
+        console.log("[ZI] showcase JSON parse error:", e.message || e);
+      }
+    }
+    return null;
+  }
+
+  /** Walk object tree to find a key by name. */
+  function findNestedValue(obj, key, maxDepth) {
+    if (maxDepth <= 0 || !obj || typeof obj !== "object") return null;
+    if (obj[key] !== undefined) return obj[key];
+    var keys = Object.keys(obj);
+    for (var i = 0; i < keys.length; i++) {
+      var r = findNestedValue(obj[keys[i]], key, maxDepth - 1);
+      if (r !== null) return r;
+    }
+    return null;
+  }
+
+  /** Extract zpid from the current page URL (/homedetails/..._zpid/). */
+  function extractZpidFromUrl() {
+    var m = window.location.href.match(/\/(\d+)_zpid/);
+    return m ? m[1] : null;
+  }
+
+  /**
+   * From a Zillow photo object ({url, mixedSources: {jpeg: [{url, width}], webp: [...]}})
+   * pick the highest-quality URL, preferring large JPEGs.
+   */
+  function pickBestPhotoUrl(photo) {
+    if (!photo) return null;
+    // Try mixedSources.jpeg — sorted by width, pick largest
+    if (photo.mixedSources) {
+      var jpegs = photo.mixedSources.jpeg;
+      if (Array.isArray(jpegs) && jpegs.length > 0) {
+        var best = jpegs[0];
+        for (var i = 1; i < jpegs.length; i++) {
+          if (jpegs[i].width > best.width) best = jpegs[i];
+        }
+        if (best.url) return best.url;
+      }
+      // Fallback to webp
+      var webps = photo.mixedSources.webp;
+      if (Array.isArray(webps) && webps.length > 0) {
+        var bestW = webps[0];
+        for (var j = 1; j < webps.length; j++) {
+          if (webps[j].width > bestW.width) bestW = webps[j];
+        }
+        if (bestW.url) return bestW.url;
+      }
+    }
+    // Fallback to photo.url directly
+    return photo.url || null;
+  }
+
+  /**
+   * CAPTURE_GALLERY: try standard modal wall first, then Showcase lightbox, then listing preview fallback.
    */
   function runCaptureGallery(onProgress) {
+    // 1) Try standard "See all photos" → vertical media wall (traditional listings)
     return openFullGalleryModal().then(function (opened) {
       var modalRoot = getModalRoot();
       if (opened && modalRoot) {
@@ -735,6 +918,23 @@
           };
         });
       }
+
+      // 2) Try Showcase extraction (immersive carousel listings — photos already in DOM)
+      if (isShowcaseListing()) {
+        if (typeof console !== "undefined" && console.log) {
+          console.log("[ZI] showcase listing detected, using showcase extraction");
+        }
+        var showcaseUrls = extractShowcasePhotos();
+        return Promise.resolve({
+          images: showcaseUrls,
+          source: "showcase",
+          capturedCount: showcaseUrls.length,
+          targetPhotoCount: null,
+          loadedViaAutoScroll: false,
+        });
+      }
+
+      // 3) Fallback: scrape listing preview tile images
       var previewUrls = extractListingPreviewImages();
       if (typeof console !== "undefined" && console.log) {
         console.log("[ZI] fallback listing preview, images:", previewUrls.length);
@@ -750,6 +950,7 @@
   }
 
   chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
+    if (isContextInvalidated()) return false;
     if (message.type === "GET_IMAGES") {
       var result;
       try {
@@ -825,11 +1026,132 @@
     return false;
   });
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () {
-      if (typeof console !== "undefined" && console.log) {
-        console.log("[ZI] content script ready (capture on user click only)");
-      }
+  // --- Floating "Capture for HHI" button on listing pages (fallback for auto-capture) ---
+
+  function isListingPage() {
+    return window.location.href.indexOf("zillow.com/homedetails/") !== -1;
+  }
+
+  function injectCaptureButton() {
+    if (!isListingPage()) return;
+    if (document.getElementById("zi-capture-fab")) return;
+
+    // Only show if paired to a project
+    if (isContextInvalidated()) return;
+    chrome.storage.local.get(["pairedProjectId"], function (data) {
+      if (!data || !data.pairedProjectId) return;
+
+      var btn = document.createElement("button");
+      btn.id = "zi-capture-fab";
+      btn.textContent = "\uD83D\uDCF7 Zillow Import";
+      btn.style.cssText = [
+        "position: fixed",
+        "bottom: 24px",
+        "right: 24px",
+        "z-index: 999999",
+        "padding: 12px 20px",
+        "background: #1A2332",
+        "color: #fff",
+        "border: 2px solid #F47216",
+        "border-radius: 8px",
+        "font-family: system-ui, sans-serif",
+        "font-size: 14px",
+        "font-weight: 600",
+        "cursor: pointer",
+        "box-shadow: 0 4px 12px rgba(0,0,0,0.3)",
+        "transition: background 0.2s",
+      ].join("; ");
+
+      btn.addEventListener("mouseenter", function () { btn.style.background = "#F47216"; });
+      btn.addEventListener("mouseleave", function () { btn.style.background = "#1A2332"; });
+
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.textContent = "Capturing...";
+        btn.style.background = "#555";
+
+        var onProgress = function (current, target) {
+          btn.textContent = "Capturing... " + current + (target != null ? " / " + target : "");
+          try {
+            chrome.runtime.sendMessage({
+              type: "ZILLOW_CAPTURE_PROGRESS",
+              current: current,
+              target: target,
+            });
+          } catch (_) {}
+        };
+
+        runCaptureGallery(onProgress).then(function (result) {
+          var images = result.images || [];
+          var meta = {
+            source: result.source,
+            capturedCount: result.capturedCount,
+            targetPhotoCount: result.targetPhotoCount,
+            loadedViaAutoScroll: result.loadedViaAutoScroll === true,
+            loadedGalleryItemCount: result.loadedGalleryItemCount,
+            stopReason: result.stopReason,
+          };
+          try { window.__ZI_LAST_RESULT__ = { images: images, meta: meta }; } catch (_) {}
+
+          if (images.length > 0) {
+            chrome.storage.local.set({ zillowLatestCapture: { images: images, meta: meta } }, function () {
+              btn.textContent = images.length + " photos captured!";
+              btn.style.background = "#16a34a";
+              // Open Photo Picker
+              chrome.runtime.sendMessage({ type: "ZILLOW_OPEN_PICKER" });
+              // Reset button after a moment
+              setTimeout(function () {
+                btn.disabled = false;
+                btn.textContent = "\uD83D\uDCF7 Zillow Import";
+                btn.style.background = "#1A2332";
+              }, 3000);
+            });
+          } else {
+            btn.textContent = "No photos found";
+            btn.style.background = "#dc2626";
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.textContent = "\uD83D\uDCF7 Zillow Import";
+              btn.style.background = "#1A2332";
+            }, 3000);
+          }
+        }).catch(function () {
+          btn.textContent = "Capture failed";
+          btn.style.background = "#dc2626";
+          setTimeout(function () {
+            btn.disabled = false;
+            btn.textContent = "\uD83D\uDCF7 Zillow Import";
+            btn.style.background = "#1A2332";
+          }, 3000);
+        });
+      });
+
+      document.body.appendChild(btn);
     });
   }
+
+  // Inject button when page is ready, and on SPA navigations
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      console.log("[ZI] content script ready");
+      injectCaptureButton();
+    });
+  } else {
+    console.log("[ZI] content script ready");
+    injectCaptureButton();
+  }
+
+  // Watch for SPA navigation (Zillow uses client-side routing)
+  var lastUrl = window.location.href;
+  var urlObserver = new MutationObserver(function () {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      // Remove old button if navigating away from listing
+      var old = document.getElementById("zi-capture-fab");
+      if (old) old.remove();
+      // Re-check after a short delay for SPA page transitions
+      setTimeout(injectCaptureButton, 1000);
+    }
+  });
+  urlObserver.observe(document.body, { childList: true, subtree: true });
 })();

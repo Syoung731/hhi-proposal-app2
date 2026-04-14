@@ -73,6 +73,11 @@ model Project {
   defaultCeilingHeightFt   Float?               @default(9)
   projectQA                Json?
   proposalDeck             ProposalDeck?
+  // Rendr LiDAR integration (optional)
+  rendrSpaceId             Int?
+  rendrProjectId           Int?
+  rendrLinkedAt            DateTime?
+  rendrImportedAt          DateTime?
 
   @@index([status])
   @@index([createdAt])
@@ -1064,4 +1069,20 @@ model CatalogSuggestion {
 
   @@index([status])
   @@index([occurrenceCount])
+}
+
+// ---------------------------------------------------------------------------
+// Integration Settings (Rendr, etc.)
+// ---------------------------------------------------------------------------
+
+model IntegrationSetting {
+  id             String    @id @default(cuid())
+  service        String    @unique  // e.g. "rendr"
+  clientId       String
+  clientSecret   String    // stored encrypted (AES-256-CBC)
+  isActive       Boolean   @default(false)
+  lastTestedAt   DateTime?
+  lastTestResult String?   // "success" | "failed"
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }

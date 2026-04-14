@@ -132,7 +132,80 @@ importScripts("config.js", "messages.js");
   }
 
   /**
+   * Auto-capture state: tracks a Zillow tab opened by openZillowForAddress
+   * so we can auto-trigger CAPTURE_GALLERY when it lands on a listing page.
+   */
+  var autoCaptureTabId = null;
+  var autoCaptureTimer = null;
+  var autoCaptureListenerRegistered = false;
+  var AUTO_CAPTURE_TIMEOUT_MS = 30000;
+  var AUTO_CAPTURE_SETTLE_MS = 2000;
+
+  function clearAutoCapture() {
+    autoCaptureTabId = null;
+    if (autoCaptureTimer) {
+      clearTimeout(autoCaptureTimer);
+      autoCaptureTimer = null;
+    }
+  }
+
+  function isZillowListingPage(url) {
+    if (!url || typeof url !== "string") return false;
+    return url.indexOf("zillow.com/homedetails/") !== -1;
+  }
+
+  function sendCaptureToTab(tabId, retriesLeft) {
+    if (retriesLeft == null) retriesLeft = 2;
+    try {
+      chrome.tabs.sendMessage(tabId, { type: "CAPTURE_GALLERY" }, function (response) {
+        if (chrome.runtime.lastError) {
+          var errMsg = chrome.runtime.lastError.message || "";
+          console.warn("[ZI background] auto-capture sendMessage error:", errMsg);
+          if (retriesLeft > 0 && errMsg.indexOf("Receiving end does not exist") !== -1) {
+            console.log("[ZI background] retrying auto-capture in 2s (" + retriesLeft + " left)");
+            setTimeout(function () { sendCaptureToTab(tabId, retriesLeft - 1); }, 2000);
+          }
+          return;
+        }
+        var images = response && Array.isArray(response.images) ? response.images : [];
+        var meta = response && response.meta ? response.meta : {};
+        console.log("[ZI background] auto-capture result:", images.length + " photos");
+        if (images.length > 0) {
+          // Store capture result for Photo Picker (same as popup.js does)
+          chrome.storage.local.set({ zillowLatestCapture: { images: images, meta: meta } }, function () {
+            // Open Photo Picker automatically
+            chrome.tabs.create({ url: chrome.runtime.getURL("photo-picker.html") });
+            console.log("[ZI background] photo picker opened with " + images.length + " photos");
+          });
+        }
+      });
+    } catch (e) {
+      console.warn("[ZI background] auto-capture exception:", e && e.message ? e.message : e);
+    }
+  }
+
+  /** Register the onUpdated listener once (lazy — only when first needed). */
+  function ensureTabListener() {
+    if (autoCaptureListenerRegistered) return;
+    autoCaptureListenerRegistered = true;
+    chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+      if (autoCaptureTabId == null || tabId !== autoCaptureTabId) return;
+      if (changeInfo.status !== "complete") return;
+      var url = (tab && tab.url) || "";
+      if (!isZillowListingPage(url)) {
+        console.log("[ZI background] tab loaded but not a listing page, waiting...");
+        return;
+      }
+      var captureTabId = autoCaptureTabId;
+      clearAutoCapture();
+      console.log("[ZI background] listing page detected, auto-capturing in " + AUTO_CAPTURE_SETTLE_MS + "ms");
+      setTimeout(function () { sendCaptureToTab(captureTabId, 2); }, AUTO_CAPTURE_SETTLE_MS);
+    });
+  }
+
+  /**
    * Open a new Zillow tab with search-by-address URL (usersSearchTerm).
+   * After opening, watches for the tab to land on a listing page and auto-triggers capture.
    */
   function handleOpenZillowForAddress(message, reply) {
     var address = typeof message.address === "string" ? message.address.trim() : "";
@@ -140,14 +213,27 @@ importScripts("config.js", "messages.js");
       reply({ ok: false, error: "address is required" });
       return;
     }
-    var searchQueryState = JSON.stringify({
-      pagination: {},
-      usersSearchTerm: address,
-    });
-    var url = "https://www.zillow.com/homes/for_sale/?searchQueryState=" + encodeURIComponent(searchQueryState);
+    // Use Zillow's /homes/<address>_rb/ format which redirects to the listing page
+    // when an exact address match is found (unlike searchQueryState which stays on search results)
+    var slug = address
+      .replace(/[,#]/g, "")       // strip commas and hash
+      .replace(/\s+/g, "-")       // spaces to hyphens
+      .replace(/-+/g, "-")        // collapse multiple hyphens
+      .replace(/^-|-$/g, "");     // trim leading/trailing hyphens
+    var url = "https://www.zillow.com/homes/" + encodeURIComponent(slug) + "_rb/";
     try {
-      chrome.tabs.create({ url: url });
-      console.log("[ZI background] Zillow tab opened");
+      clearAutoCapture();
+      ensureTabListener();
+      chrome.tabs.create({ url: url }, function (tab) {
+        if (tab && tab.id) {
+          autoCaptureTabId = tab.id;
+          autoCaptureTimer = setTimeout(function () {
+            console.log("[ZI background] auto-capture timeout, giving up");
+            clearAutoCapture();
+          }, AUTO_CAPTURE_TIMEOUT_MS);
+          console.log("[ZI background] Zillow tab opened, watching tab " + tab.id + " for listing page");
+        }
+      });
       reply({ ok: true });
     } catch (e) {
       console.warn("[ZI background] openZillowForAddress failed", e);
@@ -273,6 +359,11 @@ importScripts("config.js", "messages.js");
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     console.log("[ZI background] onMessage received", message && message.type);
+    // Content script requests Photo Picker to be opened
+    if (message && message.type === "ZILLOW_OPEN_PICKER") {
+      chrome.tabs.create({ url: chrome.runtime.getURL("photo-picker.html") });
+      return false;
+    }
     if (!message || message.type !== "ZILLOW_EXTENSION_FORWARD") {
       return false;
     }

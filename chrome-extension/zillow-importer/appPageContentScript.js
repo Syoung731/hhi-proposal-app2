@@ -18,7 +18,17 @@
   var POLL_MS = 500;
   var MAX_AGE_MS = 6 * 60 * 1000; // ignore nonces older than 6 min
 
+  /** Returns true if the extension context has been invalidated (e.g. after extension reload). */
+  function isContextInvalidated() {
+    try {
+      return !chrome.runtime || !chrome.runtime.id;
+    } catch (e) {
+      return true;
+    }
+  }
+
   function debugLog() {
+    if (isContextInvalidated()) return;
     try {
       chrome.storage.local.get([DEBUG_STORAGE_KEY], function (res) {
         if (res[DEBUG_STORAGE_KEY] === "true" || res[DEBUG_STORAGE_KEY] === true) {
@@ -39,36 +49,49 @@
   }
 
   function storePending(data) {
+    if (isContextInvalidated()) return;
     var origin = window.location.origin;
-    chrome.storage.local.set({
-      [STORAGE_KEYS.pendingDirectNonce]: data.nonce,
-      [STORAGE_KEYS.pendingDirectSessionId]: data.sessionId,
-      [STORAGE_KEYS.pendingDirectOrigin]: origin,
-      [STORAGE_KEYS.pendingDirectAt]: Date.now(),
-    });
+    try {
+      chrome.storage.local.set({
+        [STORAGE_KEYS.pendingDirectNonce]: data.nonce,
+        [STORAGE_KEYS.pendingDirectSessionId]: data.sessionId,
+        [STORAGE_KEYS.pendingDirectOrigin]: origin,
+        [STORAGE_KEYS.pendingDirectAt]: Date.now(),
+      });
+    } catch (e) {}
   }
 
   function clearPending() {
-    chrome.storage.local.remove([
-      STORAGE_KEYS.pendingDirectNonce,
-      STORAGE_KEYS.pendingDirectSessionId,
-      STORAGE_KEYS.pendingDirectOrigin,
-      STORAGE_KEYS.pendingDirectAt,
-    ]);
+    if (isContextInvalidated()) return;
+    try {
+      chrome.storage.local.remove([
+        STORAGE_KEYS.pendingDirectNonce,
+        STORAGE_KEYS.pendingDirectSessionId,
+        STORAGE_KEYS.pendingDirectOrigin,
+        STORAGE_KEYS.pendingDirectAt,
+      ]);
+    } catch (e) {}
   }
 
   function poll() {
+    if (isContextInvalidated()) {
+      clearInterval(intervalId);
+      observer.disconnect();
+      return;
+    }
     var data = readHandshakeFromPage();
     if (data) {
       storePending(data);
       return;
     }
-    chrome.storage.local.get([STORAGE_KEYS.pendingDirectAt], function (res) {
-      var at = res[STORAGE_KEYS.pendingDirectAt];
-      if (at && Date.now() - at > MAX_AGE_MS) {
-        clearPending();
-      }
-    });
+    try {
+      chrome.storage.local.get([STORAGE_KEYS.pendingDirectAt], function (res) {
+        var at = res[STORAGE_KEYS.pendingDirectAt];
+        if (at && Date.now() - at > MAX_AGE_MS) {
+          clearPending();
+        }
+      });
+    } catch (e) {}
   }
 
   var intervalId = setInterval(poll, POLL_MS);
@@ -76,6 +99,11 @@
 
   // When the handshake element is removed (e.g. modal closed), clear pending after a short delay.
   var observer = new MutationObserver(function () {
+    if (isContextInvalidated()) {
+      observer.disconnect();
+      clearInterval(intervalId);
+      return;
+    }
     if (!readHandshakeFromPage()) {
       setTimeout(clearPending, 1000);
     }
@@ -87,6 +115,18 @@
     if (event.source !== window) return;
     var data = event.data;
     if (!data || data.type !== PAGE_REQUEST_TYPE) return;
+
+    // If extension was reloaded, respond with error instead of crashing
+    if (isContextInvalidated()) {
+      window.postMessage({
+        type: PAGE_RESPONSE_TYPE,
+        requestId: data.requestId || "",
+        error: "extension_invalidated",
+        message: "Extension was reloaded. Please refresh the page.",
+      }, window.location.origin);
+      return;
+    }
+
     console.log("[ZI appPage] listener entered", data.method);
     var requestId = data.requestId;
     var method = data.method;
@@ -114,34 +154,44 @@
       payload.address = typeof params.address === "string" ? params.address : "";
     }
     console.log("[ZI appPage] forwarding to background", method);
-    chrome.runtime.sendMessage({ type: "ZILLOW_EXTENSION_FORWARD", payload: payload }, function (response) {
-      if (chrome.runtime.lastError) {
-        console.warn("[ZI appPage] response error", chrome.runtime.lastError.message);
-        window.postMessage({
-          type: PAGE_RESPONSE_TYPE,
-          requestId: requestId,
-          error: "extension_error",
-          message: chrome.runtime.lastError.message || "Extension not available",
-        }, window.location.origin);
-        return;
-      }
-      console.log("[ZI appPage] response received from background", method);
-      try {
-        window.postMessage({
-          type: PAGE_RESPONSE_TYPE,
-          requestId: requestId,
-          result: response != null ? response : { ok: false, error: "No response", code: "timeout" },
-        }, window.location.origin);
-        console.log("[ZI appPage] postMessage sent to page");
-      } catch (e) {
-        console.warn("[ZI appPage] error posting to page", e);
-        window.postMessage({
-          type: PAGE_RESPONSE_TYPE,
-          requestId: requestId,
-          error: "bridge_error",
-          message: e && e.message ? e.message : "Failed to send response",
-        }, window.location.origin);
-      }
-    });
+    try {
+      chrome.runtime.sendMessage({ type: "ZILLOW_EXTENSION_FORWARD", payload: payload }, function (response) {
+        if (chrome.runtime.lastError) {
+          console.warn("[ZI appPage] response error", chrome.runtime.lastError.message);
+          window.postMessage({
+            type: PAGE_RESPONSE_TYPE,
+            requestId: requestId,
+            error: "extension_error",
+            message: chrome.runtime.lastError.message || "Extension not available",
+          }, window.location.origin);
+          return;
+        }
+        console.log("[ZI appPage] response received from background", method);
+        try {
+          window.postMessage({
+            type: PAGE_RESPONSE_TYPE,
+            requestId: requestId,
+            result: response != null ? response : { ok: false, error: "No response", code: "timeout" },
+          }, window.location.origin);
+          console.log("[ZI appPage] postMessage sent to page");
+        } catch (e) {
+          console.warn("[ZI appPage] error posting to page", e);
+          window.postMessage({
+            type: PAGE_RESPONSE_TYPE,
+            requestId: requestId,
+            error: "bridge_error",
+            message: e && e.message ? e.message : "Failed to send response",
+          }, window.location.origin);
+        }
+      });
+    } catch (e) {
+      // chrome.runtime.sendMessage threw — context likely invalidated mid-call
+      window.postMessage({
+        type: PAGE_RESPONSE_TYPE,
+        requestId: requestId,
+        error: "extension_invalidated",
+        message: "Extension was reloaded. Please refresh the page.",
+      }, window.location.origin);
+    }
   });
 })();

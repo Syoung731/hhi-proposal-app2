@@ -12,13 +12,12 @@ import { ProjectStatus } from "@/app/generated/prisma";
 
 type Props = {
   projectId: string;
-  slug: string;
   proposalId: string | null;
   status: ProjectStatus;
   title: string;
 };
 
-export function ProjectListActions({ projectId, slug, proposalId, status, title }: Props) {
+export function ProjectListActions({ projectId, proposalId, status, title }: Props) {
   const router = useRouter();
   const [archivePending, setArchivePending] = useState(false);
   const [unarchivePending, setUnarchivePending] = useState(false);
