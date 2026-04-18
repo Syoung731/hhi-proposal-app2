@@ -263,19 +263,29 @@ async function main() {
       timelinePhases: {
         create: [
           {
-            phase: TimelinePhaseType.DESIGN_FEASIBILITY,
-            durationText: "2–3 weeks",
+            phase: TimelinePhaseType.SIGN_CONTRACT,
+            durationText: "",
             sortOrder: 0,
           },
           {
-            phase: TimelinePhaseType.PRECONSTRUCTION,
-            durationText: "2–4 weeks",
+            phase: TimelinePhaseType.START_DESIGN,
+            durationText: "",
             sortOrder: 1,
           },
           {
-            phase: TimelinePhaseType.CONSTRUCTION,
-            durationText: "6–8 weeks",
+            phase: TimelinePhaseType.DESIGN_FEASIBILITY,
+            durationText: "4 to 8 weeks",
             sortOrder: 2,
+          },
+          {
+            phase: TimelinePhaseType.PRECONSTRUCTION,
+            durationText: "3 to 5 weeks",
+            sortOrder: 3,
+          },
+          {
+            phase: TimelinePhaseType.CONSTRUCTION,
+            durationText: "12 to 16 weeks",
+            sortOrder: 4,
           },
         ],
       },

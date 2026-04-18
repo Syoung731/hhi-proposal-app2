@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "Project"
+  ADD COLUMN "retainerEnabled" BOOLEAN NOT NULL DEFAULT true,
+  ADD COLUMN "retainerPercent" DOUBLE PRECISION NOT NULL DEFAULT 0.08,
+  ADD COLUMN "retainerRoundTo" INTEGER NOT NULL DEFAULT 1000,
+  ADD COLUMN "retainerOverride" INTEGER;

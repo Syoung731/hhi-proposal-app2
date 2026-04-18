@@ -79,6 +79,12 @@ model Project {
   rendrLinkedAt            DateTime?
   rendrImportedAt          DateTime?
 
+  // Design/Feasibility Retainer (shown on investment + retainer slides)
+  retainerEnabled          Boolean              @default(true)
+  retainerPercent          Float                @default(0.08)
+  retainerRoundTo          Int                  @default(1000)
+  retainerOverride         Int?
+
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])
@@ -188,6 +194,21 @@ model Room {
   scopeQA              Json?
   estimateStaleReason  String?
   bucket               SectionBucket           @default(BASE)
+  // Structured measurement fields (from Rendr LiDAR or manual entry)
+  wallsSF              Float?
+  ceilingSF            Float?
+  perimeterLF          Float?
+  paintableSF          Float?
+  windowCount          Int?
+  windowsSF            Float?
+  doorCount            Int?
+  doorsSF              Float?
+  measurementSource    String?                 // 'rendr' | 'transcript' | 'manual'
+  rendrCeilingHeightFt Float?                  // Ceiling height from Rendr geometry (preserved)
+  // Rendr room mapping (persists the import pairing)
+  rendrRoomMappings    Json?                   // [{ index: number, label: string }]
+  // Kitchen/Bath structured detail (Phase 7B will populate)
+  roomDetail           Json?
   media                     Media[]
   subAreas                 RoomSubArea[]
   project                   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -277,14 +298,19 @@ model Media {
 }
 
 model TimelinePhase {
-  id           String            @id @default(cuid())
-  projectId    String
-  phase        TimelinePhaseType
-  durationText String            @default("")
-  sortOrder    Int               @default(0)
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id                  String            @id @default(cuid())
+  projectId           String
+  phase               TimelinePhaseType
+  /// Per-project override for the canonical phase name. Null = use default copy.
+  nameOverride        String?
+  /// Per-project override for the canonical phase description. Null = use default copy.
+  descriptionOverride String?
+  /// Editable duration text (e.g. "4 to 8 weeks"). Empty for milestone rows.
+  durationText        String            @default("")
+  sortOrder           Int               @default(0)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  project             Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([projectId, sortOrder])
@@ -357,6 +383,8 @@ enum RenderStatus {
 }
 
 enum TimelinePhaseType {
+  SIGN_CONTRACT
+  START_DESIGN
   DESIGN_FEASIBILITY
   PRECONSTRUCTION
   CONSTRUCTION
