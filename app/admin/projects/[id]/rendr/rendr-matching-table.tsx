@@ -5,17 +5,35 @@ import { fuzzyMatchRooms, type RoomMatch } from "@/app/lib/rendr/roomMatcher";
 import type { ImperialTakeoffData } from "@/app/lib/rendr/types";
 
 type AppRoom = { id: string; name: string };
+type SectionTypeOption = { id: string; name: string; category: string };
+
+/** Extended mapping: maps a Rendr room to either an existing section OR a section type (creates new). */
+export type ExtendedMapping = {
+  rendrRoomIndex: number;
+  floorSF: number;
+} & (
+  | { appRoomId: string; sectionTypeId?: undefined; sectionTypeName?: undefined }
+  | { appRoomId?: undefined; sectionTypeId: string; sectionTypeName: string }
+);
 
 type Props = {
   takeoffData: ImperialTakeoffData;
   appRooms: AppRoom[];
+  sectionTypes: SectionTypeOption[];
   projectId: string;
-  onConfirm: (mappings: { rendrRoomIndex: number; appRoomId: string; floorSF: number }[]) => void;
+  onConfirm: (mappings: ExtendedMapping[]) => void;
   onCancel: () => void;
 };
 
-export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm, onCancel }: Props) {
-  const [matches, setMatches] = useState<RoomMatch[]>([]);
+/** Internal match state — extends RoomMatch with optional section type target. */
+type ExtendedMatch = RoomMatch & {
+  /** When mapped to a section type instead of an existing room */
+  sectionTypeId?: string | null;
+  sectionTypeName?: string | null;
+};
+
+export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projectId, onConfirm, onCancel }: Props) {
+  const [matches, setMatches] = useState<ExtendedMatch[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [skipUnmatched, setSkipUnmatched] = useState(true);
   const [importing, setImporting] = useState(false);
@@ -32,7 +50,7 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
     );
     setMatches(fuzzyResults);
 
-    // Trigger AI matching for unresolved
+    // Trigger AI matching for unresolved (only if existing sections exist)
     const unmatched = fuzzyResults.filter((m) => m.confidence === "unmatched");
     if (unmatched.length > 0 && appRooms.length > 0) {
       runAiMatching(unmatched, fuzzyResults);
@@ -74,6 +92,8 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
               appRoomName: appRoom.name,
               confidence: aiMatch.confidence >= 0.7 ? "suggested" : "unmatched",
               matchMethod: "ai" as const,
+              sectionTypeId: null,
+              sectionTypeName: null,
             };
           }),
         );
@@ -85,16 +105,39 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
     }
   };
 
-  const handleRoomSelect = (rendrIdx: number, roomId: string | null) => {
+  // Handle dropdown selection — supports both existing rooms and section types
+  const handleRoomSelect = (rendrIdx: number, value: string | null) => {
     setMatches((prev) =>
       prev.map((m) => {
         if (m.rendrRoomIndex !== rendrIdx) return m;
-        if (!roomId) return { ...m, appRoomId: null, appRoomName: null, confidence: "unmatched", matchMethod: "manual" };
+        if (!value) {
+          return { ...m, appRoomId: null, appRoomName: null, sectionTypeId: null, sectionTypeName: null, confidence: "unmatched", matchMethod: "manual" };
+        }
+        // Parse prefixed value
+        if (value.startsWith("type:")) {
+          const rest = value.slice(5);
+          const sepIdx = rest.indexOf(":");
+          const typeId = rest.slice(0, sepIdx);
+          const typeName = rest.slice(sepIdx + 1);
+          return {
+            ...m,
+            appRoomId: null,
+            appRoomName: typeName,
+            sectionTypeId: typeId,
+            sectionTypeName: typeName,
+            confidence: "high" as const,
+            matchMethod: "manual" as const,
+          };
+        }
+        // Existing room — value is "room:{id}"
+        const roomId = value.startsWith("room:") ? value.slice(5) : value;
         const room = appRooms.find((r) => r.id === roomId);
         return {
           ...m,
           appRoomId: roomId,
           appRoomName: room?.name ?? null,
+          sectionTypeId: null,
+          sectionTypeName: null,
           confidence: "high" as const,
           matchMethod: "manual" as const,
         };
@@ -104,20 +147,50 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
 
   const handleConfirm = async () => {
     setImporting(true);
-    const mappings = matches
-      .filter((m) => m.appRoomId)
-      .filter((m) => !skipUnmatched || m.confidence !== "unmatched" || m.appRoomId)
-      .filter((m) => m.appRoomId !== null)
-      .map((m) => ({
-        rendrRoomIndex: m.rendrRoomIndex,
-        appRoomId: m.appRoomId!,
-        floorSF: takeoffData.rooms[m.rendrRoomIndex]?.takeoff?.floorSF ?? 0,
-      }));
+    const mappings: ExtendedMapping[] = matches
+      .filter((m) => m.appRoomId || m.sectionTypeId)
+      .filter((m) => !skipUnmatched || m.confidence !== "unmatched" || m.appRoomId || m.sectionTypeId)
+      .map((m) => {
+        const base = {
+          rendrRoomIndex: m.rendrRoomIndex,
+          floorSF: takeoffData.rooms[m.rendrRoomIndex]?.takeoff?.floorSF ?? 0,
+        };
+        if (m.sectionTypeId) {
+          return { ...base, sectionTypeId: m.sectionTypeId, sectionTypeName: m.sectionTypeName! };
+        }
+        return { ...base, appRoomId: m.appRoomId! };
+      });
     await onConfirm(mappings);
     setImporting(false);
   };
 
-  const usedRoomIds = new Set(matches.filter((m) => m.appRoomId).map((m) => m.appRoomId));
+  // Count how many Rendr rooms map to each target
+  const targetMappingCounts = new Map<string, number>();
+  for (const m of matches) {
+    const key = m.sectionTypeId ? `type:${m.sectionTypeId}` : m.appRoomId ? `room:${m.appRoomId}` : null;
+    if (key) targetMappingCounts.set(key, (targetMappingCounts.get(key) || 0) + 1);
+  }
+
+  // Get the labels of other Rendr rooms mapped to the same target
+  const getOtherMappedLabels = (rendrIdx: number, m: ExtendedMatch): string[] => {
+    if (!m.appRoomId && !m.sectionTypeId) return [];
+    return matches
+      .filter((other) => {
+        if (other.rendrRoomIndex === rendrIdx) return false;
+        if (m.sectionTypeId) return other.sectionTypeId === m.sectionTypeId;
+        return other.appRoomId === m.appRoomId;
+      })
+      .map((other) => other.rendrLabel);
+  };
+
+  // Build the current select value for a match
+  const selectValue = (m: ExtendedMatch): string => {
+    if (m.sectionTypeId) return `type:${m.sectionTypeId}:${m.sectionTypeName}`;
+    if (m.appRoomId) return `room:${m.appRoomId}`;
+    return "";
+  };
+
+  const mappedCount = matches.filter((m) => m.appRoomId || m.sectionTypeId).length;
 
   return (
     <div className="space-y-4">
@@ -133,6 +206,13 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
         )}
       </div>
 
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        Multiple Rendr rooms can be mapped to the same section (e.g., &quot;Primary Bathroom&quot; + &quot;Toilet Room&quot; → &quot;Primary Bath&quot;). Measurements will be combined automatically.
+        {appRooms.length === 0 && sectionTypes.length > 0 && (
+          <> No sections exist yet — select a section type to create one with Rendr measurements.</>
+        )}
+      </p>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -146,6 +226,9 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
           <tbody>
             {matches.map((m) => {
               const room = takeoffData.rooms[m.rendrRoomIndex];
+              const otherLabels = getOtherMappedLabels(m.rendrRoomIndex, m);
+              const isCombined = otherLabels.length > 0;
+
               return (
                 <tr key={m.rendrRoomIndex} className="border-b border-zinc-100 dark:border-zinc-800">
                   <td className="py-3 pr-4">
@@ -170,22 +253,40 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
                   </td>
                   <td className="py-3">
                     <select
-                      value={m.appRoomId ?? ""}
+                      value={selectValue(m)}
                       onChange={(e) => handleRoomSelect(m.rendrRoomIndex, e.target.value || null)}
                       className="w-full max-w-xs rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
                     >
-                      <option value="">— Select Room —</option>
-                      {appRooms.map((r) => (
-                        <option
-                          key={r.id}
-                          value={r.id}
-                          disabled={usedRoomIds.has(r.id) && m.appRoomId !== r.id}
-                        >
-                          {r.name}
-                          {usedRoomIds.has(r.id) && m.appRoomId !== r.id ? " (mapped)" : ""}
+                      <option value="">— Select Section —</option>
+                      {appRooms.length > 0 && appRooms.map((r) => {
+                        const key = `room:${r.id}`;
+                        const count = targetMappingCounts.get(key) ?? 0;
+                        const isMappedElsewhere = count > 0 && selectValue(m) !== `room:${r.id}`;
+                        return (
+                          <option key={r.id} value={`room:${r.id}`}>
+                            {r.name}{isMappedElsewhere ? ` (${count} mapped)` : ""}
+                          </option>
+                        );
+                      })}
+                      {sectionTypes.length > 0 && (
+                        <option disabled value="">— Create new section —</option>
+                      )}
+                      {sectionTypes.map((st) => (
+                        <option key={`type-${st.id}`} value={`type:${st.id}:${st.name}`}>
+                          + {st.name}
                         </option>
                       ))}
                     </select>
+                    {m.sectionTypeId && (
+                      <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                        Creates new section
+                      </p>
+                    )}
+                    {isCombined && (
+                      <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">
+                        Combined with: {otherLabels.join(", ")}
+                      </p>
+                    )}
                   </td>
                 </tr>
               );
@@ -213,10 +314,10 @@ export function RendrMatchingTable({ takeoffData, appRooms, projectId, onConfirm
           </button>
           <button
             onClick={handleConfirm}
-            disabled={importing || matches.filter((m) => m.appRoomId).length === 0}
+            disabled={importing || mappedCount === 0}
             className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            {importing ? "Importing..." : `Confirm & Import (${matches.filter((m) => m.appRoomId).length} rooms)`}
+            {importing ? "Importing..." : `Confirm & Import (${mappedCount} rooms)`}
           </button>
         </div>
       </div>

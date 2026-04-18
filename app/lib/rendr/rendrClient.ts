@@ -8,6 +8,7 @@ import { decryptSecret } from "@/app/lib/integration-secrets";
 import type {
   RendrProjectsResponse,
   RendrProject,
+  RendrSpaceDetail,
   RendrSpacesResponse,
   RendrTakeoffData,
 } from "./types";
@@ -25,7 +26,7 @@ async function getRendrCredentials(): Promise<{ clientId: string; clientSecret: 
   const record = await prisma.integrationSetting.findUnique({
     where: { service: "rendr" },
   });
-  if (!record || !record.isActive) return null;
+  if (!record) return null;
   try {
     const clientSecret = decryptSecret(record.clientSecret);
     return { clientId: record.clientId, clientSecret };
@@ -85,20 +86,97 @@ async function rendrGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Internal: make an authenticated POST to Rendr API. */
+async function rendrPost<T>(path: string, body: unknown): Promise<T> {
+  const token = await getRendrToken();
+  const url = `${RENDR_BASE_URL}${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Rendr API POST ${path} failed (${res.status}): ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Internal: make an authenticated PUT to Rendr API. */
+async function rendrPut<T>(path: string, body: unknown): Promise<T> {
+  const token = await getRendrToken();
+  const url = `${RENDR_BASE_URL}${path}`;
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Rendr API PUT ${path} failed (${res.status}): ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 // ---------------------------------------------------------------------------
 // Public API functions
 // ---------------------------------------------------------------------------
 
-export async function listRendrProjects(page = 1): Promise<RendrProjectsResponse> {
-  return rendrGet<RendrProjectsResponse>(`/api/v3/projects/?page=${page}`);
+export async function listRendrProjects(page = 1, pageSize = 10): Promise<RendrProjectsResponse> {
+  return rendrGet<RendrProjectsResponse>(`/api/v3/projects/?page=${page}&page_size=${pageSize}`);
 }
 
 export async function getRendrProject(projectId: number): Promise<RendrProject> {
   return rendrGet<RendrProject>(`/api/v3/projects/${projectId}/`);
 }
 
-export async function listRendrSpaces(page = 1): Promise<RendrSpacesResponse> {
-  return rendrGet<RendrSpacesResponse>(`/api/v3/spaces/?page=${page}`);
+export async function listRendrSpaces(page = 1, pageSize = 10): Promise<RendrSpacesResponse> {
+  return rendrGet<RendrSpacesResponse>(`/api/v3/spaces/?page=${page}&page_size=${pageSize}`);
+}
+
+/** Get full space detail including photos. */
+export async function getRendrSpaceDetail(spaceId: number): Promise<RendrSpaceDetail> {
+  return rendrGet<RendrSpaceDetail>(`/api/v3/spaces/${spaceId}/`);
+}
+
+/** Get the full JSON geometry blob for a space (walls, rooms, doors, objects, etc.). */
+export async function getRendrSpaceGeometry(spaceId: number): Promise<unknown> {
+  return rendrGet<unknown>(`/api/v3/spaces/json/data/${spaceId}/`);
+}
+
+/** Proxy a Rendr photo URL (requires auth). */
+export async function streamRendrPhoto(photoUrl: string): Promise<Response> {
+  const token = await getRendrToken();
+  return fetch(photoUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** Create a new Rendr project, optionally with spaces assigned. */
+export async function createRendrProject(
+  name: string,
+  description: string,
+  spaceIds: string[] = [],
+): Promise<RendrProject> {
+  return rendrPost<RendrProject>("/api/v3/projects/", {
+    name,
+    description,
+    space_ids: spaceIds,
+  });
+}
+
+/** Add spaces to an existing Rendr project. */
+export async function addSpacesToProject(
+  projectId: number,
+  spaceIds: string[],
+): Promise<RendrProject> {
+  return rendrPut<RendrProject>(`/api/v3/projects/${projectId}/spaces/`, spaceIds);
 }
 
 export async function getRendrTakeoffData(spaceId: number): Promise<RendrTakeoffData> {
