@@ -53,3 +53,6 @@ next-env.d.ts
 
 # Claude Code local settings (not committed)
 .claude/settings.local.json
+
+# Claude Code runtime
+.claude/scheduled_tasks.lock
