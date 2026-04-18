@@ -13,6 +13,7 @@ import { getPresignedUploadUrl, uploadBuffer } from "@/app/lib/s3";
 import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
 import { callClaude } from "@/app/lib/ai/model";
+import { getRendrSpaceDetail, streamRendrPhoto } from "@/app/lib/rendr/rendrClient";
 import type { HeroPresetKey } from "./hero-presets";
 
 export async function getPresignedUploadUrlAction(
@@ -272,6 +273,103 @@ export async function updateMediaRoomAction(
   return {};
 }
 
+/**
+ * Import selected Rendr photos into the project as EXISTING Media records.
+ * Each imported photo is tagged with "rendr" and "rendr-photo:<photoId>" so we can
+ * detect re-imports and filter the Rendr Photos view.
+ * Assignment: if roomId is set → SECTION; if frontPage=true → FRONT_PAGE (roomId=null); else UNASSIGNED.
+ */
+export async function importRendrPhotosAction(
+  projectId: string,
+  photoIds: string[],
+  target: { roomId: string | null; frontPage: boolean },
+): Promise<{ imported: number; skipped: number; error?: string }> {
+  await requireAdmin();
+  if (!photoIds.length) return { imported: 0, skipped: 0 };
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, rendrSpaceId: true },
+  });
+  if (!project) return { imported: 0, skipped: 0, error: "Project not found" };
+  if (!project.rendrSpaceId) return { imported: 0, skipped: 0, error: "Project is not linked to a Rendr space" };
+
+  let spaceDetail;
+  try {
+    spaceDetail = await getRendrSpaceDetail(project.rendrSpaceId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Failed to load Rendr space";
+    return { imported: 0, skipped: 0, error: msg };
+  }
+  const photoById = new Map(spaceDetail.photos.map((p) => [p.id, p]));
+
+  const placement: MediaPlacement =
+    target.roomId != null
+      ? MediaPlacement.SECTION
+      : target.frontPage
+        ? MediaPlacement.FRONT_PAGE
+        : MediaPlacement.UNASSIGNED;
+
+  // Use a single starting sortOrder baseline per target bucket to keep order stable.
+  const maxOrder = await prisma.media
+    .aggregate({
+      where: {
+        projectId,
+        type: MediaType.EXISTING,
+        ...(target.roomId ? { roomId: target.roomId } : { roomId: null }),
+      },
+      _max: { sortOrder: true },
+    })
+    .then((r) => r._max.sortOrder ?? -1);
+
+  let imported = 0;
+  let skipped = 0;
+  let nextOrder = maxOrder + 1;
+  for (const photoId of photoIds) {
+    const photo = photoById.get(photoId);
+    if (!photo) {
+      skipped++;
+      continue;
+    }
+    try {
+      const res = await streamRendrPhoto(photo.space_photo_url);
+      if (!res.ok) {
+        skipped++;
+        continue;
+      }
+      const contentType = res.headers.get("Content-Type") || "image/jpeg";
+      const extFromType =
+        contentType.includes("png") ? "png" :
+        contentType.includes("webp") ? "webp" :
+        contentType.includes("heic") ? "heic" :
+        "jpg";
+      const arrayBuf = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuf);
+      const fileKey = `projects/${projectId}/rendr-${Date.now()}-${Math.random().toString(36).slice(2)}.${extFromType}`;
+      const { publicUrl } = await uploadBuffer(fileKey, buf, contentType);
+      await prisma.media.create({
+        data: {
+          projectId,
+          roomId: target.roomId ?? undefined,
+          kind: MediaKind.OTHER,
+          type: MediaType.EXISTING,
+          url: publicUrl,
+          fileKey,
+          caption: null,
+          tags: ["rendr", `rendr-photo:${photoId}`],
+          sortOrder: nextOrder++,
+          placement,
+        },
+      });
+      imported++;
+    } catch {
+      skipped++;
+    }
+  }
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return { imported, skipped };
+}
+
 export async function deleteMediaAction(projectId: string, mediaId: string): Promise<{ error?: string }> {
   await requireAdmin();
   const media = await prisma.media.findFirst({
@@ -292,8 +390,40 @@ export async function deleteMediaAction(projectId: string, mediaId: string): Pro
   }
   // Remove this media from all section presentation configs (beforeSelectedMediaIds, etc.) so no broken refs remain.
   await removeMediaIdFromPresentationConfig(projectId, mediaId);
-  // Delete child renderings (versions) first to avoid orphans (schema uses onDelete: SetNull)
-  await prisma.media.deleteMany({ where: { parentMediaId: mediaId } });
+  // For a RENDERING root with children (versions), promote the oldest child to the new root
+  // and reparent the remaining children to it, rather than cascading. Deleting one version
+  // must not take the rest of the concept with it.
+  if (media.type === MediaType.RENDERING && media.parentMediaId == null) {
+    const children = await prisma.media.findMany({
+      where: { parentMediaId: mediaId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (children.length > 0) {
+      const newRootId = children[0].id;
+      await prisma.media.update({
+        where: { id: newRootId },
+        data: { parentMediaId: null },
+      });
+      const siblingIds = children.slice(1).map((c) => c.id);
+      if (siblingIds.length > 0) {
+        await prisma.media.updateMany({
+          where: { id: { in: siblingIds } },
+          data: { parentMediaId: newRootId },
+        });
+      }
+    }
+  } else if (media.type === MediaType.RENDERING && media.parentMediaId != null) {
+    // Deleting a non-root version: reparent any grandchildren up to this node's parent so they
+    // stay in the same concept group. (UI tree is depth-2 in practice, but defensive.)
+    await prisma.media.updateMany({
+      where: { parentMediaId: mediaId },
+      data: { parentMediaId: media.parentMediaId },
+    });
+  } else {
+    // Non-rendering media: original cascade (EXISTING/HERO don't have version trees).
+    await prisma.media.deleteMany({ where: { parentMediaId: mediaId } });
+  }
   await prisma.media.delete({ where: { id: mediaId } });
   if (media.type === MediaType.HERO) {
     await prisma.project.update({

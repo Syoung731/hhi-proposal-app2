@@ -10,6 +10,7 @@ import {
   deleteAllRoomsAction,
   reorderRoomsAction,
   generateRoomsFromTranscriptAction,
+  checkRendrAvailable,
   updateRoomScopesFromTranscriptAction,
   rewriteRoomScopeAction,
   mergeRoomsWithAiAction,
@@ -20,7 +21,9 @@ import {
   updateRoomManualPriceAction,
   updateProjectDefaultCeilingHeightAction,
   updateRoomTemplateAction,
+  updateRoomDetailAction,
 } from "./actions";
+import { classifyRoomForDetail } from "@/app/lib/room-classification";
 import { updateProjectStylePresetAction } from "../overview/actions";
 import { getRoomTypes } from "@/app/admin/settings/actions";
 import { NewRoomTypesModal } from "./new-room-types-modal";
@@ -250,7 +253,7 @@ function getSectionPriceRangeDisplay(
     const { unitLow, unitHigh } = unitRange;
 
     if (basis === "PER_SF") {
-      const sqFt = getSqFt(room);
+      const sqFt = getCombinedSqFt(room);
       if (sqFt == null || sqFt <= 0) {
         return {
           kind: "needDimensions",
@@ -277,7 +280,7 @@ function getSectionPriceRangeDisplay(
 
   // 2) No SectionType: fall back to RoomType ($/SF) if set
   if (room.roomTypeId && rt) {
-    const sqFt = getSqFt(room);
+    const sqFt = getCombinedSqFt(room);
     if (sqFt == null) {
       return {
         kind: "needDimensions",
@@ -603,6 +606,18 @@ type Room = {
   scopeQA?: unknown;
   estimateStaleReason?: string | null;
   roomTemplateId?: string | null;
+  wallsSF?: number | null;
+  ceilingSF?: number | null;
+  perimeterLF?: number | null;
+  paintableSF?: number | null;
+  windowCount?: number | null;
+  windowsSF?: number | null;
+  doorCount?: number | null;
+  doorsSF?: number | null;
+  measurementSource?: string | null;
+  rendrCeilingHeightFt?: number | null;
+  rendrRoomMappings?: { index: number; label: string }[] | null;
+  roomDetail?: Record<string, unknown> | null;
   subAreas?: {
     id: string;
     name: string;
@@ -620,15 +635,221 @@ type StylePresetOption = { id: string; name: string };
 type SectionTypeOption = { id: string; name: string; category: string; defaultMeasurementMode: string; defaultEstimateUnit: string; customUnitLabel: string | null };
 type RoomTemplateOption = { id: string; name: string; displayName?: string | null; active: boolean };
 
+/** Measurement source indicator badge for section cards. */
+function MeasurementSourceBadge({ room }: { room: Room }) {
+  const source = room.measurementSource;
+  const mappings = room.rendrRoomMappings as { index: number; label: string }[] | null;
+
+  if (!source && !mappings?.length) return null;
+
+  const badge = (() => {
+    if (source === "rendr") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+          Rendr
+        </span>
+      );
+    }
+    if (source === "transcript") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          Transcript
+        </span>
+      );
+    }
+    if (source === "manual") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+          Manual
+        </span>
+      );
+    }
+    return null;
+  })();
+
+  const rendrLink = mappings?.length ? (
+    <span className="text-xs text-zinc-400 dark:text-zinc-500" title={mappings.map((m) => m.label).join(" + ")}>
+      Linked to Rendr: {mappings.map((m) => m.label).join(" + ")}
+    </span>
+  ) : null;
+
+  return (
+    <>
+      {badge}
+      {rendrLink}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rendr Data Grid — compact display of LiDAR measurements + fixtures
+// ---------------------------------------------------------------------------
+
+function RendrDataGrid({ room, projectId }: { room: Room; projectId: string }) {
+  if (room.measurementSource !== "rendr") return null;
+
+  const rendrCeilingFt = room.rendrCeilingHeightFt ?? null;
+  const detail = room.roomDetail as Record<string, unknown> | null;
+  const roomType = classifyRoomForDetail(room.name, room.sectionType?.name);
+
+  // Local state for editable recommended values
+  const buildRecValues = useCallback(() => {
+    if (!detail) return {};
+    const rec: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(detail)) {
+      if (k.endsWith("Recommended") || k === "recommendedSource") rec[k] = v;
+    }
+    return rec;
+  }, [detail]);
+  const [recValues, setRecValues] = useState<Record<string, unknown>>(buildRecValues);
+  const [saving, setSaving] = useState(false);
+
+  // Sync recValues when room.roomDetail changes (e.g., after AI recalculation)
+  useEffect(() => {
+    setRecValues(buildRecValues());
+  }, [buildRecValues]);
+
+  const saveRecommended = useCallback(async (key: string, value: unknown) => {
+    const updated = { ...detail, ...recValues, [key]: value, recommendedSource: "manual" };
+    setRecValues((prev) => ({ ...prev, [key]: value, recommendedSource: "manual" }));
+    setSaving(true);
+    try {
+      await updateRoomDetailAction(projectId, room.id, updated);
+    } finally {
+      setSaving(false);
+    }
+  }, [detail, recValues, projectId, room.id]);
+
+  const getRec = (key: string) => recValues[key] ?? detail?.[key] ?? null;
+
+  // Number input for recommended values
+  const RecNum = ({ label, existKey, recKey, unit }: { label: string; existKey: string; recKey: string; unit?: string }) => {
+    const existVal = detail?.[existKey] as number | null | undefined;
+    const recVal = getRec(recKey) as number | null | undefined;
+    if (existVal == null && recVal == null) return null;
+    return (
+      <tr>
+        <td className="pr-3 py-0.5 text-zinc-500 dark:text-zinc-400">{label}{unit ? ` (${unit})` : ""}</td>
+        <td className="pr-3 py-0.5 text-center">{existVal ?? "—"}</td>
+        <td className="py-0.5">
+          <input
+            type="number"
+            step="any"
+            className="w-16 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-center text-xs dark:border-zinc-600 dark:bg-zinc-800"
+            defaultValue={recVal ?? ""}
+            onBlur={(e) => {
+              const v = e.target.value.trim() === "" ? null : Number(e.target.value);
+              if (v !== recVal) saveRecommended(recKey, v);
+            }}
+          />
+        </td>
+      </tr>
+    );
+  };
+
+  // Boolean checkbox for recommended values
+  const RecBool = ({ label, existKey, recKey }: { label: string; existKey: string; recKey: string }) => {
+    const existVal = detail?.[existKey] as boolean | null | undefined;
+    const recVal = getRec(recKey) as boolean | null | undefined;
+    if (existVal == null && recVal == null) return null;
+    return (
+      <tr>
+        <td className="pr-3 py-0.5 text-zinc-500 dark:text-zinc-400">{label}</td>
+        <td className="pr-3 py-0.5 text-center">{existVal ? "\u2713" : "—"}</td>
+        <td className="py-0.5 text-center">
+          <input
+            type="checkbox"
+            checked={recVal === true}
+            onChange={(e) => saveRecommended(recKey, e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-zinc-300 text-orange-500 focus:ring-orange-500 dark:border-zinc-600"
+          />
+        </td>
+      </tr>
+    );
+  };
+
+  const recSource = (getRec("recommendedSource") as string) ?? detail?.recommendedSource;
+
+  return (
+    <div className="mt-2 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/50">
+      <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+        Rendr Data
+        {saving && <span className="text-orange-500 normal-case font-normal">saving...</span>}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-zinc-600 dark:text-zinc-400">
+        {room.areaSqFt ? <span>Floor: {room.areaSqFt} SF</span> : null}
+        {room.wallsSF ? <span>Walls: {room.wallsSF} SF</span> : null}
+        {room.ceilingSF ? <span>Ceiling: {room.ceilingSF} SF</span> : null}
+        {room.perimeterLF ? <span>Perimeter: {room.perimeterLF} LF</span> : null}
+        {room.paintableSF ? <span>Paintable: {room.paintableSF} SF</span> : null}
+        {room.windowCount ? <span>Windows: {room.windowCount}{room.windowsSF ? ` (${room.windowsSF} SF)` : ""}</span> : null}
+        {room.doorCount ? <span>Doors: {room.doorCount}{room.doorsSF ? ` (${room.doorsSF} SF)` : ""}</span> : null}
+        {rendrCeilingFt ? <span>Ceiling Ht: {rendrCeilingFt.toFixed(1)} ft</span> : null}
+      </div>
+      {roomType && detail && (
+        <table className="mt-2 text-xs">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              <th className="pr-3 pb-0.5 text-left font-semibold">Fixtures</th>
+              <th className="pr-3 pb-0.5 text-center font-semibold">Existing</th>
+              <th className="pb-0.5 text-center font-semibold">
+                Recommended
+                {recSource && (
+                  <span className="ml-1 normal-case font-normal">
+                    ({recSource === "manual" ? "edited" : recSource === "rendr" ? "Rendr" : "AI"})
+                  </span>
+                )}
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-zinc-600 dark:text-zinc-400">
+            {roomType === "kitchen" && (
+              <>
+                <RecNum label="Base Cabinets" existKey="baseCabinetCountExisting" recKey="baseCabinetCountRecommended" />
+                <RecNum label="Base Cab LF" existKey="baseCabinetLfExisting" recKey="baseCabinetLfRecommended" unit="LF" />
+                <RecNum label="Wall Cabinets" existKey="wallCabinetCountExisting" recKey="wallCabinetCountRecommended" />
+                <RecNum label="Wall Cab LF" existKey="wallCabinetLfExisting" recKey="wallCabinetLfRecommended" unit="LF" />
+                <RecNum label="Countertop" existKey="countertopSfExisting" recKey="countertopSfRecommended" unit="SF" />
+                <RecNum label="Backsplash" existKey="backsplashSfExisting" recKey="backsplashSfRecommended" unit="SF" />
+                <RecNum label="Sinks" existKey="sinkCountExisting" recKey="sinkCountRecommended" />
+                <RecBool label="Stove" existKey="hasStoveExisting" recKey="hasStoveRecommended" />
+                <RecBool label="Oven" existKey="hasOvenExisting" recKey="hasOvenRecommended" />
+                <RecBool label="Fridge" existKey="hasFridgeExisting" recKey="hasFridgeRecommended" />
+                <RecBool label="Dishwasher" existKey="hasDishwasherExisting" recKey="hasDishwasherRecommended" />
+              </>
+            )}
+            {roomType === "bathroom" && (
+              <>
+                <RecNum label="Vanity" existKey="vanityCabinetCountExisting" recKey="vanityCabinetCountRecommended" />
+                <RecNum label="Vanity LF" existKey="vanityCabinetLfExisting" recKey="vanityCabinetLfRecommended" unit="LF" />
+                <RecNum label="Countertop" existKey="countertopSfExisting" recKey="countertopSfRecommended" unit="SF" />
+                <RecNum label="Backsplash" existKey="backsplashSfExisting" recKey="backsplashSfRecommended" unit="SF" />
+                <RecNum label="Sinks" existKey="sinkCountExisting" recKey="sinkCountRecommended" />
+                <RecNum label="Toilets" existKey="toiletCountExisting" recKey="toiletCountRecommended" />
+                <RecBool label="Tub" existKey="hasTubExisting" recKey="hasTubRecommended" />
+                <RecBool label="Shower" existKey="hasShowerExisting" recKey="hasShowerRecommended" />
+                <RecBool label="Tub/Shower Combo" existKey="hasTubShowerComboExisting" recKey="hasTubShowerComboRecommended" />
+              </>
+            )}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 /** Auto-match a room name to a template name. */
 function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): string | null {
   const lower = roomName.toLowerCase();
   const rules: [string[], string][] = [
     [["kitchen"], "kitchen"],
-    [["bath", "bathroom"], "bath"],
-    [["laundry"], "laundry"],
+    [["bath", "bathroom", "powder"], "bath"],
+    [["laundry", "mud room", "mudroom"], "laundry"],
     [["closet"], "closet"],
-    [["cope", "admin"], "cope"],
+    [["cope", "admin", "project execution", "overhead"], "cope"],
   ];
   for (const [keywords, match] of rules) {
     if (keywords.some((kw) => lower.includes(kw))) {
@@ -636,7 +857,11 @@ function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): s
       if (t) return t.id;
     }
   }
-  return null;
+  // Default: Standard Room for everything else
+  return templates.find((t) => {
+    const n = t.name.toLowerCase();
+    return n.includes("standard") || n === "general" || n === "standard room";
+  })?.id ?? null;
 }
 
 type Props = {
@@ -675,14 +900,16 @@ function formatPricingProfileLabel(
 }
 
 /** Sq Ft = (lengthIn/12)*(widthIn/12), 1 decimal; "—" if either missing. */
-function sqFtDisplay(lengthIn: number | null | undefined, widthIn: number | null | undefined): string {
+function sqFtDisplay(lengthIn: number | null | undefined, widthIn: number | null | undefined, rendrAreaSqFt?: number | null): string {
+  if (rendrAreaSqFt != null && rendrAreaSqFt > 0) return rendrAreaSqFt.toFixed(1);
   if (lengthIn == null || widthIn == null) return "—";
   const sqFt = (lengthIn / 12) * (widthIn / 12);
   return sqFt.toFixed(1);
 }
 
 /** Perimeter (linear ft) = 2 * ((lengthIn/12) + (widthIn/12)); "—" if length or width missing. */
-function perimeterDisplay(lengthIn: number | null | undefined, widthIn: number | null | undefined): string {
+function perimeterDisplay(lengthIn: number | null | undefined, widthIn: number | null | undefined, rendrPerimeterLF?: number | null): string {
+  if (rendrPerimeterLF != null && rendrPerimeterLF > 0) return rendrPerimeterLF.toFixed(1);
   if (lengthIn == null || widthIn == null) return "—";
   const perimeterFt = 2 * (lengthIn / 12 + widthIn / 12);
   return perimeterFt.toFixed(1);
@@ -692,8 +919,11 @@ function perimeterDisplay(lengthIn: number | null | undefined, widthIn: number |
 function wallSfDisplay(
   lengthIn: number | null | undefined,
   widthIn: number | null | undefined,
-  ceilingHeightIn: number | null | undefined
+  ceilingHeightIn: number | null | undefined,
+  rendrWallsSF?: number | null,
 ): string {
+  // Prefer Rendr direct measurement when available
+  if (rendrWallsSF != null && rendrWallsSF > 0) return rendrWallsSF.toFixed(1);
   if (lengthIn == null || widthIn == null || ceilingHeightIn == null) return "—";
   const perimeterFt = 2 * (lengthIn / 12 + widthIn / 12);
   const wallSf = perimeterFt * (ceilingHeightIn / 12);
@@ -801,65 +1031,133 @@ function RoomDimensionsRow({
   const effectiveWidthIn = effectiveInches(widthStr, room.widthIn);
   const effectiveCeilingHeightIn = effectiveInches(ceilingStr, room.ceilingHeightIn);
 
+  const hasRendr = room.measurementSource === "rendr" || (room.wallsSF != null && room.wallsSF > 0);
+  const isRendrActive = room.measurementSource === "rendr";
+
+  const handleSourceToggle = async (useRendr: boolean) => {
+    const formData = new FormData();
+    formData.set("name", room.name);
+    formData.set("scopeNarrative", room.scopeNarrative ?? "");
+    formData.set("estPricePerSqFt", room.estPricePerSqFt != null ? String(room.estPricePerSqFt) : "");
+    formData.set("lengthIn", lengthStr);
+    formData.set("widthIn", widthStr);
+    formData.set("ceilingHeightIn", useRendr && room.rendrCeilingHeightFt
+      ? formatInchesToFeetInches(Math.round(room.rendrCeilingHeightFt * 12))
+      : ceilingStr);
+    formData.set("sectionTypeId", room.sectionTypeId ?? "");
+    formData.set("origin", room.origin ?? "MANUAL");
+    formData.set("bucket", room.bucket ?? "BASE");
+    formData.set("measurementMode", room.measurementMode ?? "");
+    formData.set("areaSqFt", useRendr && room.areaSqFt != null ? String(room.areaSqFt) : "");
+    formData.set("quantity", room.quantity != null ? String(room.quantity) : "");
+    formData.set("estimateUnit", room.estimateUnit ?? "");
+    formData.set("customUnitLabel", room.customUnitLabel ?? "");
+    formData.set("unitQuantityManualOverride", room.unitQuantityManualOverride ? "true" : "false");
+    if (room.unitQuantityManualOverride && room.unitQuantity != null) {
+      formData.set("unitQuantityOverride", String(room.unitQuantity));
+    }
+    if (room.unitRateLow != null) formData.set("unitRateLow", String(room.unitRateLow));
+    if (room.unitRateTarget != null) formData.set("unitRateTarget", String(room.unitRateTarget));
+    if (room.unitRateHigh != null) formData.set("unitRateHigh", String(room.unitRateHigh));
+    setSaving(true);
+    await updateRoomAction(projectId, room.id, formData);
+    setSaving(false);
+    onSaved();
+  };
+
+  // Metrics based on active source
+  const displaySqFt = isRendrActive
+    ? (room.areaSqFt != null ? String(room.areaSqFt) : "—")
+    : sqFtDisplay(effectiveLengthIn, effectiveWidthIn);
+  const displayPerimeter = isRendrActive && room.perimeterLF
+    ? room.perimeterLF.toFixed(1)
+    : perimeterDisplay(effectiveLengthIn, effectiveWidthIn);
+  const displayWallSF = isRendrActive && room.wallsSF
+    ? room.wallsSF.toFixed(1)
+    : wallSfDisplay(effectiveLengthIn, effectiveWidthIn, effectiveCeilingHeightIn);
+
   return (
     <div className="mt-2 space-y-1">
+      {/* Row label for Transcript/Manual (only when dual rows) */}
+      {hasRendr && (
+        <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+          Transcript / Manual
+        </div>
+      )}
+      {/* Transcript/Manual dimension inputs */}
       <div className="flex flex-wrap items-center gap-3 gap-y-1">
         <div>
-          <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-            Length
-          </label>
-          <input
-            type="text"
-            value={lengthStr}
-            onChange={(e) => setLengthStr(e.target.value)}
-            onBlur={() => handleBlur("length", lengthStr, setLengthStr)}
-            placeholder="e.g. 12' 6&quot;"
-            className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-            aria-label="Length (ft/in)"
-          />
+          <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Length</label>
+          <input type="text" value={lengthStr} onChange={(e) => setLengthStr(e.target.value)} onBlur={() => handleBlur("length", lengthStr, setLengthStr)} placeholder="e.g. 12' 6&quot;" className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100" aria-label="Length (ft/in)" />
           {errors.length && <p className="text-xs text-red-600 dark:text-red-400">{errors.length}</p>}
         </div>
         <div>
-          <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-            Width
-          </label>
-          <input
-            type="text"
-            value={widthStr}
-            onChange={(e) => setWidthStr(e.target.value)}
-            onBlur={() => handleBlur("width", widthStr, setWidthStr)}
-            placeholder="e.g. 12' 6&quot;"
-            className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-            aria-label="Width (ft/in)"
-          />
+          <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Width</label>
+          <input type="text" value={widthStr} onChange={(e) => setWidthStr(e.target.value)} onBlur={() => handleBlur("width", widthStr, setWidthStr)} placeholder="e.g. 12' 6&quot;" className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100" aria-label="Width (ft/in)" />
           {errors.width && <p className="text-xs text-red-600 dark:text-red-400">{errors.width}</p>}
         </div>
         <div>
-          <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-            Ceiling
-          </label>
-          <input
-            type="text"
-            value={ceilingStr}
-            onChange={(e) => setCeilingStr(e.target.value)}
-            onBlur={() => handleBlur("ceiling", ceilingStr, setCeilingStr)}
-            placeholder="e.g. 9'"
-            className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-            aria-label="Ceiling height (ft/in)"
-          />
+          <label className="mb-0.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Ceiling</label>
+          <input type="text" value={ceilingStr} onChange={(e) => setCeilingStr(e.target.value)} onBlur={() => handleBlur("ceiling", ceilingStr, setCeilingStr)} placeholder="e.g. 9'" className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100" aria-label="Ceiling height (ft/in)" />
           {errors.ceiling && <p className="text-xs text-red-600 dark:text-red-400">{errors.ceiling}</p>}
         </div>
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">
-          Sq Ft: {sqFtDisplay(effectiveLengthIn, effectiveWidthIn)}
-        </span>
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">
-          Perimeter: {perimeterDisplay(effectiveLengthIn, effectiveWidthIn)} LF
-        </span>
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">
-          Wall SF: {wallSfDisplay(effectiveLengthIn, effectiveWidthIn, effectiveCeilingHeightIn)}
-        </span>
+        {!hasRendr && (
+          <>
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">Sq Ft: {sqFtDisplay(effectiveLengthIn, effectiveWidthIn)}</span>
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">Perimeter: {perimeterDisplay(effectiveLengthIn, effectiveWidthIn)} LF</span>
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">Wall SF: {wallSfDisplay(effectiveLengthIn, effectiveWidthIn, effectiveCeilingHeightIn)}</span>
+          </>
+        )}
+        {hasRendr && !isRendrActive && (
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">Sq Ft: {sqFtDisplay(effectiveLengthIn, effectiveWidthIn)}</span>
+        )}
         {saving && <span className="text-xs text-zinc-500 dark:text-zinc-400">Saving…</span>}
       </div>
+      {/* Rendr row */}
+      {hasRendr && (
+        <>
+          <div className="text-[10px] font-medium uppercase tracking-wider text-green-600 dark:text-green-400">
+            Rendr (LiDAR)
+          </div>
+          <div className="flex flex-wrap items-center gap-3 gap-y-1">
+            <div>
+              <label className="mb-0.5 block text-xs font-medium text-zinc-400 dark:text-zinc-500">Area</label>
+              <div className="flex h-[30px] w-24 items-center rounded border border-zinc-200 bg-zinc-50 px-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                {room.areaSqFt ? `${room.areaSqFt} SF` : "—"}
+              </div>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs font-medium text-zinc-400 dark:text-zinc-500">Ceiling</label>
+              <div className="flex h-[30px] w-24 items-center rounded border border-zinc-200 bg-zinc-50 px-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                {room.rendrCeilingHeightFt ? `${room.rendrCeilingHeightFt} ft` : "—"}
+              </div>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs font-medium text-zinc-400 dark:text-zinc-500">Perimeter</label>
+              <div className="flex h-[30px] w-24 items-center rounded border border-zinc-200 bg-zinc-50 px-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                {room.perimeterLF ? `${room.perimeterLF} LF` : "—"}
+              </div>
+            </div>
+          </div>
+          {/* Source selection */}
+          <div className="flex items-center gap-4 text-xs text-zinc-600 dark:text-zinc-400">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name={`source-${room.id}`} checked={!isRendrActive} onChange={() => handleSourceToggle(false)} className="h-3.5 w-3.5 text-zinc-600" />
+              Use Transcript/Manual
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name={`source-${room.id}`} checked={isRendrActive} onChange={() => handleSourceToggle(true)} className="h-3.5 w-3.5 text-green-600" />
+              Use Rendr (LiDAR)
+            </label>
+          </div>
+          {/* Metrics summary */}
+          <div className="flex flex-wrap gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+            <span>Sq Ft: {displaySqFt}</span>
+            <span>Perimeter: {displayPerimeter} LF</span>
+            <span>Wall SF: {displayWallSF}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1095,6 +1393,9 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [updating, setUpdating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showUpdateScopesConfirm, setShowUpdateScopesConfirm] = useState(false);
+  const [showRendrModal, setShowRendrModal] = useState(false);
+  const [rendrRoomCount, setRendrRoomCount] = useState(0);
+  const [includeRendr, setIncludeRendr] = useState(true);
   const [showBulkEstimateModal, setShowBulkEstimateModal] = useState(false);
   const [estimateRefreshKey, setEstimateRefreshKey] = useState(0);
   const [reviewingRoomId, setReviewingRoomId] = useState<string | null>(null);
@@ -1163,19 +1464,39 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
     );
   }
 
-  async function handleGenerateFromTranscript() {
+  async function handleGenerateFromTranscriptClick() {
+    // Check if Rendr is available — show modal if so, otherwise generate directly
+    try {
+      const rendrCheck = await checkRendrAvailable(projectId);
+      if (rendrCheck.hasRendr) {
+        setRendrRoomCount(rendrCheck.roomCount);
+        setIncludeRendr(true);
+        setShowRendrModal(true);
+        return;
+      }
+    } catch {
+      // If check fails, proceed without Rendr
+    }
+    await doGenerateFromTranscript(false);
+  }
+
+  async function doGenerateFromTranscript(withRendr: boolean) {
+    setShowRendrModal(false);
     setGenerating(true);
     setStatusMessage(null);
     setUnmatchedRooms(null);
     try {
-      const result = await generateRoomsFromTranscriptAction(projectId);
+      const result = await generateRoomsFromTranscriptAction(projectId, withRendr);
       router.refresh();
       if (result.error) {
         setStatusMessage(result.error);
       } else {
-        setStatusMessage(
-          `Generated ${result.created} sections. Skipped ${result.skipped} duplicates.`
-        );
+        const parts: string[] = [];
+        if (result.updated > 0) parts.push(`Updated scope on ${result.updated} section(s)`);
+        if (result.created > 0) parts.push(`created ${result.created} new section(s)`);
+        if (result.skipped > 0) parts.push(`skipped ${result.skipped} duplicate(s)`);
+        if (withRendr) parts.push("with Rendr measurements");
+        setStatusMessage(parts.length > 0 ? parts.join(", ") + "." : "No changes made.");
         if (result.unmatchedRooms?.length) {
           setUnmatchedRooms(result.unmatchedRooms);
         }
@@ -1329,11 +1650,11 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           </button>
           <button
             type="button"
-            onClick={handleGenerateFromTranscript}
+            onClick={handleGenerateFromTranscriptClick}
             disabled={generating || updating}
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
-            {generating ? "Generating…" : "Generate sections from transcript"}
+            {generating ? "Generating…" : rooms.some(r => !r.isProjectOverhead && r.origin === "IMPORTED" && r.measurementSource === "rendr") ? "Generate scope from transcript" : "Generate sections from transcript"}
           </button>
           <button
             type="button"
@@ -1408,6 +1729,58 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               </option>
             ))}
           </select>
+        </div>
+      )}
+      {showRendrModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rendr-generate-title"
+        >
+          <div className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+            <h2
+              id="rendr-generate-title"
+              className="text-sm font-medium text-zinc-900 dark:text-zinc-100"
+            >
+              Generate Sections
+            </h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              Rendr scan detected{rendrRoomCount > 0 ? ` with ${rendrRoomCount} rooms` : ""}.
+            </p>
+            <label className="mt-3 flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeRendr}
+                onChange={(e) => setIncludeRendr(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500 dark:border-zinc-600"
+              />
+              <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                <span className="font-medium">Include Rendr measurements</span>
+                <br />
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  The AI will use LiDAR room data (areas, ceiling heights, fixtures)
+                  alongside the transcript for more accurate sections.
+                </span>
+              </span>
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRendrModal(false)}
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => doGenerateFromTranscript(includeRendr)}
+                className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {showUpdateScopesConfirm && (
@@ -1830,6 +2203,7 @@ function StaticRoomCard({
                   return sf != null ? sf.toFixed(2) : "—";
                 })()}
               </span>
+              <MeasurementSourceBadge room={room} />
             </div>
             {/* Three-tier pricing selector */}
             <PricingTierSelector
@@ -1863,6 +2237,7 @@ function StaticRoomCard({
               </div>
             )}
             <RoomSubAreasEditor projectId={projectId} room={room} onSaved={onDimensionsSaved} />
+            <RendrDataGrid room={room} projectId={projectId} />
             {/* AI Estimate Panel — includes template selector + review button in header */}
             {room.estimateStaleReason && (
               <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1.5 rounded mt-2">
@@ -2069,6 +2444,7 @@ function SortableRoomCard({
                     return sf != null ? sf.toFixed(2) : "—";
                   })()}
                 </span>
+                <MeasurementSourceBadge room={room} />
               </div>
               {/* Three-tier pricing selector */}
               <PricingTierSelector
@@ -2102,6 +2478,7 @@ function SortableRoomCard({
                 </div>
               )}
               <RoomSubAreasEditor projectId={projectId} room={room} onSaved={onDimensionsSaved} />
+              <RendrDataGrid room={room} projectId={projectId} />
               {/* AI Estimate Panel — includes template selector + review button in header */}
               {room.estimateStaleReason && (
                 <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1.5 rounded mt-2">
@@ -2551,23 +2928,36 @@ function RoomForm({
             <span className="self-center text-sm text-zinc-500 dark:text-zinc-400">
               Sq Ft: {sqFtDisplay(
                 effectiveInches(lengthStr, room.lengthIn),
-                effectiveInches(widthStr, room.widthIn)
+                effectiveInches(widthStr, room.widthIn),
+                room.measurementSource === "rendr" ? undefined : room.areaSqFt,
               )}
             </span>
             <span className="self-center text-sm text-zinc-500 dark:text-zinc-400">
               Perimeter: {perimeterDisplay(
                 effectiveInches(lengthStr, room.lengthIn),
-                effectiveInches(widthStr, room.widthIn)
+                effectiveInches(widthStr, room.widthIn),
+                room.perimeterLF,
               )} LF
             </span>
             <span className="self-center text-sm text-zinc-500 dark:text-zinc-400">
               Wall SF: {wallSfDisplay(
                 effectiveInches(lengthStr, room.lengthIn),
                 effectiveInches(widthStr, room.widthIn),
-                effectiveInches(ceilingStr, room.ceilingHeightIn)
+                effectiveInches(ceilingStr, room.ceilingHeightIn),
+                room.wallsSF,
               )}
             </span>
           </div>
+          {/* Rendr reference data */}
+          {room && (room.wallsSF != null || room.rendrCeilingHeightFt != null) && (
+            <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="font-medium text-green-600 dark:text-green-400">Rendr ref:</span>
+              {room.areaSqFt != null && <span>Area: {room.areaSqFt} SF</span>}
+              {room.rendrCeilingHeightFt != null && <span>Ceiling: {room.rendrCeilingHeightFt} ft</span>}
+              {room.perimeterLF != null && <span>Perimeter: {room.perimeterLF} LF</span>}
+              {room.wallsSF != null && <span>Wall SF: {room.wallsSF}</span>}
+            </div>
+          )}
           {dimensionError && (
             <p className="mt-1 text-sm text-red-600 dark:text-red-400">{dimensionError}</p>
           )}

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import type { ProjectForTabs } from "./page";
 import { MediaTab } from "./media/media-tab";
 import { OverviewTab } from "./overview/overview-tab";
@@ -9,6 +8,7 @@ import { TimelineTab } from "./timeline/timeline-tab";
 import { InvestmentTab } from "./investment/investment-tab";
 import { PublishTab } from "./publish/publish-tab";
 import { RendrTab } from "./rendr/rendr-tab";
+import { ProjectTabNav } from "./ProjectTabNav";
 
 /** Build full address string from project Overview fields for Zillow search. */
 function buildProjectAddress(project: {
@@ -30,16 +30,6 @@ function buildProjectAddress(project: {
   if (parts.length === 0) return null;
   return parts.join(", ");
 }
-
-const BASE_TABS: { slug: string; label: string; hrefOnly?: boolean }[] = [
-  { slug: "overview", label: "Overview" },
-  { slug: "rooms", label: "Sections" },
-  { slug: "media", label: "Media" },
-  { slug: "timeline", label: "Timeline" },
-  { slug: "investment", label: "Investment" },
-  { slug: "deck", label: "Deck", hrefOnly: true },
-  { slug: "publish", label: "Preview & Publish" },
-];
 
 type StylePresetForTabs = { id: string; name: string; isActive?: boolean };
 type SectionTypeForTabs = { id: string; name: string; category: string; defaultMeasurementMode: string; defaultEstimateUnit: string; customUnitLabel: string | null };
@@ -67,39 +57,14 @@ export function ProjectTabs({
   rendrConfigured?: boolean;
   children?: React.ReactNode;
 }) {
-  const base = `/admin/projects/${project.id}`;
-
-  // Conditionally include the Rendr tab
-  const TABS = rendrConfigured
-    ? [...BASE_TABS.slice(0, 5), { slug: "rendr", label: "Rendr" }, ...BASE_TABS.slice(5)]
-    : BASE_TABS;
-
   return (
     <div className="space-y-6">
-      <nav className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {TABS.map(({ slug, label, hrefOnly }) => {
-          const href = hrefOnly
-            ? `${base}/${slug}`
-            : slug === "overview"
-              ? base
-              : `${base}?tab=${slug}`;
-          const isActive = currentTab === slug;
-          return (
-            <Link
-              key={slug}
-              href={href}
-              className={
-                isActive
-                  ? "border-b-2 border-zinc-900 px-4 py-3 text-sm font-medium text-zinc-900 dark:border-zinc-100 dark:text-zinc-100"
-                  : "px-4 py-3 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              }
-            >
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
-      <div className={`min-h-[200px] rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${currentTab === "presentation" && children ? "p-0" : "p-8"}`}>
+      <ProjectTabNav
+        projectId={project.id}
+        currentTab={currentTab}
+        rendrConfigured={rendrConfigured}
+      />
+      <div className={`min-h-[200px] rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${(currentTab === "presentation" && children) || currentTab === "rendr" ? "p-0 overflow-hidden" : "p-8"}`}>
         {currentTab === "overview" && (
           <OverviewTab
             projectId={project.id}
@@ -167,6 +132,19 @@ export function ProjectTabs({
               unitRateHigh: r.unitRateHigh ?? null,
               scopeQA: r.scopeQA ?? null,
               estimateStaleReason: r.estimateStaleReason ?? null,
+              roomTemplateId: r.roomTemplateId ?? null,
+              wallsSF: r.wallsSF ?? null,
+              ceilingSF: r.ceilingSF ?? null,
+              perimeterLF: r.perimeterLF ?? null,
+              paintableSF: r.paintableSF ?? null,
+              windowCount: r.windowCount ?? null,
+              windowsSF: r.windowsSF ?? null,
+              doorCount: r.doorCount ?? null,
+              doorsSF: r.doorsSF ?? null,
+              measurementSource: r.measurementSource ?? null,
+              rendrCeilingHeightFt: r.rendrCeilingHeightFt ?? null,
+              rendrRoomMappings: r.rendrRoomMappings as { index: number; label: string }[] | null,
+              roomDetail: r.roomDetail as Record<string, unknown> | null,
               subAreas: (r.subAreas ?? []).map((sa) => ({
                 id: sa.id,
                 name: sa.name,
@@ -175,6 +153,7 @@ export function ProjectTabs({
                 ceilingHeightIn: sa.ceilingHeightIn ?? null,
                 areaSqFt: sa.areaSqFt ?? null,
                 sortOrder: sa.sortOrder,
+                includeInArea: sa.includeInArea ?? true,
               })),
             }))}
             projectQA={project.projectQA ?? null}
@@ -197,6 +176,7 @@ export function ProjectTabs({
             coverHeroImageId={project.coverHeroImageId}
             initialRoomId={initialMediaRoomId}
             projectAddress={buildProjectAddress(project)}
+            rendrSpaceId={project.rendrSpaceId ?? null}
           />
         )}
         {currentTab === "timeline" && (
@@ -205,6 +185,8 @@ export function ProjectTabs({
             phases={project.timelinePhases.map((p) => ({
               id: p.id,
               phase: p.phase,
+              nameOverride: p.nameOverride,
+              descriptionOverride: p.descriptionOverride,
               durationText: p.durationText,
               sortOrder: p.sortOrder,
             }))}
@@ -240,6 +222,12 @@ export function ProjectTabs({
               includeInTotals: i.includeInTotals,
               sortOrder: i.sortOrder,
             }))}
+            retainer={{
+              enabled: project.retainerEnabled,
+              percent: project.retainerPercent,
+              roundTo: project.retainerRoundTo,
+              override: project.retainerOverride,
+            }}
           />
         )}
         {currentTab === "rendr" && rendrConfigured && (
@@ -249,6 +237,7 @@ export function ProjectTabs({
             rendrProjectId={project.rendrProjectId ?? null}
             rendrImportedAt={project.rendrImportedAt?.toISOString() ?? null}
             rooms={project.rooms.map((r) => ({ id: r.id, name: r.name }))}
+            sectionTypes={sectionTypes.map((st) => ({ id: st.id, name: st.name, category: st.category }))}
           />
         )}
         {currentTab === "publish" && (

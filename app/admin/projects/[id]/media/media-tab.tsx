@@ -18,6 +18,7 @@ import {
   markConnectionFailedAction,
   extractRenderChecklistAction,
   cleanupOrphanedRenderingsAction,
+  importRendrPhotosAction,
 } from "./actions";
 import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
@@ -72,6 +73,8 @@ type Props = {
   initialRoomId?: string;
   /** Project property address (Overview) for opening Zillow after direct handshake. */
   projectAddress?: string | null;
+  /** Linked Rendr space id (Project.rendrSpaceId); when set, Rendr Photos section is available. */
+  rendrSpaceId?: number | null;
 };
 
 export type UploadBatchResult = {
@@ -153,6 +156,12 @@ export const ZILLOW_IMPORT_ID = "__zillow_import__";
 export const UNASSIGNED_PHOTOS_ID = "__unassigned_photos__";
 /** Tag used to mark media imported from Zillow; Phase 4 import flow should set this. */
 export const ZILLOW_IMPORT_TAG = "zillow";
+/** Pseudo-section id for the Rendr Photos staging page (not a real room). */
+export const RENDR_PHOTOS_ID = "__rendr_photos__";
+/** Tag used to mark media imported from Rendr. Each imported item also gets `rendr-photo:<photoId>`. */
+export const RENDR_IMPORT_TAG = "rendr";
+/** Prefix used on tags to record the original Rendr photo id, so we can detect re-imports. */
+export const RENDR_PHOTO_TAG_PREFIX = "rendr-photo:";
 
 /** When set (e.g. Chrome Web Store or Edge Add-ons URL), "Install Extension" opens this; otherwise dev: "Open Chrome Extensions" → chrome://extensions. Production TODO: set NEXT_PUBLIC_ZILLOW_EXTENSION_STORE_URL to store listing URL. */
 const ZILLOW_EXTENSION_STORE_URL = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ZILLOW_EXTENSION_STORE_URL ?? null : null;
@@ -673,6 +682,7 @@ export function MediaTab({
   coverHeroImageId = null,
   initialRoomId,
   projectAddress = null,
+  rendrSpaceId = null,
 }: Props) {
   const router = useRouter();
   const roomIds = new Set(rooms.map((r) => r.id));
@@ -725,6 +735,17 @@ export function MediaTab({
   const [selectedZillowIds, setSelectedZillowIds] = useState<Set<string>>(new Set());
   const [zillowAssignRoomId, setZillowAssignRoomId] = useState("");
   const [zillowAssigning, setZillowAssigning] = useState(false);
+  /** Rendr Photos page: list of photos for the project's linked Rendr space, selection, and assignment. */
+  const [rendrPhotos, setRendrPhotos] = useState<
+    { id: string; created?: string; space_photo_thumbnail_url?: string }[]
+  >([]);
+  const [rendrPhotosLoading, setRendrPhotosLoading] = useState(false);
+  const [rendrPhotosError, setRendrPhotosError] = useState<string | null>(null);
+  const [rendrPhotosLoaded, setRendrPhotosLoaded] = useState(false);
+  const [selectedRendrPhotoIds, setSelectedRendrPhotoIds] = useState<Set<string>>(new Set());
+  const [rendrAssignRoomId, setRendrAssignRoomId] = useState("");
+  const [rendrImporting, setRendrImporting] = useState(false);
+  const [rendrImportResult, setRendrImportResult] = useState<string | null>(null);
 
   /** Ref: have we already tried to start direct connection this modal open (avoid double-run). */
   const directStartAttemptedRef = useRef(false);
@@ -829,6 +850,40 @@ export function MediaTab({
     }, DIRECT_CONNECTION_POLL_MS);
     return () => clearInterval(intervalId);
   }, [directStatus, directSessionId]);
+
+  /** Set of Rendr photo ids already imported into this project (derived from tags). */
+  const importedRendrPhotoIds = new Set<string>();
+  for (const m of media) {
+    for (const t of m.tags ?? []) {
+      if (t.startsWith(RENDR_PHOTO_TAG_PREFIX)) {
+        importedRendrPhotoIds.add(t.slice(RENDR_PHOTO_TAG_PREFIX.length));
+      }
+    }
+  }
+
+  /** Lazy-load the Rendr photo list the first time the user opens the Rendr Photos page. */
+  useEffect(() => {
+    if (activeRoomId !== RENDR_PHOTOS_ID) return;
+    if (!rendrSpaceId) return;
+    if (rendrPhotosLoaded || rendrPhotosLoading) return;
+    setRendrPhotosLoading(true);
+    setRendrPhotosError(null);
+    fetch(`/api/rendr/spaces/${rendrSpaceId}/detail`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) {
+          setRendrPhotosError(d.error);
+          setRendrPhotos([]);
+        } else {
+          setRendrPhotos(Array.isArray(d.photos) ? d.photos : []);
+        }
+        setRendrPhotosLoaded(true);
+      })
+      .catch((e) => {
+        setRendrPhotosError(e instanceof Error ? e.message : "Failed to load Rendr photos");
+      })
+      .finally(() => setRendrPhotosLoading(false));
+  }, [activeRoomId, rendrSpaceId, rendrPhotosLoaded, rendrPhotosLoading]);
 
   /** Renderings (room or cover) must never appear in Unassigned Media. */
   const isRendering = (m: MediaItem) =>
@@ -960,6 +1015,7 @@ export function MediaTab({
       (prev === FRONT_PAGE_ID ||
         prev === ZILLOW_IMPORT_ID ||
         prev === UNASSIGNED_PHOTOS_ID ||
+        prev === RENDR_PHOTOS_ID ||
         roomIds.has(prev))
         ? prev
         : rooms[0]?.id ?? null
@@ -1320,6 +1376,24 @@ export function MediaTab({
                 </span>
               )}
             </button>
+            {rendrSpaceId != null && (
+              <button
+                type="button"
+                onClick={() => setActiveRoomId(RENDR_PHOTOS_ID)}
+                className={`mb-1 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${
+                  activeRoomId === RENDR_PHOTOS_ID
+                    ? "border-zinc-400 bg-white dark:border-zinc-500 dark:bg-zinc-900"
+                    : "border-transparent hover:bg-zinc-200/80 dark:hover:bg-zinc-700/50"
+                }`}
+              >
+                <span className="truncate font-medium">Imported from Rendr</span>
+                {rendrPhotosLoaded && rendrPhotos.length > 0 && (
+                  <span className="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-xs dark:bg-zinc-600">
+                    {rendrPhotos.length}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setActiveRoomId(UNASSIGNED_PHOTOS_ID)}
@@ -1669,6 +1743,156 @@ export function MediaTab({
               {genericUnassigned.length === 0 && (
                 <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
                   No unassigned photos. Photos you upload or import (other than from Zillow) are assigned to the section you choose. Zillow-imported photos appear under Imported from Zillow.
+                </p>
+              )}
+            </div>
+          ) : activeRoomId === RENDR_PHOTOS_ID ? (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Imported from Rendr
+              </h2>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Photos from your linked Rendr scan. Select photos below and assign them to a section or move to Front Page Photos. Already-imported photos are marked and can be re-imported if needed.
+              </p>
+              {rendrPhotosLoading && (
+                <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                  Loading Rendr photos…
+                </p>
+              )}
+              {rendrPhotosError && (
+                <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
+                  {rendrPhotosError}
+                </p>
+              )}
+              {rendrImportResult && (
+                <p className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300">
+                  {rendrImportResult}
+                </p>
+              )}
+              {!rendrPhotosLoading && !rendrPhotosError && rendrPhotos.length > 0 && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRendrPhotoIds(new Set(rendrPhotos.map((p) => p.id)))}
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedRendrPhotoIds(new Set());
+                        setRendrAssignRoomId("");
+                      }}
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Clear selection
+                    </button>
+                    {selectedRendrPhotoIds.size > 0 && (
+                      <>
+                        <select
+                          value={rendrAssignRoomId}
+                          onChange={(e) => setRendrAssignRoomId(e.target.value)}
+                          className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                          aria-label="Assign to section"
+                        >
+                          <option value="">Assign to Section…</option>
+                          <option value={FRONT_PAGE_ID}>Front Page</option>
+                          <option value={UNASSIGNED_PHOTOS_ID}>Unassigned</option>
+                          {rooms.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!rendrAssignRoomId || rendrImporting}
+                          onClick={async () => {
+                            if (!rendrAssignRoomId) return;
+                            setRendrImporting(true);
+                            setRendrImportResult(null);
+                            setRendrPhotosError(null);
+                            const photoIds = Array.from(selectedRendrPhotoIds);
+                            const target =
+                              rendrAssignRoomId === FRONT_PAGE_ID
+                                ? { roomId: null, frontPage: true }
+                                : rendrAssignRoomId === UNASSIGNED_PHOTOS_ID
+                                  ? { roomId: null, frontPage: false }
+                                  : { roomId: rendrAssignRoomId, frontPage: false };
+                            const result = await importRendrPhotosAction(projectId, photoIds, target);
+                            setRendrImporting(false);
+                            if (result.error) {
+                              setRendrPhotosError(result.error);
+                            } else {
+                              setRendrImportResult(
+                                `Imported ${result.imported} photo${result.imported !== 1 ? "s" : ""}` +
+                                  (result.skipped > 0 ? ` (${result.skipped} skipped)` : "") +
+                                  "."
+                              );
+                              setSelectedRendrPhotoIds(new Set());
+                              setRendrAssignRoomId("");
+                              router.refresh();
+                            }
+                          }}
+                          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        >
+                          {rendrImporting ? "Importing…" : "Import to Section"}
+                        </button>
+                        <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                          {selectedRendrPhotoIds.size} selected
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {rendrPhotos.map((photo) => {
+                      const isSelected = selectedRendrPhotoIds.has(photo.id);
+                      const alreadyImported = importedRendrPhotoIds.has(photo.id);
+                      return (
+                        <button
+                          key={photo.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedRendrPhotoIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(photo.id)) next.delete(photo.id);
+                              else next.add(photo.id);
+                              return next;
+                            });
+                          }}
+                          className={`group relative aspect-[4/3] overflow-hidden rounded-lg border-2 transition-shadow focus:outline-none ${
+                            isSelected
+                              ? "border-blue-500 ring-2 ring-blue-400"
+                              : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-500"
+                          }`}
+                        >
+                          <img
+                            src={`/api/rendr/spaces/${rendrSpaceId}/photos/${photo.id}`}
+                            alt="Rendr photo"
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                          {isSelected && (
+                            <span className="absolute left-1 top-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                              Selected
+                            </span>
+                          )}
+                          {alreadyImported && (
+                            <span className="absolute right-1 top-1 rounded bg-green-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                              Imported
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              {!rendrPhotosLoading && !rendrPhotosError && rendrPhotosLoaded && rendrPhotos.length === 0 && (
+                <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                  No photos found on the linked Rendr scan.
                 </p>
               )}
             </div>

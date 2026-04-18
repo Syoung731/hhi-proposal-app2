@@ -19,6 +19,14 @@ import {
   mergeRoomScopesNarrative,
 } from "@/app/lib/ai/extract-from-transcript";
 import { generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
+import { generateRecommendedDetail } from "@/app/lib/ai/generate-recommended-detail";
+import { classifyRoomForDetail, type KitchenDetail, type BathroomDetail } from "@/app/lib/room-classification";
+import { buildRendrContextString } from "@/app/lib/rendr/buildRendrContext";
+import { getRendrTakeoffData, getRendrSpaceGeometry } from "@/app/lib/rendr/rendrClient";
+import { convertTakeoffData } from "@/app/lib/rendr/convertTakeoff";
+import type { ImperialTakeoffData, ImperialRoomTakeoff } from "@/app/lib/rendr/types";
+import { fuzzyMatchRooms } from "@/app/lib/rendr/roomMatcher";
+import { extractCeilingHeightForMappedRooms, type GeometryData } from "@/app/lib/rendr/extractCeilingHeight";
 import { z } from "zod";
 
 export type UnmatchedRoomItem = { name: string; roomIds: string[] };
@@ -33,6 +41,7 @@ type ExtractedSection = {
   length?: string | null;
   width?: string | null;
   ceilingHeight?: string | null;
+  fixtures?: import("@/app/lib/ai/extract-from-transcript").TranscriptFixtures | null;
 };
 
 /** Normalize for dedupe comparison: trim, collapse spaces, normalize separators, collapse again, lowercase. */
@@ -135,6 +144,22 @@ const nullableNumberFormField = z
 const roomNumericFieldsSchema = z.object({
   estPricePerSqFt: nullableNumberFormField,
 });
+
+export async function updateRoomDetailAction(
+  projectId: string,
+  roomId: string,
+  roomDetail: Record<string, unknown>,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const room = await prisma.room.findFirst({ where: { id: roomId, projectId } });
+  if (!room) return { error: "Room not found" };
+  await prisma.room.update({
+    where: { id: roomId },
+    data: { roomDetail: roomDetail as unknown as Prisma.InputJsonValue },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+  return {};
+}
 
 export async function createRoomAction(projectId: string, formData: FormData): Promise<{ error?: string }> {
   await requireAdmin();
@@ -389,6 +414,7 @@ export async function updateRoomAction(
     totalTarget: number | null;
     totalHigh: number | null;
     bucket: "BASE" | "ALTERNATE" | "ALLOWANCE";
+    measurementSource?: string | null;
   } = {
     name: name || "Section",
     scopeNarrative,
@@ -415,6 +441,17 @@ export async function updateRoomAction(
     totalHigh: null,
     bucket,
   };
+
+  // Track measurement source: if user changed dimensions, mark as manual
+  const dimsChanged =
+    lengthIn !== room.lengthIn ||
+    widthIn !== room.widthIn ||
+    ceilingHeightIn !== room.ceilingHeightIn ||
+    (resolvedAreaSqFt !== room.areaSqFt && resolvedAreaSqFt !== null);
+  if (dimsChanged && (lengthIn != null || widthIn != null || resolvedAreaSqFt != null)) {
+    data.measurementSource = "manual";
+  }
+
   if (!unitQuantityManualOverride && !forceUnitQuantityOne) {
     data.unitQuantity = computedUnitQty;
   }
@@ -438,17 +475,17 @@ export async function updateRoomAction(
 
   // Flag estimate as stale if scope or dimensions changed
   const scopeChanged = scopeNarrative !== (room.scopeNarrative ?? "");
-  const dimsChanged =
+  const staleDimsChanged =
     lengthIn !== room.lengthIn ||
     widthIn !== room.widthIn ||
     ceilingHeightIn !== room.ceilingHeightIn;
-  if (scopeChanged || dimsChanged) {
+  if (scopeChanged || staleDimsChanged) {
     const hasEstimate = await prisma.aIEstimate.findFirst({
       where: { sectionId: roomId },
       select: { id: true },
     });
     if (hasEstimate) {
-      const reason = scopeChanged && dimsChanged
+      const reason = scopeChanged && staleDimsChanged
         ? "Scope and dimensions changed after estimate"
         : scopeChanged
           ? "Scope updated after estimate"
@@ -461,7 +498,7 @@ export async function updateRoomAction(
 
     // Also flag COPE as stale when any room's dimensions or scope change,
     // since COPE aggregates data from all rooms (total SF, total value, etc.)
-    if (dimsChanged) {
+    if (staleDimsChanged) {
       const copeRoom = await prisma.room.findFirst({
         where: { projectId, isProjectOverhead: true },
         select: { id: true },
@@ -616,8 +653,123 @@ export async function reorderRoomsAction(
   return {};
 }
 
-export async function generateRoomsFromTranscriptAction(projectId: string): Promise<{
+// ---------------------------------------------------------------------------
+// Rendr availability check (fast — for UI confirmation modal)
+// ---------------------------------------------------------------------------
+
+export async function checkRendrAvailable(projectId: string): Promise<{
+  hasRendr: boolean;
+  roomCount: number;
+}> {
+  await requireAdmin();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { rendrSpaceId: true, rendrImportedAt: true },
+  });
+  if (!project?.rendrSpaceId) {
+    return { hasRendr: false, roomCount: 0 };
+  }
+  try {
+    const raw = await getRendrTakeoffData(project.rendrSpaceId);
+    const imperial = convertTakeoffData(raw);
+    return { hasRendr: true, roomCount: imperial.rooms.length };
+  } catch {
+    // Rendr API may be down — still flag as linked but no room count
+    return { hasRendr: true, roomCount: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Build Rendr context string for AI transcript extraction
+// ---------------------------------------------------------------------------
+
+function buildRendrContextForTranscript(imperial: ImperialTakeoffData, geometryData: GeometryData | null): string {
+  if (!imperial.rooms.length) return "";
+
+  const lines: string[] = [
+    "RENDR LIDAR SCAN DATA — Physical rooms measured by LiDAR:",
+    "",
+  ];
+
+  for (const room of imperial.rooms) {
+    if (room.label === "All Rooms") continue;
+    const t = room.takeoff;
+
+    // Extract ceiling height from geometry if available
+    const ceilingFt = extractCeilingHeightForMappedRooms(geometryData, [room.label]);
+
+    let roomLine = `${room.label}: ${t.floorSF} SF floor, ${t.wallsSF} SF walls, ${t.perimeterLF} LF perimeter`;
+    if (ceilingFt) roomLine += `, ${ceilingFt} ft ceiling`;
+    if (t.numberOfWindows) roomLine += `, ${t.numberOfWindows} windows`;
+    if (t.numberOfDoors) roomLine += `, ${t.numberOfDoors} doors`;
+
+    const fixtures: string[] = [];
+    if (t.numberOfBaseCabinets) fixtures.push(`${t.numberOfBaseCabinets} base cabinets (${t.baseCabinetsLF} LF)`);
+    if (t.numberOfWallCabinets) fixtures.push(`${t.numberOfWallCabinets} wall cabinets (${t.wallCabinetsLF} LF)`);
+    if (t.countertopsSF) fixtures.push(`${t.countertopsSF} SF countertop`);
+    if (t.backsplashSF) fixtures.push(`${t.backsplashSF} SF backsplash`);
+    if (t.numberOfSinks) fixtures.push(`${t.numberOfSinks} sink(s)`);
+    if (t.numberOfToilets) fixtures.push(`${t.numberOfToilets} toilet(s)`);
+    if (t.numberOfBathtubs) fixtures.push(`${t.numberOfBathtubs} bathtub(s)`);
+    if (t.numberOfStoves) fixtures.push("stove");
+    if (t.numberOfOvens) fixtures.push("oven");
+    if (t.numberOfRefrigerators) fixtures.push("refrigerator");
+    if (t.numberOfDishwashers) fixtures.push("dishwasher");
+    if (t.numberOfFirePlaces) fixtures.push(`${t.numberOfFirePlaces} fireplace(s)`);
+
+    if (fixtures.length > 0) {
+      roomLine += ` | Fixtures: ${fixtures.join(", ")}`;
+    }
+
+    lines.push(`  ${roomLine}`);
+  }
+
+  lines.push("");
+  lines.push("Use this data to inform section measurements and fixture references in scope narratives.");
+  lines.push("The room names from Rendr represent the PHYSICAL spaces. The transcript may discuss");
+  lines.push("these spaces by different names or combine them into scope-based sections.");
+
+  return lines.join("\n");
+}
+
+/** Build a human-readable pricing notes summary from Rendr takeoff data. */
+function buildPricingNotesSummary(
+  t: ImperialRoomTakeoff,
+  mappings: { index: number; label: string }[],
+): string {
+  const header =
+    mappings.length > 1
+      ? `LiDAR Import (combined: ${mappings.map((m) => m.label).join(" + ")}):`
+      : `LiDAR Import:`;
+
+  return [
+    `${header} Floor ${t.floorSF} SF, Walls ${t.wallsSF} SF, Ceiling ${t.ceilingSF} SF`,
+    `Perimeter ${t.perimeterLF} LF, Paintable ${t.paintableSF} SF`,
+    t.numberOfWindows ? `Windows: ${t.numberOfWindows} (${t.windowsSF} SF)` : null,
+    t.numberOfDoors ? `Doors: ${t.numberOfDoors} (${t.doorsSF} SF)` : null,
+    t.numberOfSinks ? `Sinks: ${t.numberOfSinks}` : null,
+    t.numberOfToilets ? `Toilets: ${t.numberOfToilets}` : null,
+    t.numberOfBathtubs ? `Bathtubs: ${t.numberOfBathtubs}` : null,
+    t.baseCabinetsLF ? `Base Cabinets: ${t.numberOfBaseCabinets} (${t.baseCabinetsLF} LF)` : null,
+    t.wallCabinetsLF ? `Wall Cabinets: ${t.numberOfWallCabinets} (${t.wallCabinetsLF} LF)` : null,
+    t.countertopsLF ? `Countertops: ${t.countertopsLF} LF (${t.countertopsSF} SF)` : null,
+    t.backsplashLF ? `Backsplash: ${t.backsplashLF} LF (${t.backsplashSF} SF)` : null,
+    t.numberOfFirePlaces ? `Fireplaces: ${t.numberOfFirePlaces}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Generate rooms from transcript (with optional Rendr context)
+// ---------------------------------------------------------------------------
+
+export async function generateRoomsFromTranscriptAction(
+  projectId: string,
+  includeRendr: boolean = false,
+): Promise<{
   created: number;
+  updated: number;
   skipped: number;
   error?: string;
   unmatchedRooms?: UnmatchedRoomItem[];
@@ -625,32 +777,94 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
   await requireAdmin();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, transcriptText: true },
+    select: { id: true, transcriptText: true, rendrSpaceId: true },
   });
   if (!project) {
-    return { created: 0, skipped: 0, error: "Project not found." };
+    return { created: 0, updated: 0, skipped: 0, error: "Project not found." };
   }
   const transcriptText = project.transcriptText?.trim() ?? "";
   if (!transcriptText) {
-    return { created: 0, skipped: 0, error: "No transcript available." };
+    return { created: 0, updated: 0, skipped: 0, error: "No transcript available." };
   }
+
+  // Fetch Rendr data when requested (best-effort — failures fall back to transcript-only)
+  let rendrContext: string | null = null;
+  let imperialTakeoff: ImperialTakeoffData | null = null;
+  let geometryData: GeometryData | null = null;
+
+  if (includeRendr && project.rendrSpaceId) {
+    try {
+      const raw = await getRendrTakeoffData(project.rendrSpaceId);
+      imperialTakeoff = convertTakeoffData(raw);
+      try {
+        geometryData = await getRendrSpaceGeometry(project.rendrSpaceId) as GeometryData | null;
+      } catch {
+        // Geometry is optional — ceiling heights won't be available
+      }
+      rendrContext = buildRendrContextForTranscript(imperialTakeoff, geometryData);
+    } catch (e) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[generateRooms] Rendr fetch failed, continuing without:", e);
+      }
+    }
+  }
+
+  // Fetch existing section names to pass to AI (so it reuses them instead of inventing variants)
+  const existingSections = await prisma.room.findMany({
+    where: { projectId, isProjectOverhead: false },
+    select: { name: true },
+  });
+  const existingSectionNames = existingSections.map((r) => r.name).filter(Boolean);
 
   let rooms: ExtractedSection[];
   try {
-    const result = await extractRoomsFromTranscript(transcriptText);
+    const result = await extractRoomsFromTranscript(
+      transcriptText, undefined, rendrContext,
+      existingSectionNames.length > 0 ? existingSectionNames : undefined,
+    );
     rooms = result.rooms ?? [];
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to extract rooms from transcript.";
-    return { created: 0, skipped: 0, error: message };
+    return { created: 0, updated: 0, skipped: 0, error: message };
+  }
+
+  // Fallback: rename AI-returned variant names to existing section names
+  // e.g., "Living Room Kitchen Wall Opening" → "Living Room" if "Living Room" exists
+  if (existingSectionNames.length > 0) {
+    const existingNormalized = existingSectionNames.map((n) => ({
+      original: n,
+      normalized: normalizeRoomNameForCompare(n),
+    }));
+    for (const r of rooms) {
+      const aiNorm = normalizeRoomNameForCompare(r.name ?? "");
+      // Skip if it already matches an existing name exactly
+      const exactMatch = existingNormalized.some((e) => e.normalized === aiNorm);
+      if (exactMatch) continue;
+      // Check if AI name contains an existing name (or vice versa)
+      for (const e of existingNormalized) {
+        if (aiNorm.includes(e.normalized) || e.normalized.includes(aiNorm)) {
+          r.name = e.original;
+          break;
+        }
+      }
+    }
   }
 
   const existing = await prisma.room.findMany({
     where: { projectId },
-    select: { name: true },
+    select: { id: true, name: true, measurementSource: true, scopeNarrative: true, roomDetail: true, sectionType: { select: { name: true } } },
   });
   const existingKeys = new Set(
     existing.map((r) => applyAlias(normalizeRoomNameForCompare(r.name), transcriptText))
   );
+  // Map canonical name → existing room info (for Rendr scope-merge + recommended recalc)
+  const existingRoomsByKey = new Map<string, { id: string; name: string; measurementSource: string | null; scopeNarrative: string | null; roomDetail: unknown; sectionTypeName: string | null }>();
+  for (const r of existing) {
+    const key = applyAlias(normalizeRoomNameForCompare(r.name), transcriptText);
+    if (!existingRoomsByKey.has(key)) {
+      existingRoomsByKey.set(key, { id: r.id, name: r.name, measurementSource: r.measurementSource, scopeNarrative: r.scopeNarrative, roomDetail: r.roomDetail, sectionTypeName: r.sectionType?.name ?? null });
+    }
+  }
   const { _max } = await prisma.room.aggregate({
     where: { projectId },
     _max: { sortOrder: true },
@@ -669,7 +883,10 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
     widthIn?: number | null;
     ceilingHeightIn?: number | null;
     areaSqFt?: number | null;
+    fixtures?: ExtractedSection["fixtures"];
   }[] = [];
+  // Rendr-created sections to update with AI scope or recalculate recommended detail
+  const toUpdateScope: { id: string; scopeNarrative: string; skipScopeWrite?: boolean }[] = [];
   let nextOrder = maxOrder + 1;
   let skipped = 0;
   let loggedOneRoomDims = false;
@@ -683,7 +900,17 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
     }
     const canonicalName = applyAlias(normalizeRoomNameForCompare(rawName), transcriptText);
     if (existingKeys.has(canonicalName)) {
-      skipped++;
+      // Check if this is a Rendr-created section — update scope or recalculate recommended
+      const existingRoom = existingRoomsByKey.get(canonicalName);
+      if (existingRoom?.measurementSource === "rendr" && !existingRoom.scopeNarrative?.trim()) {
+        // No scope yet — write the AI-generated scope
+        toUpdateScope.push({ id: existingRoom.id, scopeNarrative, skipScopeWrite: false });
+      } else if (existingRoom?.measurementSource === "rendr" && existingRoom.roomDetail) {
+        // Already has scope — just recalculate recommended detail using the EXISTING scope
+        toUpdateScope.push({ id: existingRoom.id, scopeNarrative: existingRoom.scopeNarrative!, skipScopeWrite: true });
+      } else {
+        skipped++;
+      }
       continue;
     }
     existingKeys.add(canonicalName);
@@ -720,10 +947,12 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
       widthIn,
       ceilingHeightIn,
       areaSqFt,
+      fixtures: r.fixtures ?? null,
     });
   }
 
   let unmatchedRooms: UnmatchedRoomItem[] = [];
+  let createdRooms: { id: string; name: string; sectionTypeId: string | null }[] = [];
   if (toCreate.length > 0) {
     const created = await prisma.room.createManyAndReturn({
       data: toCreate.map((row) => ({
@@ -740,8 +969,10 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
         ceilingHeightIn: row.ceilingHeightIn ?? null,
         areaSqFt: row.areaSqFt ?? null,
         origin: "AI_TRANSCRIPT",
+        measurementSource: (row.lengthIn != null || row.widthIn != null) ? "transcript" : null,
       })),
     });
+    createdRooms = created.map((r) => ({ id: r.id, name: r.name, sectionTypeId: r.sectionTypeId }));
     const byName = new Map<string, string[]>();
     for (const room of created) {
       if (!room.sectionTypeId) {
@@ -751,9 +982,137 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
       }
     }
     unmatchedRooms = [...byName.entries()].map(([name, roomIds]) => ({ name, roomIds }));
+
+    // Build roomDetail for Kitchen/Bath sections with transcript fixture data
+    for (let i = 0; i < toCreate.length; i++) {
+      const row = toCreate[i];
+      const createdRoom = created[i];
+      if (!createdRoom || !row.fixtures) continue;
+      const sectionTypeName = row.sectionTypeId
+        ? sectionTypeMap.entries().find(([, v]) => v === row.sectionTypeId)?.[0] ?? null
+        : null;
+      const roomType = classifyRoomForDetail(row.name, sectionTypeName);
+      if (!roomType) continue;
+
+      const f = row.fixtures;
+      let detail: KitchenDetail | BathroomDetail;
+      if (roomType === "kitchen") {
+        detail = {
+          baseCabinetCountExisting: f.baseCabinetCount ?? null,
+          wallCabinetCountExisting: f.wallCabinetCount ?? null,
+          sinkCountExisting: f.sinkCount ?? null,
+          hasStoveExisting: f.appliances?.includes("stove") ?? null,
+          hasOvenExisting: f.appliances?.includes("oven") ?? null,
+          hasFridgeExisting: f.appliances?.includes("refrigerator") ?? null,
+          hasDishwasherExisting: f.appliances?.includes("dishwasher") ?? null,
+          existingSource: "transcript",
+          baseCabinetCountRecommended: f.baseCabinetCount ?? null,
+          wallCabinetCountRecommended: f.wallCabinetCount ?? null,
+          sinkCountRecommended: f.sinkCount ?? null,
+          hasStoveRecommended: f.appliances?.includes("stove") ?? null,
+          hasOvenRecommended: f.appliances?.includes("oven") ?? null,
+          hasFridgeRecommended: f.appliances?.includes("refrigerator") ?? null,
+          hasDishwasherRecommended: f.appliances?.includes("dishwasher") ?? null,
+          recommendedSource: "ai",
+        };
+      } else {
+        detail = {
+          vanityCabinetCountExisting: f.baseCabinetCount ?? null,
+          sinkCountExisting: f.sinkCount ?? null,
+          toiletCountExisting: f.toiletCount ?? null,
+          hasTubExisting: f.hasTub ?? null,
+          hasShowerExisting: f.hasShower ?? null,
+          hasTubShowerComboExisting: f.hasTubShowerCombo ?? null,
+          existingSource: "transcript",
+          vanityCabinetCountRecommended: f.baseCabinetCount ?? null,
+          sinkCountRecommended: f.sinkCount ?? null,
+          toiletCountRecommended: f.toiletCount ?? null,
+          hasTubRecommended: f.hasTub ?? null,
+          hasShowerRecommended: f.hasShower ?? null,
+          hasTubShowerComboRecommended: f.hasTubShowerCombo ?? null,
+          recommendedSource: "ai",
+        };
+      }
+      await prisma.room.update({
+        where: { id: createdRoom.id },
+        data: { roomDetail: detail as unknown as Prisma.InputJsonValue },
+      });
+    }
+  }
+
+  // Update scope on Rendr-created sections that matched transcript rooms,
+  // then recalculate AI Recommended detail (awaited so results are visible on refresh)
+  for (const update of toUpdateScope) {
+    if (!update.skipScopeWrite) {
+      await prisma.room.update({
+        where: { id: update.id },
+        data: {
+          scopeNarrative: update.scopeNarrative,
+          scopeSource: "AI",
+          scopeUpdatedAt: new Date(),
+        },
+      });
+    }
+
+    const existingRoom = [...existingRoomsByKey.values()].find((r) => r.id === update.id);
+    if (existingRoom) {
+      const roomType = classifyRoomForDetail(existingRoom.name, existingRoom.sectionTypeName);
+      if (roomType && existingRoom.roomDetail) {
+        try {
+          await generateRecommendedDetail(
+            update.id,
+            existingRoom.name,
+            update.scopeNarrative,
+            existingRoom.roomDetail as Record<string, unknown>,
+            roomType,
+          );
+        } catch {
+          // Best-effort — Recommended stays unchanged if this fails
+        }
+      }
+    }
   }
 
   await ensureCopeRoom(projectId);
+
+  // Auto-link Rendr measurements to newly created sections (best-effort)
+  if (includeRendr && imperialTakeoff && createdRooms.length > 0) {
+    try {
+      await autoLinkRendrToSections(projectId, createdRooms, imperialTakeoff, geometryData);
+    } catch (e) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[generateRooms] Rendr auto-link failed:", e);
+      }
+    }
+  }
+
+  // Fire-and-forget: generate AI recommended detail for Kitchen/Bath sections
+  if (toCreate.length > 0) {
+    for (let i = 0; i < toCreate.length; i++) {
+      const row = toCreate[i];
+      // Only for created rooms (not skipped ones), find by index
+      const createdRoom = unmatchedRooms.length > 0 || toCreate.length > 0
+        ? await prisma.room.findFirst({
+            where: { projectId, name: row.name },
+            select: { id: true, roomDetail: true, scopeNarrative: true, sectionType: { select: { name: true } } },
+            orderBy: { createdAt: "desc" },
+          })
+        : null;
+      if (!createdRoom) continue;
+      const roomType = classifyRoomForDetail(row.name, createdRoom.sectionType?.name);
+      if (!roomType) continue;
+      const detail = (createdRoom.roomDetail as Record<string, unknown>) ?? {};
+      if (detail.recommendedSource === "manual") continue;
+      // Non-blocking
+      generateRecommendedDetail(
+        createdRoom.id,
+        row.name,
+        row.scopeNarrative,
+        detail,
+        roomType,
+      ).catch(() => {});
+    }
+  }
 
   // Auto-generate scope overview if rooms were created and project doesn't have one yet
   if (toCreate.length > 0) {
@@ -797,7 +1156,156 @@ export async function generateRoomsFromTranscriptAction(projectId: string): Prom
 
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
-  return { created: toCreate.length, skipped, unmatchedRooms: unmatchedRooms.length > 0 ? unmatchedRooms : undefined };
+  return { created: toCreate.length, updated: toUpdateScope.length, skipped, unmatchedRooms: unmatchedRooms.length > 0 ? unmatchedRooms : undefined };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-link Rendr measurements to newly created sections via fuzzy matching
+// ---------------------------------------------------------------------------
+
+async function autoLinkRendrToSections(
+  projectId: string,
+  createdRooms: { id: string; name: string; sectionTypeId: string | null }[],
+  imperialTakeoff: ImperialTakeoffData,
+  geometryData: GeometryData | null,
+) {
+  const rendrRooms = imperialTakeoff.rooms
+    .filter((r) => r.label !== "All Rooms")
+    .map((r) => ({ label: r.label, roomTakeoff: r.takeoff as unknown as import("@/app/lib/rendr/types").RendrRoomTakeoff }));
+
+  const appRooms = createdRooms.map((r) => ({ id: r.id, name: r.name }));
+  const matches = fuzzyMatchRooms(rendrRooms, appRooms);
+
+  // Only auto-import high and suggested confidence matches
+  const autoMatches = matches.filter(
+    (m) => m.appRoomId && (m.confidence === "high" || m.confidence === "suggested"),
+  );
+  if (autoMatches.length === 0) return;
+
+  // Build a lookup from label to imperial room
+  const imperialByLabel = new Map(
+    imperialTakeoff.rooms.map((r, i) => [r.label, { takeoff: r.takeoff, index: i }]),
+  );
+
+  // Fetch section type names for room classification
+  const sectionTypeIds = createdRooms.map((r) => r.sectionTypeId).filter(Boolean) as string[];
+  const sectionTypeNames = new Map<string, string>();
+  if (sectionTypeIds.length > 0) {
+    const types = await prisma.sectionType.findMany({
+      where: { id: { in: sectionTypeIds } },
+      select: { id: true, name: true },
+    });
+    for (const t of types) sectionTypeNames.set(t.id, t.name);
+  }
+
+  for (const match of autoMatches) {
+    if (!match.appRoomId) continue;
+    const imperial = imperialByLabel.get(match.rendrLabel);
+    if (!imperial) continue;
+    const t = imperial.takeoff;
+
+    const rendrRoomMappings = [{ index: match.rendrRoomIndex, label: match.rendrLabel }];
+
+    // Extract ceiling height from geometry
+    const rendrCeilingFt = extractCeilingHeightForMappedRooms(geometryData, [match.rendrLabel]);
+
+    // Build Kitchen/Bath roomDetail
+    const appRoom = createdRooms.find((r) => r.id === match.appRoomId);
+    const sectionTypeName = appRoom?.sectionTypeId ? sectionTypeNames.get(appRoom.sectionTypeId) ?? null : null;
+    const roomType = appRoom ? classifyRoomForDetail(appRoom.name, sectionTypeName) : null;
+
+    let roomDetail: Record<string, unknown> | null = null;
+    if (roomType === "kitchen") {
+      roomDetail = {
+        baseCabinetCountExisting: t.numberOfBaseCabinets || null,
+        baseCabinetLfExisting: t.baseCabinetsLF || null,
+        wallCabinetCountExisting: t.numberOfWallCabinets || null,
+        wallCabinetLfExisting: t.wallCabinetsLF || null,
+        countertopSfExisting: t.countertopsSF || null,
+        countertopLfExisting: t.countertopsLF || null,
+        backsplashSfExisting: t.backsplashSF || null,
+        backsplashLfExisting: t.backsplashLF || null,
+        sinkCountExisting: t.numberOfSinks || null,
+        hasStoveExisting: (t.numberOfStoves ?? 0) > 0,
+        hasOvenExisting: (t.numberOfOvens ?? 0) > 0,
+        hasFridgeExisting: (t.numberOfRefrigerators ?? 0) > 0,
+        hasDishwasherExisting: (t.numberOfDishwashers ?? 0) > 0,
+        existingSource: "rendr",
+        baseCabinetCountRecommended: t.numberOfBaseCabinets || null,
+        baseCabinetLfRecommended: t.baseCabinetsLF || null,
+        wallCabinetCountRecommended: t.numberOfWallCabinets || null,
+        wallCabinetLfRecommended: t.wallCabinetsLF || null,
+        countertopSfRecommended: t.countertopsSF || null,
+        backsplashSfRecommended: t.backsplashSF || null,
+        sinkCountRecommended: t.numberOfSinks || null,
+        hasStoveRecommended: false,
+        hasOvenRecommended: false,
+        hasFridgeRecommended: false,
+        hasDishwasherRecommended: false,
+        recommendedSource: null,
+      };
+    } else if (roomType === "bathroom") {
+      roomDetail = {
+        vanityCabinetCountExisting: t.numberOfBaseCabinets || null,
+        vanityCabinetLfExisting: t.baseCabinetsLF || null,
+        countertopSfExisting: t.countertopsSF || null,
+        countertopLfExisting: t.countertopsLF || null,
+        backsplashSfExisting: t.backsplashSF || null,
+        backsplashLfExisting: t.backsplashLF || null,
+        sinkCountExisting: t.numberOfSinks || null,
+        toiletCountExisting: t.numberOfToilets || null,
+        hasTubExisting: (t.numberOfBathtubs ?? 0) > 0,
+        hasShowerExisting: false,
+        hasTubShowerComboExisting: false,
+        existingSource: "rendr",
+        vanityCabinetCountRecommended: t.numberOfBaseCabinets || null,
+        vanityCabinetLfRecommended: t.baseCabinetsLF || null,
+        countertopSfRecommended: t.countertopsSF || null,
+        backsplashSfRecommended: t.backsplashSF || null,
+        sinkCountRecommended: t.numberOfSinks || null,
+        toiletCountRecommended: t.numberOfToilets || null,
+        hasTubRecommended: false,
+        hasShowerRecommended: false,
+        hasTubShowerComboRecommended: false,
+        recommendedSource: null,
+      };
+    }
+
+    await prisma.room.update({
+      where: { id: match.appRoomId },
+      data: {
+        areaSqFt: t.floorSF,
+        measurementMode: "AREA",
+        wallsSF: t.wallsSF || null,
+        ceilingSF: t.ceilingSF || null,
+        perimeterLF: t.perimeterLF || null,
+        paintableSF: t.paintableSF || null,
+        windowCount: t.numberOfWindows || null,
+        windowsSF: t.windowsSF || null,
+        doorCount: t.numberOfDoors || null,
+        doorsSF: t.doorsSF || null,
+        measurementSource: "rendr",
+        ...(rendrCeilingFt ? {
+          ceilingHeightFt: rendrCeilingFt,
+          rendrCeilingHeightFt: rendrCeilingFt,
+          ceilingHeightIn: null,
+        } : {}),
+        rendrRoomMappings: rendrRoomMappings as unknown as Prisma.InputJsonValue,
+        pricingNotes: buildPricingNotesSummary(t, rendrRoomMappings),
+        ...(roomDetail ? { roomDetail: roomDetail as unknown as Prisma.InputJsonValue } : {}),
+      },
+    });
+  }
+
+  // Mark import on project
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { rendrImportedAt: new Date() },
+  });
+
+  if (process.env.NODE_ENV === "development") {
+    console.log(`[generateRooms] Auto-linked ${autoMatches.length} sections to Rendr data`);
+  }
 }
 
 export async function updateRoomScopesFromTranscriptAction(projectId: string): Promise<{
@@ -837,11 +1345,38 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
     if (first) stylePresetPrompt = first.prompt;
   }
 
+  // Fetch Rendr context if scan is linked (same logic as generateRoomsFromTranscriptAction)
+  let rendrContext: string | null = null;
+  const projectForRendr = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { rendrSpaceId: true },
+  });
+  if (projectForRendr?.rendrSpaceId) {
+    try {
+      const raw = await getRendrTakeoffData(projectForRendr.rendrSpaceId);
+      const imperial = convertTakeoffData(raw);
+      let geo: GeometryData | null = null;
+      try { geo = await getRendrSpaceGeometry(projectForRendr.rendrSpaceId) as GeometryData | null; } catch {}
+      rendrContext = buildRendrContextForTranscript(imperial, geo);
+    } catch {
+      // Rendr context is best-effort
+    }
+  }
+
+  // Fetch existing section names to pass to AI
+  const existingSections = await prisma.room.findMany({
+    where: { projectId, isProjectOverhead: false },
+    select: { name: true },
+  });
+  const existingSectionNames = existingSections.map((r) => r.name).filter(Boolean);
+
   let roomsFromAi: ExtractedSection[];
   try {
     const result = await extractRoomsFromTranscript(
       transcriptText,
-      stylePresetPrompt || undefined
+      stylePresetPrompt || undefined,
+      rendrContext,
+      existingSectionNames.length > 0 ? existingSectionNames : undefined,
     );
     roomsFromAi = result.rooms ?? [];
   } catch (e) {
@@ -849,9 +1384,28 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
     return { created: 0, updated: 0, skipped: 0, error: message };
   }
 
+  // Fallback: rename AI-returned variant names to existing section names
+  if (existingSectionNames.length > 0) {
+    const existingNormalized = existingSectionNames.map((n) => ({
+      original: n,
+      normalized: normalizeRoomNameForCompare(n),
+    }));
+    for (const r of roomsFromAi) {
+      const aiNorm = normalizeRoomNameForCompare(r.name ?? "");
+      const exactMatch = existingNormalized.some((e) => e.normalized === aiNorm);
+      if (exactMatch) continue;
+      for (const e of existingNormalized) {
+        if (aiNorm.includes(e.normalized) || e.normalized.includes(aiNorm)) {
+          r.name = e.original;
+          break;
+        }
+      }
+    }
+  }
+
   const existingRooms = await prisma.room.findMany({
     where: { projectId },
-    select: { id: true, name: true, sortOrder: true, lengthIn: true, widthIn: true, ceilingHeightIn: true },
+    select: { id: true, name: true, sortOrder: true, lengthIn: true, widthIn: true, ceilingHeightIn: true, roomDetail: true, measurementSource: true, sectionType: { select: { name: true, defaultMeasurementMode: true, defaultEstimateUnit: true } } },
   });
 
   const canonicalToExisting = new Map<string, { id: string }>();
@@ -959,6 +1513,7 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
         ceilingHeightIn: row.ceilingHeightIn ?? null,
         areaSqFt: row.areaSqFt ?? null,
         origin: "AI_TRANSCRIPT",
+        measurementSource: (row.lengthIn != null || row.widthIn != null) ? "transcript" : null,
       })),
     });
     const byName = new Map<string, string[]>();
@@ -1034,6 +1589,26 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
       return prisma.room.update({ where: { id: u.id }, data });
     });
     await Promise.all(updateOps);
+
+    // Recalculate AI Recommended detail for Kitchen/Bath sections that got scope updates
+    for (const u of toUpdate) {
+      const room = existingRooms.find((r) => r.id === u.id);
+      if (!room) continue;
+      const roomType = classifyRoomForDetail(room.name, room.sectionType?.name);
+      if (roomType && room.roomDetail) {
+        try {
+          await generateRecommendedDetail(
+            u.id,
+            room.name,
+            u.scopeNarrative,
+            room.roomDetail as Record<string, unknown>,
+            roomType,
+          );
+        } catch {
+          // Best-effort
+        }
+      }
+    }
   }
   await recomputeInvestmentRollups(projectId);
 
@@ -1100,6 +1675,18 @@ export async function rewriteRoomScopeAction(
       scopeNarrative: true,
       stylePresetId: true,
       stylePreset: { select: { prompt: true } },
+      // Rendr fields for AI context
+      measurementSource: true,
+      areaSqFt: true,
+      wallsSF: true,
+      ceilingSF: true,
+      perimeterLF: true,
+      paintableSF: true,
+      windowCount: true,
+      windowsSF: true,
+      doorCount: true,
+      doorsSF: true,
+      roomDetail: true,
     },
   });
   if (!room) return { error: "Room not found." };
@@ -1111,10 +1698,18 @@ export async function rewriteRoomScopeAction(
     room.stylePreset
   );
 
+  // Build Rendr measurement context for AI
+  const rendrContext = buildRendrContextString(room);
+
   let newNarrative: string;
   try {
+    // Append Rendr context to transcript so AI has measurement data
+    const enrichedTranscript = rendrContext
+      ? `${transcriptText}\n\n${rendrContext}`
+      : transcriptText;
+
     newNarrative = await rewriteRoomScopeNarrative(
-      transcriptText,
+      enrichedTranscript,
       room.name,
       room.scopeNarrative ?? "",
       stylePresetPrompt || undefined

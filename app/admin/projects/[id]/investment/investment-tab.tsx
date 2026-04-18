@@ -1,13 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  updateInvestmentLineItemAction,
-  deleteInvestmentLineItemAction,
-  updateInvestmentLineItem,
-  type UpdateInvestmentLineItemPatch,
-} from "./actions";
+import { updateProjectRetainer, type UpdateProjectRetainerPatch } from "./actions";
+import { computeRetainer, type RetainerSettings } from "@/app/lib/retainer";
 
 const BUCKET_LABELS: Record<string, string> = {
   BASE: "Base",
@@ -44,458 +40,422 @@ type Item = {
   sortOrder: number;
 };
 
+type Retainer = {
+  enabled: boolean;
+  percent: number;
+  roundTo: number;
+  override: number | null;
+};
+
 type Props = {
   projectId: string;
   sections: Section[];
   items: Item[];
+  retainer: Retainer;
 };
 
-function roundDollars(value: number | null): number | null {
-  if (value == null || Number.isNaN(value)) return null;
-  return Math.round(value);
-}
-
-function effectiveLow(item: Item): number | null {
-  if (item.isOverride) return item.overrideLow ?? null;
-  return item.rangeLow;
-}
-
-function effectiveTarget(item: Item): number | null {
-  if (item.isOverride) return item.overrideTarget ?? null;
-  return item.rangeTarget;
-}
-
-function effectiveHigh(item: Item): number | null {
-  if (item.isOverride) return item.overrideHigh ?? null;
-  return item.rangeHigh;
-}
-
-function formatMoney(n: number | null): string {
+function formatMoney(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `$${n.toLocaleString()}`;
+  return `$${Math.round(n).toLocaleString()}`;
 }
 
-function basePricingLabel(section: Section): string {
-  const hasAny =
-    section.totalLow != null ||
-    section.totalTarget != null ||
-    section.totalHigh != null;
-  if (!hasAny) return "TBD";
-  const parts: string[] = [];
-  if (section.totalLow != null) parts.push(formatMoney(Math.round(section.totalLow)));
-  if (section.totalTarget != null) parts.push(formatMoney(Math.round(section.totalTarget)));
-  if (section.totalHigh != null) parts.push(formatMoney(Math.round(section.totalHigh)));
-  return parts.join(" / ");
+function sectionRange(s: Section): string {
+  const lo = s.totalLow != null ? Math.round(s.totalLow) : null;
+  const hi = s.totalHigh != null ? Math.round(s.totalHigh) : null;
+  if (lo == null && hi == null) return "TBD";
+  if (lo != null && hi != null) return `${formatMoney(lo)} – ${formatMoney(hi)}`;
+  return formatMoney(lo ?? hi);
 }
 
-export function InvestmentTab({ projectId, sections, items: initialItems }: Props) {
-  const router = useRouter();
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+export function InvestmentTab({ projectId, sections, retainer }: Props) {
+  const sectionsSorted = useMemo(
+    () => [...sections].sort((a, b) => a.sortOrder - b.sortOrder),
+    [sections]
+  );
 
-  const itemsSorted = [...initialItems].sort((a, b) => a.sortOrder - b.sortOrder);
-  const sectionsByBucket = (bucket: string) =>
-    sections.filter((s) => s.bucket === bucket).sort((a, b) => a.sortOrder - b.sortOrder);
+  const subtotalLow = sectionsSorted.reduce((sum, s) => sum + (s.totalLow ?? 0), 0);
+  const subtotalTarget = sectionsSorted.reduce((sum, s) => sum + (s.totalTarget ?? 0), 0);
+  const subtotalHigh = sectionsSorted.reduce((sum, s) => sum + (s.totalHigh ?? 0), 0);
 
-  const itemsInTotals = initialItems.filter((i) => i.includeInTotals);
-  let totalLow = 0;
-  let totalTarget = 0;
-  let totalHigh = 0;
-  for (const item of itemsInTotals) {
-    totalLow += effectiveLow(item) ?? 0;
-    totalTarget += effectiveTarget(item) ?? 0;
-    totalHigh += effectiveHigh(item) ?? 0;
-  }
+  const settings: RetainerSettings = {
+    enabled: retainer.enabled,
+    percent: retainer.percent,
+    roundTo: retainer.roundTo,
+    override: retainer.override,
+  };
+  const retainerAmount = computeRetainer(subtotalHigh, settings);
 
-  async function handleDelete(itemId: string) {
-    if (!confirm("Remove this line item?")) return;
-    await deleteInvestmentLineItemAction(projectId, itemId);
-    router.refresh();
-  }
+  const grandLow = subtotalLow + retainerAmount;
+  const grandTarget = subtotalTarget + retainerAmount;
+  const grandHigh = subtotalHigh + retainerAmount;
 
-  async function handlePatch(itemId: string, patch: UpdateInvestmentLineItemPatch) {
-    await updateInvestmentLineItem(projectId, itemId, patch);
-    router.refresh();
-  }
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   return (
     <div className="space-y-6">
-      {/* Sections by bucket (read-only totals from each section) */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-          Sections (totals per section)
-        </h2>
-        <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-zinc-50 dark:bg-zinc-800/50">
-              <tr>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Section
-                </th>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Bucket
-                </th>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Category
-                </th>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Low / Target / High
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(["BASE", "ALTERNATE", "ALLOWANCE"] as const).map((bucket) =>
-                sectionsByBucket(bucket).map((section) => (
-                  <tr
-                    key={section.id}
-                    className="border-t border-zinc-100 dark:border-zinc-800"
-                  >
-                    <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
-                      {section.name}
-                    </td>
-                    <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                      {BUCKET_LABELS[bucket] ?? bucket}
-                    </td>
-                    <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                      {section.sectionTypeName}
-                    </td>
-                    <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                      {basePricingLabel(section)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <TotalsCard
+        subtotalLow={subtotalLow}
+        subtotalTarget={subtotalTarget}
+        subtotalHigh={subtotalHigh}
+        retainerAmount={retainerAmount}
+        retainerEnabled={retainer.enabled}
+        grandLow={grandLow}
+        grandTarget={grandTarget}
+        grandHigh={grandHigh}
+      />
 
-      {/* Investment rollups per bucket (Base, Alternates, Allowances) */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-          Investment rollups by bucket
-        </h2>
-        <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-zinc-50 dark:bg-zinc-800/50">
-              <tr>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Bucket
-                </th>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Rollup (Low / Target / High)
-                </th>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Effective (proposal)
-                </th>
-                <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                  Override / In totals
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {itemsSorted.map((item) => {
-                const effLow = effectiveLow(item);
-                const effTarget = effectiveTarget(item);
-                const effHigh = effectiveHigh(item);
-                const effectiveLabel =
-                  effLow != null || effTarget != null || effHigh != null
-                    ? [effLow, effTarget, effHigh].map(formatMoney).join(" / ")
-                    : "TBD";
-                const rollupLabel =
-                  item.rangeLow != null || item.rangeTarget != null || item.rangeHigh != null
-                    ? [item.rangeLow, item.rangeTarget, item.rangeHigh].map(formatMoney).join(" / ")
-                    : "—";
-                return (
-                  <tr
-                    key={item.id}
-                    className="border-t border-zinc-100 dark:border-zinc-800"
-                  >
-                    <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
-                      {item.label}
-                    </td>
-                    <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                      {rollupLabel}
-                    </td>
-                    <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                      {effectiveLabel}
-                    </td>
-                    <td className="px-4 py-2">
-                      <SectionRowOverrides
-                        item={item}
-                        onPatch={(p) => handlePatch(item.id, p)}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <RetainerPanel
+        projectId={projectId}
+        retainer={retainer}
+        subtotalHigh={subtotalHigh}
+        computedAmount={retainerAmount}
+      />
 
-      {/* Totals */}
-      <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-800/50">
-        <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-          Totals (items with “Include in totals”)
-        </h2>
-        <div className="flex flex-wrap gap-6 text-sm">
-          <span>
-            <span className="text-zinc-500 dark:text-zinc-400">Low: </span>
-            <span className="font-medium text-zinc-900 dark:text-zinc-100">
-              {formatMoney(totalLow)}
-            </span>
-          </span>
-          <span>
-            <span className="text-zinc-500 dark:text-zinc-400">Target: </span>
-            <span className="font-medium text-zinc-900 dark:text-zinc-100">
-              {formatMoney(totalTarget)}
-            </span>
-          </span>
-          <span>
-            <span className="text-zinc-500 dark:text-zinc-400">High: </span>
-            <span className="font-medium text-zinc-900 dark:text-zinc-100">
-              {formatMoney(totalHigh)}
-            </span>
-          </span>
-        </div>
+      <section>
+        <button
+          type="button"
+          onClick={() => setShowBreakdown((v) => !v)}
+          className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/50"
+          aria-expanded={showBreakdown}
+        >
+          <span>Per-section breakdown ({sectionsSorted.length})</span>
+          <span className="text-zinc-400">{showBreakdown ? "▾" : "▸"}</span>
+        </button>
+        {showBreakdown && (
+          <div className="mt-3 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-zinc-50 dark:bg-zinc-800/50">
+                <tr>
+                  <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
+                    Section
+                  </th>
+                  <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
+                    Bucket
+                  </th>
+                  <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
+                    Pricing profile
+                  </th>
+                  <th className="px-4 py-2 text-right font-medium text-zinc-900 dark:text-zinc-100">
+                    Range
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {(["BASE", "ALTERNATE", "ALLOWANCE"] as const).flatMap((bucket) =>
+                  sectionsSorted
+                    .filter((s) => s.bucket === bucket)
+                    .map((section) => (
+                      <tr
+                        key={section.id}
+                        className="border-t border-zinc-100 dark:border-zinc-800"
+                      >
+                        <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
+                          {section.name}
+                        </td>
+                        <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
+                          {BUCKET_LABELS[bucket] ?? bucket}
+                        </td>
+                        <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
+                          {section.sectionTypeName}
+                        </td>
+                        <td className="px-4 py-2 text-right font-medium text-zinc-700 dark:text-zinc-300 tabular-nums">
+                          {sectionRange(section)}
+                        </td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );
 }
 
-function ManualItemTargetInput({
-  value,
-  onPatch,
+// ── Totals card ────────────────────────────────────────────────────────────
+
+function TotalsCard({
+  subtotalLow,
+  subtotalTarget,
+  subtotalHigh,
+  retainerAmount,
+  retainerEnabled,
+  grandLow,
+  grandTarget,
+  grandHigh,
 }: {
-  value: number | null;
-  onPatch: (v: number | null) => void;
+  subtotalLow: number;
+  subtotalTarget: number;
+  subtotalHigh: number;
+  retainerAmount: number;
+  retainerEnabled: boolean;
+  grandLow: number;
+  grandTarget: number;
+  grandHigh: number;
 }) {
-  const [local, setLocal] = useState(value != null ? String(value) : "");
-  useEffect(() => {
-    setLocal(value != null ? String(value) : "");
-  }, [value]);
-  const handleBlur = () => {
-    const trimmed = local.trim();
-    if (trimmed === "") {
-      onPatch(null);
-      return;
-    }
-    const n = parseInt(trimmed, 10);
-    onPatch(Number.isNaN(n) ? null : n);
-  };
   return (
-    <input
-      type="number"
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={handleBlur}
-      placeholder="—"
-      min={0}
-      className="w-20 rounded border border-zinc-300 px-1.5 py-0.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-    />
+    <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="border-b border-zinc-100 bg-gradient-to-b from-zinc-50 to-white px-5 py-3 dark:border-zinc-800 dark:from-zinc-800/40 dark:to-zinc-900">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Project Investment
+        </h2>
+      </div>
+
+      <div className="grid grid-cols-1 gap-0 md:grid-cols-[1fr_auto_auto_auto]">
+        <TotalsRow
+          label="Subtotal (sections)"
+          low={subtotalLow}
+          target={subtotalTarget}
+          high={subtotalHigh}
+        />
+        {retainerEnabled && (
+          <TotalsRow
+            label="Design / Feasibility Retainer"
+            low={retainerAmount}
+            target={retainerAmount}
+            high={retainerAmount}
+            subdued
+          />
+        )}
+        <TotalsRow
+          label="Grand Total"
+          low={grandLow}
+          target={grandTarget}
+          high={grandHigh}
+          emphasis
+        />
+      </div>
+    </section>
   );
 }
 
-function SectionRowOverrides({
-  item,
-  onPatch,
+function TotalsRow({
+  label,
+  low,
+  target,
+  high,
+  emphasis,
+  subdued,
 }: {
-  item: Item;
-  onPatch: (p: UpdateInvestmentLineItemPatch) => void;
+  label: string;
+  low: number;
+  target: number;
+  high: number;
+  emphasis?: boolean;
+  subdued?: boolean;
 }) {
-  const [overrideLow, setOverrideLow] = useState(
-    item.overrideLow != null ? String(item.overrideLow) : ""
-  );
-  const [overrideTarget, setOverrideTarget] = useState(
-    item.overrideTarget != null ? String(item.overrideTarget) : ""
-  );
-  const [overrideHigh, setOverrideHigh] = useState(
-    item.overrideHigh != null ? String(item.overrideHigh) : ""
-  );
-  const [overrideNotes, setOverrideNotes] = useState(item.overrideNotes ?? "");
-
-  const applyOverrideValues = () => {
-    const low = overrideLow.trim() ? parseInt(overrideLow, 10) : null;
-    const target = overrideTarget.trim() ? parseInt(overrideTarget, 10) : null;
-    const high = overrideHigh.trim() ? parseInt(overrideHigh, 10) : null;
-    const patch: UpdateInvestmentLineItemPatch = {
-      overrideLow: low != null && !Number.isNaN(low) ? low : null,
-      overrideTarget: target != null && !Number.isNaN(target) ? target : null,
-      overrideHigh: high != null && !Number.isNaN(high) ? high : null,
-      overrideNotes: overrideNotes.trim() || null,
-    };
-    onPatch(patch);
-  };
+  const labelClass = emphasis
+    ? "text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+    : subdued
+      ? "text-sm text-zinc-600 dark:text-zinc-400"
+      : "text-sm text-zinc-700 dark:text-zinc-300";
+  const valueClass = emphasis
+    ? "text-base font-bold text-zinc-900 tabular-nums dark:text-zinc-100"
+    : subdued
+      ? "text-sm text-zinc-700 tabular-nums dark:text-zinc-300"
+      : "text-sm font-medium text-zinc-900 tabular-nums dark:text-zinc-100";
+  const rowBg = emphasis
+    ? "bg-orange-50/60 dark:bg-orange-500/5"
+    : "";
+  const borderTop = emphasis ? "border-t-2 border-orange-200 dark:border-orange-500/30" : "border-t border-zinc-100 dark:border-zinc-800";
 
   return (
-    <div className="flex flex-col gap-2">
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={item.isOverride}
-          onChange={(e) => {
-            const on = e.target.checked;
-            onPatch({ isOverride: on });
-            if (!on) {
-              setOverrideLow("");
-              setOverrideTarget("");
-              setOverrideHigh("");
-              setOverrideNotes("");
-            }
-          }}
-          className="rounded border-zinc-300 dark:border-zinc-600"
-        />
-        <span className="text-xs">Override for proposal</span>
-      </label>
-      {item.isOverride && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <input
-            type="number"
-            value={overrideLow}
-            onChange={(e) => setOverrideLow(e.target.value)}
-            onBlur={applyOverrideValues}
-            placeholder="Low $"
-            min={0}
-            className="w-20 rounded border border-zinc-300 px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-          />
-          <input
-            type="number"
-            value={overrideTarget}
-            onChange={(e) => setOverrideTarget(e.target.value)}
-            onBlur={applyOverrideValues}
-            placeholder="Target $"
-            min={0}
-            className="w-20 rounded border border-zinc-300 px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-          />
-          <input
-            type="number"
-            value={overrideHigh}
-            onChange={(e) => setOverrideHigh(e.target.value)}
-            onBlur={applyOverrideValues}
-            placeholder="High $"
-            min={0}
-            className="w-20 rounded border border-zinc-300 px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-          />
-          <input
-            type="text"
-            value={overrideNotes}
-            onChange={(e) => setOverrideNotes(e.target.value)}
-            onBlur={() => onPatch({ overrideNotes: overrideNotes.trim() || null })}
-            placeholder="Override notes"
-            className="min-w-[120px] rounded border border-zinc-300 px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-          />
-        </div>
-      )}
-      <label className="flex items-center gap-1">
-        <input
-          type="checkbox"
-          checked={item.includeInTotals}
-          onChange={(e) => onPatch({ includeInTotals: e.target.checked })}
-          className="rounded border-zinc-300 dark:border-zinc-600"
-        />
-        <span className="text-xs">Include in totals</span>
-      </label>
+    <div className={`col-span-full grid grid-cols-[1fr_auto_auto_auto] items-center gap-6 px-5 py-3 ${borderTop} ${rowBg}`}>
+      <div className={labelClass}>{label}</div>
+      <Cell label="Low" value={low} valueClass={valueClass} />
+      <Cell label="Target" value={target} valueClass={valueClass} />
+      <Cell label="High" value={high} valueClass={valueClass} />
     </div>
   );
 }
 
-function ItemForm({
+function Cell({ label, value, valueClass }: { label: string; value: number; valueClass: string }) {
+  return (
+    <div className="flex min-w-[110px] flex-col items-end">
+      <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+        {label}
+      </span>
+      <span className={valueClass}>{formatMoney(value)}</span>
+    </div>
+  );
+}
+
+// ── Retainer editor ────────────────────────────────────────────────────────
+
+function RetainerPanel({
   projectId,
-  item,
-  onDone,
-  onCancel,
-  submitAction,
+  retainer,
+  subtotalHigh,
+  computedAmount,
 }: {
   projectId: string;
-  item?: Item;
-  onDone: () => void;
-  onCancel: () => void;
-  submitAction: typeof updateInvestmentLineItemAction;
+  retainer: Retainer;
+  subtotalHigh: number;
+  computedAmount: number;
 }) {
-  const [label, setLabel] = useState(item?.label ?? "");
-  const [rangeLow, setRangeLow] = useState(
-    item?.rangeLow != null ? String(item.rangeLow) : ""
-  );
-  const [rangeTarget, setRangeTarget] = useState(
-    item?.rangeTarget != null ? String(item.rangeTarget) : ""
-  );
-  const [rangeHigh, setRangeHigh] = useState(
-    item?.rangeHigh != null ? String(item.rangeHigh) : ""
-  );
-  const [notes, setNotes] = useState(item?.notes ?? "");
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const formData = new FormData();
-    formData.set("label", label);
-    formData.set("rangeLow", rangeLow);
-    formData.set("rangeTarget", rangeTarget);
-    formData.set("rangeHigh", rangeHigh);
-    formData.set("notes", notes);
-    if (item) {
-      await (submitAction as typeof updateInvestmentLineItemAction)(
-        projectId,
-        item.id,
-        formData
-      );
+  const [enabled, setEnabled] = useState(retainer.enabled);
+  const [percentPct, setPercentPct] = useState(
+    (retainer.percent * 100).toFixed(2).replace(/\.?0+$/, "")
+  );
+  const [roundTo, setRoundTo] = useState(String(retainer.roundTo));
+  const [overrideStr, setOverrideStr] = useState(
+    retainer.override != null ? String(retainer.override) : ""
+  );
+
+  useEffect(() => {
+    setEnabled(retainer.enabled);
+    setPercentPct((retainer.percent * 100).toFixed(2).replace(/\.?0+$/, ""));
+    setRoundTo(String(retainer.roundTo));
+    setOverrideStr(retainer.override != null ? String(retainer.override) : "");
+  }, [retainer.enabled, retainer.percent, retainer.roundTo, retainer.override]);
+
+  async function patch(p: UpdateProjectRetainerPatch) {
+    setSaving(true);
+    try {
+      await updateProjectRetainer(projectId, p);
+      router.refresh();
+    } finally {
+      setSaving(false);
     }
-    onDone();
   }
 
+  const pctNum = parseFloat(percentPct);
+  const rawComputed = Number.isFinite(pctNum) ? subtotalHigh * (pctNum / 100) : 0;
+
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-3 py-2">
-      <input
-        type="text"
-        value={label}
-        onChange={(e) => setLabel(e.target.value)}
-        placeholder="Label"
-        required
-        className="rounded border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-      />
-      <input
-        type="number"
-        value={rangeLow}
-        onChange={(e) => setRangeLow(e.target.value)}
-        placeholder="Low $"
-        min={0}
-        className="w-24 rounded border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-      />
-      <input
-        type="number"
-        value={rangeTarget}
-        onChange={(e) => setRangeTarget(e.target.value)}
-        placeholder="Target $"
-        min={0}
-        className="w-24 rounded border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-      />
-      <input
-        type="number"
-        value={rangeHigh}
-        onChange={(e) => setRangeHigh(e.target.value)}
-        placeholder="High $"
-        min={0}
-        className="w-24 rounded border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-      />
-      <input
-        type="text"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes"
-        className="w-32 rounded border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-      />
-      <button
-        type="submit"
-        className="rounded bg-zinc-900 px-2 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
-      >
-        {item ? "Save" : "Add"}
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600"
-      >
-        Cancel
-      </button>
-    </form>
+    <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Design / Feasibility Retainer
+          </h2>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => {
+                setEnabled(e.target.checked);
+                void patch({ retainerEnabled: e.target.checked });
+              }}
+              className="rounded border-zinc-300 dark:border-zinc-600"
+            />
+            <span>Include on this project</span>
+          </label>
+        </div>
+        {saving && <span className="text-xs text-zinc-400">Saving…</span>}
+      </div>
+
+      <div className={`px-5 py-4 ${enabled ? "" : "opacity-50"}`}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[auto_auto_auto_1fr]">
+          {/* Percent */}
+          <div>
+            <label className="block text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Percent of subtotal high
+            </label>
+            <div className="mt-1 flex items-center gap-1">
+              <input
+                type="number"
+                step="0.5"
+                min={0}
+                max={100}
+                value={percentPct}
+                disabled={!enabled}
+                onChange={(e) => setPercentPct(e.target.value)}
+                onBlur={() => {
+                  const v = parseFloat(percentPct);
+                  if (!Number.isFinite(v) || v < 0 || v > 100) return;
+                  void patch({ retainerPercent: v / 100 });
+                }}
+                className="w-20 rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+              <span className="text-sm text-zinc-500">%</span>
+            </div>
+          </div>
+
+          {/* Round to */}
+          <div>
+            <label className="block text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Round to nearest
+            </label>
+            <select
+              value={roundTo}
+              disabled={!enabled}
+              onChange={(e) => {
+                setRoundTo(e.target.value);
+                void patch({ retainerRoundTo: parseInt(e.target.value, 10) });
+              }}
+              className="mt-1 rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+            >
+              <option value="1">$1</option>
+              <option value="100">$100</option>
+              <option value="500">$500</option>
+              <option value="1000">$1,000</option>
+              <option value="5000">$5,000</option>
+            </select>
+          </div>
+
+          {/* Override */}
+          <div>
+            <label className="block text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Override amount
+            </label>
+            <div className="mt-1 flex items-center gap-1">
+              <span className="text-sm text-zinc-500">$</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                placeholder="—"
+                value={overrideStr}
+                disabled={!enabled}
+                onChange={(e) => setOverrideStr(e.target.value)}
+                onBlur={() => {
+                  const trimmed = overrideStr.trim();
+                  if (trimmed === "") {
+                    void patch({ retainerOverride: null });
+                    return;
+                  }
+                  const n = parseInt(trimmed, 10);
+                  void patch({ retainerOverride: Number.isNaN(n) ? null : n });
+                }}
+                className="w-28 rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+              {overrideStr && enabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOverrideStr("");
+                    void patch({ retainerOverride: null });
+                  }}
+                  className="text-xs text-zinc-400 hover:text-zinc-600"
+                  title="Clear override"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Computed result */}
+          <div className="flex flex-col items-end justify-center rounded-lg bg-zinc-50 px-4 py-3 dark:bg-zinc-800/50">
+            <span className="text-[11px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Retainer amount
+            </span>
+            <span className="text-xl font-bold text-zinc-900 tabular-nums dark:text-zinc-100">
+              {formatMoney(computedAmount)}
+            </span>
+            <span className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+              {retainer.override != null
+                ? "Manual override"
+                : `${percentPct}% of ${formatMoney(subtotalHigh)} = ${formatMoney(rawComputed)}`}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

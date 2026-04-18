@@ -4,6 +4,7 @@ import type { ProposalSlide, DeckBranding, ProjectTimelineContent, ProjectPhase 
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, SECTION_LABEL_SIZE, HEADLINE_SCALE, BODY_SCALE, LINE_SPACING, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
+import { buildProjectPhases } from "@/app/lib/timeline-phases";
 
 interface Props {
   slide: ProposalSlide;
@@ -12,30 +13,11 @@ interface Props {
 }
 
 // ─── Default phases ──────────────────────────────────────────────────────────
+// Sourced from the canonical HHI timeline. Milestones (no duration) render
+// without a duration label; only the 3 editable phases carry duration text
+// pulled from the Timeline tab.
 
-export const DEFAULT_TIMELINE_PHASES: ProjectPhase[] = [
-  {
-    id: "design",
-    name: "Architectural Design",
-    duration: "8 \u2013 12 weeks",
-    description:
-      "Deep collaboration to create the exact remodel plan. HOA and permit approvals are secured during this window.",
-  },
-  {
-    id: "precon",
-    name: "Pre-Construction",
-    duration: "3 \u2013 5 weeks",
-    description:
-      "Material specification, permit document preparation, and cross-team review to generate the absolute final fixed-price build budget.",
-  },
-  {
-    id: "construction",
-    name: "Construction",
-    duration: "10 \u2013 14 weeks",
-    description:
-      "Our build team and specialized subcontractors execute the agreed plan with daily oversight and minimal disruption to your home.",
-  },
-];
+export const DEFAULT_TIMELINE_PHASES: ProjectPhase[] = buildProjectPhases([]);
 
 // ─── Design tokens ───────────────────────────────────────────────────────────
 
@@ -197,7 +179,7 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
           />
 
           <div style={{ display: "flex", flexDirection: "column", gap: "4%", height: "100%" }}>
-            {phases.map((phase, i) => (
+            {phases.map((phase) => (
               <div key={phase.id} style={{ position: "relative", display: "flex", gap: "3%" }}>
                 {/* Dot */}
                 <div
@@ -232,21 +214,23 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
                         textShadow: makeOutlineShadow(phase.nameOutline),
                       }}
                     >
-                      Phase {i + 1}: {phase.name}
+                      {phase.name}
                     </span>
-                    <span
-                      style={{
-                        fontFamily: phase.durationFont ?? bodyFont,
-                        fontSize: `${(phase.durationSize ?? 0.9) * 0.55 * bodyScale}em`,
-                        fontWeight: phase.durationBold ? 700 : 400,
-                        fontStyle: phase.durationItalic !== false ? "italic" : "normal",
-                        textDecoration: phase.durationUnderline ? "underline" : "none",
-                        color: phase.durationColor ?? resolvedAccent,
-                        textShadow: makeOutlineShadow(phase.durationOutline),
-                      }}
-                    >
-                      {phase.duration}
-                    </span>
+                    {phase.duration ? (
+                      <span
+                        style={{
+                          fontFamily: phase.durationFont ?? bodyFont,
+                          fontSize: `${(phase.durationSize ?? 0.9) * 0.55 * bodyScale}em`,
+                          fontWeight: phase.durationBold ? 700 : 400,
+                          fontStyle: phase.durationItalic !== false ? "italic" : "normal",
+                          textDecoration: phase.durationUnderline ? "underline" : "none",
+                          color: phase.durationColor ?? resolvedAccent,
+                          textShadow: makeOutlineShadow(phase.durationOutline),
+                        }}
+                      >
+                        {phase.duration}
+                      </span>
+                    ) : null}
                   </div>
 
                   {/* Description */}
@@ -398,7 +382,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
                     }}
                   >
                     {isLeft && (
-                      <PhaseBlock phase={phase} index={i} accent={accent} align="right" />
+                      <PhaseBlock phase={phase} accent={accent} align="right" />
                     )}
                   </div>
 
@@ -433,7 +417,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
                     }}
                   >
                     {!isLeft && (
-                      <PhaseBlock phase={phase} index={i} accent={accent} align="left" />
+                      <PhaseBlock phase={phase} accent={accent} align="left" />
                     )}
                   </div>
                 </div>
@@ -475,7 +459,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
   );
 }
 
-function PhaseBlock({ phase, index, accent, align }: { phase: ProjectPhase; index: number; accent: string; align: "left" | "right" }) {
+function PhaseBlock({ phase, accent, align }: { phase: ProjectPhase; accent: string; align: "left" | "right" }) {
   return (
     <>
       <p
@@ -493,23 +477,25 @@ function PhaseBlock({ phase, index, accent, align }: { phase: ProjectPhase; inde
           textShadow: makeOutlineShadow(phase.nameOutline),
         }}
       >
-        Phase {index + 1}: {phase.name}
+        {phase.name}
       </p>
-      <p
-        style={{
-          fontFamily: phase.durationFont ?? SLIDE_FONTS.defaults.body,
-          fontSize: `${(phase.durationSize ?? 0.9) * 0.5 * 1.1}em`,
-          fontWeight: phase.durationBold ? 700 : 400,
-          fontStyle: phase.durationItalic !== false ? "italic" : "normal",
-          textDecoration: phase.durationUnderline ? "underline" : "none",
-          color: phase.durationColor ?? accent,
-          textAlign: align,
-          marginBottom: "3%",
-          textShadow: makeOutlineShadow(phase.durationOutline),
-        }}
-      >
-        {phase.duration}
-      </p>
+      {phase.duration ? (
+        <p
+          style={{
+            fontFamily: phase.durationFont ?? SLIDE_FONTS.defaults.body,
+            fontSize: `${(phase.durationSize ?? 0.9) * 0.5 * 1.1}em`,
+            fontWeight: phase.durationBold ? 700 : 400,
+            fontStyle: phase.durationItalic !== false ? "italic" : "normal",
+            textDecoration: phase.durationUnderline ? "underline" : "none",
+            color: phase.durationColor ?? accent,
+            textAlign: align,
+            marginBottom: "3%",
+            textShadow: makeOutlineShadow(phase.durationOutline),
+          }}
+        >
+          {phase.duration}
+        </p>
+      ) : null}
       <p
         style={{
           fontFamily: phase.descriptionFont ?? SLIDE_FONTS.defaults.body,
@@ -616,20 +602,25 @@ function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasAi
                     textShadow: makeOutlineShadow(phase.nameOutline),
                   }}
                 >
-                  Phase {i + 1}: {phase.name}{" "}
-                  <span
-                    style={{
-                      fontFamily: phase.durationFont ?? bodyFont,
-                      fontWeight: phase.durationBold ? 700 : 400,
-                      fontStyle: phase.durationItalic !== false ? "italic" : "normal",
-                      textDecoration: phase.durationUnderline ? "underline" : "none",
-                      color: phase.durationColor ?? resolvedAccent,
-                      fontSize: "0.85em",
-                      textShadow: makeOutlineShadow(phase.durationOutline),
-                    }}
-                  >
-                    ({phase.duration})
-                  </span>
+                  {phase.name}
+                  {phase.duration ? (
+                    <>
+                      {" "}
+                      <span
+                        style={{
+                          fontFamily: phase.durationFont ?? bodyFont,
+                          fontWeight: phase.durationBold ? 700 : 400,
+                          fontStyle: phase.durationItalic !== false ? "italic" : "normal",
+                          textDecoration: phase.durationUnderline ? "underline" : "none",
+                          color: phase.durationColor ?? resolvedAccent,
+                          fontSize: "0.85em",
+                          textShadow: makeOutlineShadow(phase.durationOutline),
+                        }}
+                      >
+                        ({phase.duration})
+                      </span>
+                    </>
+                  ) : null}
                 </p>
 
                 {/* Description */}

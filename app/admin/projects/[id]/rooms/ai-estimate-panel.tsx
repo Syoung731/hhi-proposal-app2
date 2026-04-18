@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -40,6 +40,13 @@ type RoomTemplate = {
   name: string;
   displayName?: string | null;
   active: boolean;
+};
+
+type TradeUpdateProposalShape = {
+  summary: string;
+  add: Array<{ name: string; quantity: number; unit: string; unitCost: number; unitPrice: number; catalogItemId?: string | null; reason: string }>;
+  update: Array<{ id: string; quantity?: number; unit?: string; unitCost?: number; unitPrice?: number; name?: string; reason: string }>;
+  delete: Array<{ id: string; reason: string }>;
 };
 
 // ─── Constants ─────────────────────────────────────────────────────
@@ -183,11 +190,25 @@ function ConfidenceDot({ confidence }: { confidence?: number | null }) {
 function NotesTooltip({ notes }: { notes?: string | null }) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => setShow(false), 200);
+  };
+  useEffect(() => () => cancelClose(), []);
+
   const btnRef = useCallback(
     (node: HTMLButtonElement | null) => {
       if (node && show) {
         const rect = node.getBoundingClientRect();
-        setPos({ x: rect.left, y: rect.bottom + 4 });
+        setPos({ x: rect.left, y: rect.bottom });
       }
     },
     [show]
@@ -199,21 +220,23 @@ function NotesTooltip({ notes }: { notes?: string | null }) {
         ref={btnRef}
         type="button"
         className="shrink-0 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-bold text-zinc-500 hover:text-brand-accent transition-colors"
-        onMouseEnter={() => setShow(true)}
-        onMouseLeave={() => setShow(false)}
+        onMouseEnter={() => { cancelClose(); setShow(true); }}
+        onMouseLeave={scheduleClose}
         onClick={() => setShow((s) => !s)}
       >
         i
       </button>
       {show && pos && (
         <div
-          className="rounded-md border border-zinc-200 bg-white p-2.5 text-[11px] leading-relaxed text-zinc-600 shadow-xl"
-          style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 9999, width: 320, maxHeight: 200, overflowY: "auto" }}
-          onMouseEnter={() => setShow(true)}
-          onMouseLeave={() => setShow(false)}
+          className="rounded-md border border-zinc-200 bg-white text-[11px] leading-relaxed text-zinc-600 shadow-xl"
+          style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 9999, width: 320, maxHeight: 240, paddingTop: 6 }}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
         >
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">AI Notes</div>
-          {notes}
+          <div className="px-2.5 pt-1.5" style={{ maxHeight: 228, overflowY: "auto" }}>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">AI Notes</div>
+            <div className="pb-2.5">{notes}</div>
+          </div>
         </div>
       )}
     </>
@@ -280,78 +303,206 @@ function InlineNumber({
 
 // ─── Add Item Form ─────────────────────────────────────────────────
 
+type CatalogItem = {
+  id: string;
+  name: string;
+  unit: string;
+  unitCost: number | null;
+  unitPrice: number | null;
+  trade: string | null;
+  costType: string | null;
+};
+
 function AddItemForm({
   tradeGroup,
   onAdd,
   onCancel,
 }: {
   tradeGroup: string;
-  onAdd: (item: { tradeGroup: string; name: string; quantity: number; unit: string; unitCost: number; unitPrice: number }) => void;
+  onAdd: (item: { tradeGroup: string; name: string; quantity: number; unit: string; unitCost: number; unitPrice: number; catalogItemId?: string | null }) => void;
   onCancel: () => void;
 }) {
+  const [mode, setMode] = useState<"catalog" | "manual">("catalog");
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<CatalogItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<CatalogItem | null>(null);
+
   const [name, setName] = useState("");
   const [qty, setQty] = useState("1");
   const [unit, setUnit] = useState("EA");
   const [cost, setCost] = useState("0");
   const [price, setPrice] = useState("0");
 
+  // Debounced catalog search
+  useEffect(() => {
+    if (mode !== "catalog") return;
+    const q = search.trim();
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/settings/catalog/items?search=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (!cancelled) setResults((data.items ?? []).slice(0, 20));
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [search, mode]);
+
+  const selectCatalogItem = (item: CatalogItem) => {
+    setSelected(item);
+    setName(item.name);
+    setUnit(item.unit || "EA");
+    setCost(String(item.unitCost ?? 0));
+    setPrice(String(item.unitPrice ?? 0));
+    setResults([]);
+    setSearch(item.name);
+  };
+
   const handleSubmit = () => {
-    if (!name.trim()) return;
+    const itemName = (mode === "catalog" ? (selected?.name ?? name) : name).trim();
+    if (!itemName) return;
     onAdd({
       tradeGroup,
-      name: name.trim(),
+      name: itemName,
       quantity: parseFloat(qty) || 1,
       unit,
       unitCost: parseFloat(cost) || 0,
       unitPrice: parseFloat(price) || 0,
+      catalogItemId: mode === "catalog" ? selected?.id ?? null : null,
     });
   };
 
+  const switchMode = (next: "catalog" | "manual") => {
+    setMode(next);
+    setSelected(null);
+    if (next === "manual") {
+      setResults([]);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2 py-1 pl-6 pr-2 bg-zinc-50 border-t border-zinc-100">
-      <input
-        type="text"
-        placeholder="Item name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="flex-1 min-w-0 rounded border border-zinc-300 px-2 py-0.5 text-xs"
-        autoFocus
-        onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
-      />
-      <input
-        type="number"
-        placeholder="Qty"
-        value={qty}
-        onChange={(e) => setQty(e.target.value)}
-        className="w-14 rounded border border-zinc-300 px-1 py-0.5 text-xs text-right"
-      />
-      <input
-        type="text"
-        placeholder="Unit"
-        value={unit}
-        onChange={(e) => setUnit(e.target.value)}
-        className="w-10 rounded border border-zinc-300 px-1 py-0.5 text-xs"
-      />
-      <input
-        type="number"
-        placeholder="Cost"
-        value={cost}
-        onChange={(e) => setCost(e.target.value)}
-        className="w-16 rounded border border-zinc-300 px-1 py-0.5 text-xs text-right"
-      />
-      <input
-        type="number"
-        placeholder="Price"
-        value={price}
-        onChange={(e) => setPrice(e.target.value)}
-        className="w-16 rounded border border-zinc-300 px-1 py-0.5 text-xs text-right"
-      />
-      <button type="button" onClick={handleSubmit} className="rounded bg-zinc-900 px-2 py-0.5 text-xs text-white hover:bg-zinc-700">
-        Add
-      </button>
-      <button type="button" onClick={onCancel} className="rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-100">
-        Cancel
-      </button>
+    <div className="py-2 pl-6 pr-2 bg-zinc-50 border-t border-zinc-100 space-y-1">
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 text-[10px]">
+        <button
+          type="button"
+          onClick={() => switchMode("catalog")}
+          className={`rounded px-2 py-0.5 ${mode === "catalog" ? "bg-zinc-900 text-white" : "bg-white border border-zinc-300 text-zinc-700 hover:bg-zinc-100"}`}
+        >
+          Search catalog
+        </button>
+        <button
+          type="button"
+          onClick={() => switchMode("manual")}
+          className={`rounded px-2 py-0.5 ${mode === "manual" ? "bg-zinc-900 text-white" : "bg-white border border-zinc-300 text-zinc-700 hover:bg-zinc-100"}`}
+        >
+          Manual entry
+        </button>
+        <span className="ml-auto text-zinc-400">{mode === "catalog" && selected ? "Catalog item selected" : ""}</span>
+      </div>
+
+      {mode === "catalog" && (
+        <div>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search catalog by name (min 2 chars)…"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setSelected(null); }}
+              className="w-full rounded border border-zinc-300 px-2 py-1 text-xs"
+              autoFocus
+            />
+            {loading && <span className="absolute right-2 top-1.5 text-[10px] text-zinc-400">searching…</span>}
+          </div>
+          {results.length > 0 && !selected && (
+            <div className="mt-0.5 w-full max-h-56 overflow-y-auto rounded border border-zinc-300 bg-white shadow-sm">
+              {results.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => selectCatalogItem(item)}
+                  className="flex w-full items-center gap-2 border-b border-zinc-100 px-2 py-1 text-left text-xs hover:bg-orange-50 last:border-b-0"
+                >
+                  <span className="flex-1 truncate">{item.name}</span>
+                  <span className="text-[10px] text-zinc-500">{item.trade ?? "—"}</span>
+                  <span className="w-8 text-right text-[10px] text-zinc-500">{item.unit}</span>
+                  <span className="w-16 text-right tabular-nums">
+                    ${(item.unitPrice ?? 0).toFixed(2)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quantity / unit / cost / price — editable in both modes (catalog selection pre-fills) */}
+      <div className="flex items-center gap-2">
+        {mode === "manual" && (
+          <input
+            type="text"
+            placeholder="Item name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="flex-1 min-w-0 rounded border border-zinc-300 px-2 py-0.5 text-xs"
+            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+          />
+        )}
+        {mode === "catalog" && <div className="flex-1" />}
+        <input
+          type="number"
+          placeholder="Qty"
+          value={qty}
+          onChange={(e) => setQty(e.target.value)}
+          className="w-14 rounded border border-zinc-300 px-1 py-0.5 text-xs text-right"
+          title="Quantity"
+        />
+        <input
+          type="text"
+          placeholder="Unit"
+          value={unit}
+          onChange={(e) => setUnit(e.target.value)}
+          className="w-10 rounded border border-zinc-300 px-1 py-0.5 text-xs"
+          title="Unit"
+        />
+        <input
+          type="number"
+          placeholder="Cost"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+          className="w-16 rounded border border-zinc-300 px-1 py-0.5 text-xs text-right"
+          title="Unit Cost"
+        />
+        <input
+          type="number"
+          placeholder="Price"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          className="w-16 rounded border border-zinc-300 px-1 py-0.5 text-xs text-right"
+          title="Unit Price"
+        />
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={mode === "catalog" && !selected && !name.trim()}
+          className="rounded bg-zinc-900 px-2 py-0.5 text-xs text-white hover:bg-zinc-700 disabled:opacity-40"
+        >
+          Add
+        </button>
+        <button type="button" onClick={onCancel} className="rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-100">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -369,6 +520,8 @@ function TradeGroupSection({
   onDeleteItem,
   onAddItem,
   accentColor,
+  estimateId,
+  onReplaceEstimate,
 }: {
   tradeGroup: string;
   items: LineItem[];
@@ -376,39 +529,235 @@ function TradeGroupSection({
   onToggleCollapsed: () => void;
   onUpdateItem: (itemId: string, field: "quantity" | "unitCost" | "unitPrice", value: number) => void;
   onDeleteItem: (itemId: string) => void;
-  onAddItem: (item: { tradeGroup: string; name: string; quantity: number; unit: string; unitCost: number; unitPrice: number }) => void;
+  onAddItem: (item: { tradeGroup: string; name: string; quantity: number; unit: string; unitCost: number; unitPrice: number; catalogItemId?: string | null }) => void;
   accentColor: string;
+  estimateId: string | null;
+  onReplaceEstimate: (estimate: Estimate) => void;
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiProposal, setAiProposal] = useState<TradeUpdateProposalShape | null>(null);
+  const [applying, setApplying] = useState(false);
+
   const sortedItems = useMemo(() => sortMaterialInstallPairs(items), [items]);
   const groupTotal = items.reduce((sum, i) => sum + i.totalPrice, 0);
   const groupRangeLow = items.reduce((sum, i) => sum + (i.totalPriceLow ?? i.totalPrice), 0);
   const groupRangeHigh = items.reduce((sum, i) => sum + (i.totalPriceHigh ?? i.totalPrice), 0);
 
+  const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+
+  const runAiUpdate = async () => {
+    if (!estimateId || !aiInstruction.trim()) return;
+    setAiLoading(true);
+    setAiError(null);
+    setAiProposal(null);
+    try {
+      const res = await fetch(`/api/ai-estimate/${estimateId}/update-trade`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tradeGroup, instruction: aiInstruction.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "AI update failed");
+      setAiProposal(data.proposal as TradeUpdateProposalShape);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "AI update failed");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const applyProposal = async () => {
+    if (!estimateId || !aiProposal) return;
+    setApplying(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`/api/ai-estimate/${estimateId}/apply-trade-update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tradeGroup, proposal: aiProposal }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Apply failed");
+      onReplaceEstimate(data.estimate as Estimate);
+      setAiProposal(null);
+      setAiInstruction("");
+      setShowAiPanel(false);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "Apply failed");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const cancelProposal = () => {
+    setAiProposal(null);
+    setAiError(null);
+  };
+
   return (
     <div className="border-b border-zinc-100 last:border-b-0">
       {/* Trade group header — darker accent tint */}
-      <button
-        type="button"
-        onClick={onToggleCollapsed}
-        className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:brightness-95 border-b border-zinc-200"
+      <div
+        className="flex w-full items-center gap-2 px-3 py-2 text-xs border-b border-zinc-200"
         style={{ backgroundColor: hexToRgba(accentColor, 0.15) }}
       >
-        <span className="text-zinc-500 text-[10px] w-3 shrink-0">
-          {collapsed ? "▶" : "▼"}
-        </span>
-        <span className="font-bold text-zinc-900 text-xs">
-          {tradeGroup}
-        </span>
-        <span className="text-[10px] text-zinc-500">
-          ({items.length})
-        </span>
-        <span className="ml-auto font-bold text-zinc-900 tabular-nums text-xs"
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="flex items-center gap-2 flex-1 hover:brightness-95 text-left"
+        >
+          <span className="text-zinc-500 text-[10px] w-3 shrink-0">
+            {collapsed ? "▶" : "▼"}
+          </span>
+          <span className="font-bold text-zinc-900 text-xs">
+            {tradeGroup}
+          </span>
+          <span className="text-[10px] text-zinc-500">
+            ({items.length})
+          </span>
+        </button>
+        {estimateId && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShowAiPanel((v) => !v); }}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${showAiPanel ? "bg-orange-500 text-white" : "bg-white border border-orange-300 text-orange-600 hover:bg-orange-50"}`}
+            title="Update this trade group with AI"
+          >
+            ✨ AI
+          </button>
+        )}
+        <span className="font-bold text-zinc-900 tabular-nums text-xs"
           title={groupRangeLow !== groupRangeHigh ? `Range: ${fmtMoney(groupRangeLow)} – ${fmtMoney(groupRangeHigh)}` : undefined}
         >
           {fmtMoney(groupTotal)}
         </span>
-      </button>
+      </div>
+
+      {/* AI Update Panel */}
+      {showAiPanel && (
+        <div className="px-3 py-2 bg-orange-50/50 border-b border-orange-200 space-y-2">
+          {!aiProposal && (
+            <>
+              <textarea
+                value={aiInstruction}
+                onChange={(e) => setAiInstruction(e.target.value)}
+                placeholder={`E.g., "Add Range Hood and Microwave to the install items"`}
+                className="w-full rounded border border-orange-300 px-2 py-1 text-xs bg-white resize-y min-h-[48px]"
+                disabled={aiLoading}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={runAiUpdate}
+                  disabled={!aiInstruction.trim() || aiLoading}
+                  className="rounded bg-orange-500 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-orange-600 disabled:opacity-40"
+                >
+                  {aiLoading ? "Generating…" : "Submit"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowAiPanel(false); setAiInstruction(""); setAiError(null); }}
+                  className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                >
+                  Cancel
+                </button>
+                {aiError && <span className="text-[11px] text-red-600">{aiError}</span>}
+              </div>
+            </>
+          )}
+
+          {/* Preview of diff */}
+          {aiProposal && (
+            <div className="space-y-1">
+              <div className="text-[11px] text-zinc-700"><span className="font-semibold">Proposed changes:</span> {aiProposal.summary}</div>
+              {aiProposal.add?.length > 0 && (
+                <div className="rounded border border-green-300 bg-green-50 px-2 py-1">
+                  <div className="text-[10px] font-semibold text-green-700 uppercase tracking-wider">Add ({aiProposal.add.length})</div>
+                  {aiProposal.add.map((op, idx) => {
+                    const isZero = (op.unitPrice ?? 0) === 0 && (op.quantity ?? 0) > 0;
+                    return (
+                      <div key={`add-${idx}`} className={`mt-0.5 text-[11px] ${isZero ? "text-red-700" : "text-zinc-700"}`}>
+                        + <span className="font-medium">{op.name}</span> — {op.quantity} {op.unit} @ ${op.unitPrice.toFixed(2)} = ${(op.quantity * op.unitPrice).toFixed(2)}
+                        {isZero && <span className="ml-2 inline-block rounded bg-red-100 px-1 text-[10px] font-semibold text-red-700">⚠ $0 PRICE — cannot apply</span>}
+                        <div className="pl-3 text-[10px] text-zinc-500">{op.reason}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {aiProposal.update?.length > 0 && (
+                <div className="rounded border border-blue-300 bg-blue-50 px-2 py-1">
+                  <div className="text-[10px] font-semibold text-blue-700 uppercase tracking-wider">Update ({aiProposal.update.length})</div>
+                  {aiProposal.update.map((op, idx) => {
+                    const existing = itemsById.get(op.id);
+                    return (
+                      <div key={`upd-${idx}`} className="mt-0.5 text-[11px] text-zinc-700">
+                        ~ <span className="font-medium">{existing?.name ?? op.id}</span>
+                        {op.quantity != null && existing && ` | qty ${existing.quantity} → ${op.quantity}`}
+                        {op.unitCost != null && existing && ` | cost $${existing.unitCost} → $${op.unitCost}`}
+                        {op.unitPrice != null && existing && ` | price $${existing.unitPrice} → $${op.unitPrice}`}
+                        <div className="pl-3 text-[10px] text-zinc-500">{op.reason}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {aiProposal.delete?.length > 0 && (
+                <div className="rounded border border-red-300 bg-red-50 px-2 py-1">
+                  <div className="text-[10px] font-semibold text-red-700 uppercase tracking-wider">Remove ({aiProposal.delete.length})</div>
+                  {aiProposal.delete.map((op, idx) => {
+                    const existing = itemsById.get(op.id);
+                    return (
+                      <div key={`del-${idx}`} className="mt-0.5 text-[11px] text-zinc-700">
+                        − <span className="font-medium line-through">{existing?.name ?? op.id}</span>
+                        <div className="pl-3 text-[10px] text-zinc-500">{op.reason}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {aiProposal.add?.length === 0 && aiProposal.update?.length === 0 && aiProposal.delete?.length === 0 && (
+                <div className="text-[11px] text-zinc-500 italic">No changes proposed.</div>
+              )}
+              {(() => {
+                const hasZeroAdds = aiProposal.add.some((op) => (op.unitPrice ?? 0) === 0 && (op.quantity ?? 0) > 0);
+                const isEmpty = aiProposal.add.length === 0 && aiProposal.update.length === 0 && aiProposal.delete.length === 0;
+                return (
+                  <div className="space-y-1 pt-1">
+                    {hasZeroAdds && (
+                      <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                        One or more items have $0 price. Reject and try rewording your instruction (e.g., ask for specific pricing).
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={applyProposal}
+                        disabled={applying || isEmpty || hasZeroAdds}
+                        className="rounded bg-orange-500 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-orange-600 disabled:opacity-40"
+                      >
+                        {applying ? "Applying…" : "Apply changes"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelProposal}
+                        className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                      >
+                        Reject / Try again
+                      </button>
+                      {aiError && <span className="text-[11px] text-red-600">{aiError}</span>}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
       {!collapsed && (
         <div className="pb-0.5">
           {/* Column headers — once per trade group */}
@@ -676,7 +1025,7 @@ export function AIEstimatePanel({
   );
 
   const handleAddItem = useCallback(
-    async (item: { tradeGroup: string; name: string; quantity: number; unit: string; unitCost: number; unitPrice: number }) => {
+    async (item: { tradeGroup: string; name: string; quantity: number; unit: string; unitCost: number; unitPrice: number; catalogItemId?: string | null }) => {
       if (!estimate) return;
       try {
         const res = await fetch(`/api/ai-estimate/${estimate.id}/items`, {
@@ -892,6 +1241,8 @@ export function AIEstimatePanel({
               onDeleteItem={handleDeleteItem}
               onAddItem={handleAddItem}
               accentColor={accentColor}
+              estimateId={estimate?.id ?? null}
+              onReplaceEstimate={(e) => setEstimate(e)}
             />
           ))}
         </div>

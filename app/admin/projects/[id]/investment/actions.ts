@@ -149,6 +149,47 @@ export async function deleteInvestmentLineItemAction(
   return {};
 }
 
+export type UpdateProjectRetainerPatch = {
+  retainerEnabled?: boolean;
+  retainerPercent?: number;
+  retainerRoundTo?: number;
+  retainerOverride?: number | null;
+};
+
+export async function updateProjectRetainer(
+  projectId: string,
+  patch: UpdateProjectRetainerPatch
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!project) return { error: "Project not found" };
+  const data: Parameters<typeof prisma.project.update>[0]["data"] = {};
+  if (patch.retainerEnabled !== undefined) data.retainerEnabled = patch.retainerEnabled;
+  if (patch.retainerPercent !== undefined) {
+    const p = Number(patch.retainerPercent);
+    if (!Number.isFinite(p) || p < 0 || p > 1) return { error: "Invalid percent (0–1)" };
+    data.retainerPercent = p;
+  }
+  if (patch.retainerRoundTo !== undefined) {
+    const r = Math.max(1, Math.round(Number(patch.retainerRoundTo)));
+    data.retainerRoundTo = r;
+  }
+  if (patch.retainerOverride !== undefined) {
+    if (patch.retainerOverride === null) data.retainerOverride = null;
+    else {
+      const n = Math.round(Number(patch.retainerOverride));
+      data.retainerOverride = Number.isFinite(n) && n >= 0 ? n : null;
+    }
+  }
+  await prisma.project.update({ where: { id: projectId }, data });
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
 export async function moveInvestmentOrderAction(
   projectId: string,
   itemId: string,

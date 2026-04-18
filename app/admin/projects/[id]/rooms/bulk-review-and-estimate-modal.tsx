@@ -101,9 +101,10 @@ function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): s
   const lower = roomName.toLowerCase();
   const rules: [string[], string][] = [
     [["kitchen"], "kitchen"],
-    [["bath", "bathroom"], "bath"],
-    [["laundry"], "laundry"],
+    [["bath", "bathroom", "powder"], "bath"],
+    [["laundry", "mud room", "mudroom"], "laundry"],
     [["closet"], "closet"],
+    [["cope", "admin", "project execution", "overhead"], "cope"],
   ];
   for (const [keywords, match] of rules) {
     if (keywords.some((kw) => lower.includes(kw))) {
@@ -111,7 +112,11 @@ function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): s
       if (t) return t.id;
     }
   }
-  return null;
+  // Default: Standard Room for everything else
+  return templates.find((t) => {
+    const n = t.name.toLowerCase();
+    return n.includes("standard") || n === "general" || n === "standard room";
+  })?.id ?? null;
 }
 
 // ---------- Component ----------

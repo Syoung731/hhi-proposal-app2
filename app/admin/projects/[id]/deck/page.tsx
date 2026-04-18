@@ -5,6 +5,7 @@ import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getDeckForProject } from "@/app/lib/deck/db";
 import { getDesignBuildDefaults } from "@/app/lib/design-build-defaults.server";
+import { isRendrConfigured } from "@/app/lib/rendr/rendrClient";
 // Note: we fetch backgrounds directly with Prisma here (not via the server action)
 // so we stay within the server component request context for auth.
 import { DeckEditorClient } from "./DeckEditorClient";
@@ -274,6 +275,9 @@ export default async function DeckEditorPage({ params }: PageProps) {
   // ── Design-Build defaults for addSlide ─────────────────────────────────────
   const designBuildDefaults = await getDesignBuildDefaults();
 
+  // ── Rendr integration status (for tab nav visibility) ──────────────────────
+  const rendrConfigured = await isRendrConfigured().catch(() => false);
+
   // ── Proposal config (objective text, commitments) ────────────────────────────
   // Fetched before getDeckForProject so the objective slide injection below
   // can backfill blank seeded slides on first load.
@@ -314,6 +318,15 @@ export default async function DeckEditorPage({ params }: PageProps) {
       if (slide.type === "cover") {
         slide.content = { ...(slide.content ?? {}), heroImageUrl: coverHeroUrl };
       }
+    }
+  }
+
+  // Inject the project address into every cover slide's content.address so
+  // "Prepared for …" shows the client/project site address, not the company
+  // office. Skipped once the user edits the slide so their override is kept.
+  for (const slide of slides) {
+    if (slide.type === "cover" && !slide.isUserModified) {
+      slide.content = { ...(slide.content ?? {}), address };
     }
   }
 
@@ -379,6 +392,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       projectRoomsWithMedia={projectRoomsWithMedia}
       projectLevelMedia={projectLevelMedia}
       brandBackgrounds={brandBackgrounds}
+      rendrConfigured={rendrConfigured}
     />
   );
 }

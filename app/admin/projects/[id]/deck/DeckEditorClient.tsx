@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import Link from "next/link";
 import type {
   ProposalSlide,
   DeckBranding,
@@ -21,6 +20,7 @@ import { InspectorPanel } from "./InspectorPanel";
 import type { BrandBackgroundForUI } from "@/app/admin/settings/settings-tabs";
 import type { GlobalDesignBuildSettings } from "@/app/lib/design-build-defaults";
 import { analyzeBackgroundTextZoneAction } from "@/app/admin/settings/branding/backgrounds/actions";
+import { ProjectTabNav } from "../ProjectTabNav";
 
 interface Props {
   /** Slides loaded from the database (post auto-sync). */
@@ -38,6 +38,8 @@ interface Props {
   projectLevelMedia?: RoomMediaItem[];
   /** Brand backgrounds for the per-slide background picker. */
   brandBackgrounds?: BrandBackgroundForUI[];
+  /** Whether Rendr integration is configured — controls tab nav visibility. */
+  rendrConfigured?: boolean;
 }
 
 function generateId() {
@@ -280,6 +282,7 @@ export function DeckEditorClient({
   projectRoomsWithMedia,
   projectLevelMedia = [],
   brandBackgrounds = [],
+  rendrConfigured = false,
 }: Props) {
   const [slides, setSlides] = useState<ProposalSlide[]>(
     [...initialSlides].sort((a, b) => a.order - b.order)
@@ -808,115 +811,68 @@ export function DeckEditorClient({
     [slides, activeSlideId]
   );
 
+  const deckActions = (
+    <>
+      <AddSlideMenu onAdd={(type) => addSlide(type)} accentColor={branding.accentColor} />
+      <AutoBeforeAfterMenu
+        onAutoGen={autoGenBeforeAfterSlides}
+        onRefresh={handleServerRefresh}
+        onAutoGenScope={autoGenScopeBreakdown}
+        accentColor={branding.accentColor}
+      />
+      <button
+        onClick={async () => {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          setSaveStatus("saving");
+          const result = await saveDeckSlidesAction(projectId, slides);
+          setSaveStatus(result.ok ? "saved" : "error");
+        }}
+        disabled={saveStatus === "saving"}
+        className="rounded font-semibold"
+        style={{
+          fontSize: 11,
+          padding: "4px 12px",
+          background: saveStatus === "error" ? "#EF4444" : branding.accentColor,
+          color: "#fff",
+          border: "none",
+          cursor: saveStatus === "saving" ? "not-allowed" : "pointer",
+          opacity: saveStatus === "saving" ? 0.7 : 1,
+          minWidth: 60,
+          transition: "background 0.2s",
+        }}
+      >
+        {saveStatus === "saving"
+          ? "Saving…"
+          : saveStatus === "saved"
+          ? "Saved ✓"
+          : saveStatus === "error"
+          ? "Error"
+          : "Save"}
+      </button>
+    </>
+  );
+
   return (
     <div
-      className="flex flex-col"
-      style={{ height: "100vh", background: "#F4F3F0" }}
+      className="flex flex-col -mt-10 -mb-10"
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="application"
     >
-      {/* ── Top bar ─────────────────────────────────────────────────────── */}
-      <header
-        className="flex items-center justify-between flex-shrink-0"
-        style={{
-          height: 48,
-          background: "#1E2D3A",
-          padding: "0 16px",
-          borderBottom: "1px solid #0F1A24",
-        }}
-      >
-        {/* Left — back + title */}
-        <div className="flex items-center gap-3">
-          <Link
-            href={`/admin/projects/${projectId}`}
-            className="flex items-center gap-1.5 rounded"
-            style={{
-              fontSize: 12,
-              color: "#94A3B8",
-              padding: "3px 6px",
-              textDecoration: "none",
-            }}
-          >
-            ← Projects
-          </Link>
-          <span style={{ color: "#334155", fontSize: 12 }}>|</span>
-          <span style={{ fontSize: 13, color: "#E2E8F0", fontWeight: 600 }}>
-            Deck Editor
-          </span>
-          {projectTitle && (
-            <>
-              <span style={{ color: "#334155", fontSize: 12 }}>·</span>
-              <span style={{ fontSize: 12, color: "#64748B", maxWidth: 240 }} className="truncate">
-                {projectTitle}
-              </span>
-            </>
-          )}
-        </div>
-
-        {/* Center — slide counter */}
-        <div className="flex items-center gap-2">
-          {slides.map((s, i) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveSlideId(s.id)}
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: s.id === activeSlideId ? branding.accentColor : "#334155",
-                border: "none",
-                cursor: "pointer",
-                transition: "background 0.15s",
-              }}
-              title={`Slide ${i + 1}`}
-            />
-          ))}
-        </div>
-
-        {/* Right — add slide dropdown + auto B/A + save placeholder */}
-        <div className="flex items-center gap-2">
-          <AddSlideMenu onAdd={(type) => addSlide(type)} accentColor={branding.accentColor} />
-          <AutoBeforeAfterMenu
-            onAutoGen={autoGenBeforeAfterSlides}
-            onRefresh={handleServerRefresh}
-            onAutoGenScope={autoGenScopeBreakdown}
-            accentColor={branding.accentColor}
-          />
-          <button
-            onClick={async () => {
-              if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-              setSaveStatus("saving");
-              const result = await saveDeckSlidesAction(projectId, slides);
-              setSaveStatus(result.ok ? "saved" : "error");
-            }}
-            disabled={saveStatus === "saving"}
-            className="rounded font-semibold"
-            style={{
-              fontSize: 11,
-              padding: "4px 12px",
-              background: saveStatus === "error" ? "#EF4444" : branding.accentColor,
-              color: "#fff",
-              border: "none",
-              cursor: saveStatus === "saving" ? "not-allowed" : "pointer",
-              opacity: saveStatus === "saving" ? 0.7 : 1,
-              minWidth: 60,
-              transition: "background 0.2s",
-            }}
-          >
-            {saveStatus === "saving"
-              ? "Saving…"
-              : saveStatus === "saved"
-              ? "Saved ✓"
-              : saveStatus === "error"
-              ? "Error"
-              : "Save"}
-          </button>
-        </div>
-      </header>
+      {/* ── Tab nav with deck actions flush-right ───────────────────────── */}
+      <ProjectTabNav
+        projectId={projectId}
+        currentTab="deck"
+        rendrConfigured={rendrConfigured}
+        rightSlot={deckActions}
+        stickyTop={112}
+      />
 
       {/* ── Three-column editor layout ───────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
+      <div
+        className="flex overflow-hidden"
+        style={{ background: "#F4F3F0", height: "calc(100vh - 160px)" }}
+      >
         {/* Left — slide rail */}
         <SlideRail
           slides={slides}

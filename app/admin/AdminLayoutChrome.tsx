@@ -45,7 +45,7 @@ export function AdminLayoutChrome({
                 <img
                   src={logoLightUrl}
                   alt="Admin"
-                  className="h-10 w-auto object-contain"
+                  className="h-16 w-auto object-contain"
                 />
               ) : (
                 "HHI Admin"

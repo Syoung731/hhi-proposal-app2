@@ -72,18 +72,20 @@ export default async function AdminProjectPage({
   const roomTypeHighPct = companySettings.roomTypeHighPct ?? 10;
   return (
     <div>
-      <div className="mb-4">
-        <Link
-          href="/admin/projects"
-          className="text-sm text-zinc-600 hover:underline dark:text-zinc-400"
-        >
-          ← Projects
-        </Link>
-      </div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          {project.title}
-        </h1>
+      <div className="sticky top-[112px] z-40 -mx-6 bg-zinc-50 px-6 pb-4 pt-4 dark:bg-zinc-950">
+        <div className="mb-4">
+          <Link
+            href="/admin/projects"
+            className="text-sm text-zinc-600 hover:underline dark:text-zinc-400"
+          >
+            ← Projects
+          </Link>
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+            {project.title}
+          </h1>
+        </div>
       </div>
       <ProjectTabs
         project={project}
