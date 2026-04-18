@@ -35,7 +35,12 @@ import type {
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
   InvestmentContent,
+  ProjectTimelineContent,
+  ProjectPhase,
+  DesignRetainerContent,
 } from "./types";
+import { buildProjectPhases } from "@/app/lib/timeline-phases";
+import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
 
 // ─── Internal type alias ─────────────────────────────────────────────────────
 
@@ -242,11 +247,7 @@ async function seedDefaultSlides(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         content: {
           sectionLabel: "YOUR PROJECT",
-          phases: [
-            { id: "design", name: "Architectural Design", duration: "8 \u2013 12 weeks", description: "Deep collaboration to create the exact remodel plan. HOA and permit approvals are secured during this window." },
-            { id: "precon", name: "Pre-Construction", duration: "3 \u2013 5 weeks", description: "Material specification, permit document preparation, and cross-team review to generate the absolute final fixed-price build budget." },
-            { id: "construction", name: "Construction", duration: "10 \u2013 14 weeks", description: "Our build team and specialized subcontractors execute the agreed plan with daily oversight and minimal disruption to your home." },
-          ],
+          phases: buildProjectPhases([]),
         } as any,
       },
       {
@@ -588,6 +589,134 @@ async function syncInvestmentSlide(
   });
 }
 
+/**
+ * Keeps the project-timeline slide's `content.phases` in sync with the project's
+ * `TimelinePhase` records. Phase names/descriptions are hardcoded in
+ * `TIMELINE_PHASE_DEFINITIONS`; only durations flow from the Timeline tab.
+ *
+ * Per-item style fields (nameFont, nameColor, etc.) on existing phases are
+ * preserved — they are merged by id onto the canonical phase entries.
+ */
+async function syncProjectTimelineSlide(
+  _deckId: string,
+  projectId: string,
+  existing: DbRow[]
+): Promise<void> {
+  const row = existing.find((r) => r.type === "project-timeline");
+  if (!row) return;
+
+  const timelinePhases = await prisma.timelinePhase.findMany({
+    where: { projectId },
+    orderBy: { sortOrder: "asc" },
+    select: {
+      phase: true,
+      durationText: true,
+      nameOverride: true,
+      descriptionOverride: true,
+    },
+  });
+
+  const canonical = buildProjectPhases(timelinePhases);
+  const currentContent = (row.content ?? {}) as ProjectTimelineContent;
+  const existingById = new Map(
+    (currentContent.phases ?? []).map((p) => [p.id, p])
+  );
+
+  const mergedPhases: ProjectPhase[] = canonical.map((next) => {
+    const prev = existingById.get(next.id);
+    if (!prev) return next;
+    return {
+      ...prev,
+      id: next.id,
+      name: next.name,
+      duration: next.duration,
+      description: next.description,
+    };
+  });
+
+  const updatedContent: ProjectTimelineContent = {
+    ...currentContent,
+    phases: mergedPhases,
+  };
+
+  await prisma.deckSlide.update({
+    where: { id: row.id },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: { content: updatedContent as any },
+  });
+}
+
+/**
+ * Syncs the project-level retainer settings onto:
+ *  - the `design-retainer` slide's `retainerAmount` (formatted string), and
+ *  - the `investment` slide's `retainerAmount` (number) + `retainerLabel`.
+ *
+ * User-modified slides are skipped (same convention as other sync fns), so
+ * once an admin hand-edits the slide, auto-sync backs off.
+ */
+async function syncRetainerFromProject(
+  _deckId: string,
+  projectId: string,
+  existing: DbRow[]
+): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      retainerEnabled: true,
+      retainerPercent: true,
+      retainerRoundTo: true,
+      retainerOverride: true,
+    },
+  });
+  if (!project) return;
+
+  const rooms = await prisma.room.findMany({
+    where: { projectId },
+    select: { totalHigh: true },
+  });
+  const subtotalHigh = rooms.reduce((sum, r) => sum + (r.totalHigh ?? 0), 0);
+
+  const amount = computeRetainer(subtotalHigh, {
+    enabled: project.retainerEnabled,
+    percent: project.retainerPercent,
+    roundTo: project.retainerRoundTo,
+    override: project.retainerOverride,
+  });
+
+  // design-retainer slide — string amount
+  const retainerRow = existing.find((r) => r.type === "design-retainer");
+  if (retainerRow && !retainerRow.isUserModified) {
+    const c = (retainerRow.content ?? {}) as DesignRetainerContent;
+    const next: DesignRetainerContent = {
+      ...c,
+      retainerAmount: project.retainerEnabled ? formatRetainerAmount(amount) : null,
+    };
+    await prisma.deckSlide.update({
+      where: { id: retainerRow.id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: { content: next as any },
+    });
+  }
+
+  // investment slide — numeric amount for table footer
+  const investmentRow = existing.find((r) => r.type === "investment");
+  if (investmentRow && !investmentRow.isUserModified) {
+    const c = (investmentRow.content ?? {}) as InvestmentContent;
+    const next: InvestmentContent = {
+      ...c,
+      retainerAmount: project.retainerEnabled ? amount : null,
+      retainerLabel: project.retainerEnabled
+        ? (c.retainerLabel ?? "Design / Feasibility Retainer")
+        : null,
+    };
+    await prisma.deckSlide.update({
+      where: { id: investmentRow.id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: { content: next as any },
+    });
+  }
+}
+
 // ─── Backfill: default slides added after initial seed ────────────────────────
 
 /**
@@ -720,11 +849,7 @@ async function backfillMissingDefaults(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         content: {
           sectionLabel: "YOUR PROJECT",
-          phases: [
-            { id: "design", name: "Architectural Design", duration: "8 \u2013 12 weeks", description: "Deep collaboration to create the exact remodel plan. HOA and permit approvals are secured during this window." },
-            { id: "precon", name: "Pre-Construction", duration: "3 \u2013 5 weeks", description: "Material specification, permit document preparation, and cross-team review to generate the absolute final fixed-price build budget." },
-            { id: "construction", name: "Construction", duration: "10 \u2013 14 weeks", description: "Our build team and specialized subcontractors execute the agreed plan with daily oversight and minimal disruption to your home." },
-          ],
+          phases: buildProjectPhases([]),
         } as any,
       },
     });
@@ -945,6 +1070,8 @@ export async function getDeckForProject({
   await syncBeforeAfterSlides(deck.id, existing, roomsWithMedia);
   await syncScopeBreakdownSlide(deck.id, existing, roomsWithMedia);
   await syncInvestmentSlide(deck.id, projectId, existing);
+  await syncProjectTimelineSlide(deck.id, projectId, existing);
+  await syncRetainerFromProject(deck.id, projectId, existing);
 
   // Return final visible slides.
   const final = await prisma.deckSlide.findMany({

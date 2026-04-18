@@ -169,9 +169,10 @@ export function buildCopeUserPrompt(
     .map((r) => {
       const baseSf = r.areaSqFt ? `${r.areaSqFt} SF` : "no SF";
       const effectiveSf = r.effectiveSqFt ? `${r.effectiveSqFt} effective SF` : baseSf;
+      const wallSf = r.wallSF != null ? `, ${r.wallSF} SF walls` : "";
       const price = r.totalTarget != null ? `$${r.totalTarget.toLocaleString()}` : "no estimate";
       const type = r.sectionType || "no type";
-      return `- ${r.name}: ${effectiveSf} | ${price} | ${type}`;
+      return `- ${r.name}: ${effectiveSf}${wallSf} | ${price} | ${type}`;
     })
     .join("\n");
 

@@ -93,6 +93,7 @@ export async function getProjectAggregateData(
       name: r.name,
       areaSqFt: r.areaSqFt,
       effectiveSqFt: roomMetrics.get(r.id)?.effectiveSqFt ?? r.areaSqFt ?? 0,
+      wallSF: roomMetrics.get(r.id)?.wallSF ?? null,
       totalTarget: r.totalTarget,
       sectionType: r.sectionType?.name || null,
     })),
