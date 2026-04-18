@@ -14,13 +14,14 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const { tradeGroup, name, quantity, unit, unitCost, unitPrice } = body as {
+    const { tradeGroup, name, quantity, unit, unitCost, unitPrice, catalogItemId } = body as {
       tradeGroup: string;
       name: string;
       quantity?: number;
       unit?: string;
       unitCost?: number;
       unitPrice?: number;
+      catalogItemId?: string | null;
     };
 
     if (!tradeGroup || !name) {
@@ -49,7 +50,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     const ctx = await prisma.companyContext.findFirst();
     const lowPct = ctx?.priceRangeLowPct ?? -10;
     const highPct = ctx?.priceRangeHighPct ?? 10;
-    const range = calcItemPriceRange(tp, "MANUAL", lowPct, highPct);
+    const source = catalogItemId ? "CATALOG" : "MANUAL";
+    const range = calcItemPriceRange(tp, source, lowPct, highPct);
 
     const item = await prisma.estimateLineItem.create({
       data: {
@@ -64,8 +66,9 @@ export async function POST(request: NextRequest, { params }: Params) {
         totalPrice: tp,
         totalPriceLow: range.totalPriceLow,
         totalPriceHigh: range.totalPriceHigh,
-        source: "MANUAL",
-        confidence: 1.0,
+        source,
+        confidence: catalogItemId ? 1.0 : 1.0,
+        catalogItemId: catalogItemId ?? null,
         sortOrder: (maxSort?.sortOrder ?? 0) + 1,
       },
     });

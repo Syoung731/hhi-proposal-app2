@@ -6,6 +6,7 @@ import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
+import { classifyRoomForDetail } from "@/app/lib/room-classification";
 
 // ---------- POST — Generate a new AI estimate ----------
 
@@ -68,14 +69,18 @@ export async function POST(request: NextRequest) {
     // Load room dimensions + scopeQA from database
     const room = await prisma.room.findUnique({
       where: { id: sectionId },
-      select: { lengthFt: true, widthFt: true, ceilingHeightFt: true, lengthIn: true, widthIn: true, ceilingHeightIn: true, scopeQA: true },
+      select: { name: true, lengthFt: true, widthFt: true, ceilingHeightFt: true, lengthIn: true, widthIn: true, ceilingHeightIn: true, scopeQA: true, roomDetail: true, sectionType: { select: { name: true } } },
     });
 
     let roomDimensions: RoomDimensions | undefined;
     if (room) {
       const lFt = (room.lengthFt ?? 0) + (room.lengthIn ?? 0) / 12;
       const wFt = (room.widthFt ?? 0) + (room.widthIn ?? 0) / 12;
-      const cFt = (room.ceilingHeightFt ?? 0) + (room.ceilingHeightIn ?? 0) / 12;
+      const cFt = (room.ceilingHeightFt && room.ceilingHeightFt > 0)
+        ? room.ceilingHeightFt
+        : (room.ceilingHeightIn && room.ceilingHeightIn > 0)
+          ? room.ceilingHeightIn / 12
+          : 0;
       roomDimensions = {
         lengthFt: lFt > 0 ? lFt : undefined,
         widthFt: wFt > 0 ? wFt : undefined,
@@ -99,6 +104,8 @@ export async function POST(request: NextRequest) {
 
     // Build prompt
     const scopeQA = room?.scopeQA as import("@/app/lib/ai-estimate-prompt").ScopeQAData | null;
+    const roomDetail = room?.roomDetail as Record<string, unknown> | null;
+    const roomDetailType = room ? classifyRoomForDetail(room.name, room.sectionType?.name) : null;
     const userPrompt = buildUserPrompt(
       roomTemplate,
       companyContext,
@@ -109,6 +116,8 @@ export async function POST(request: NextRequest) {
       correctionHistory,
       roomMetrics,
       scopeQA,
+      roomDetail,
+      roomDetailType,
     );
 
     // Call Claude with automatic model fallback

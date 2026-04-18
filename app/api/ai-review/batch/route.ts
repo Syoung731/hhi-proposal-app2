@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/app/lib/prisma";
 import { callClaude } from "@/app/lib/ai/model";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
+import { buildRendrContextString } from "@/app/lib/rendr/buildRendrContext";
 
 /**
  * POST /api/ai-review/batch
@@ -47,6 +48,16 @@ DO NOT ask about:
 - Project-level items (permits, HOA, dumpsters, supervision, protection)
 - Items clearly stated in the scope
 - Aesthetic preferences that don't affect line items or quantities
+- Quantities that are ALREADY PROVIDED in the "Fixture & Cabinet Data" section (cabinet LF, countertop SF, backsplash SF, sink count, toilet count, appliance decisions, tub/shower decisions). These are LiDAR-measured and confirmed — do NOT generate questions asking for these numbers.
+
+IMPORTANT: When fixture/cabinet data IS provided with recommended values, and you DO still ask a question about a related quantity (e.g., confirming cabinet layout changes mentioned in scope), you MUST use the RECOMMENDED value from the fixture data as the defaultAnswer — NOT a guess. For example, if recommended base cabinet LF is 24.9, the defaultAnswer must be 24.9, not 18.
+
+When fixture/cabinet data IS provided, focus your questions on QUALITATIVE decisions instead:
+- Material selections (countertop material, tile type, cabinet wood species)
+- Finish levels (cabinet door style, hardware tier, fixture quality)
+- Layout changes (moving plumbing, electrical relocation, structural work)
+- Specific product preferences (brand, model, color)
+- Scope boundaries (which walls get tile, floor only vs walls, extent of demo)
 
 Return this JSON structure:
 {
@@ -198,6 +209,9 @@ async function generateRoomQuestions(
 
   const roomCeilingProvided = metrics.ceilingHeightFt !== 9 || (room.ceilingHeightFt != null && room.ceilingHeightFt > 0);
 
+  const rendrCtx = buildRendrContextString(room);
+  const fixtureCtx = buildFixtureContext(room.roomDetail as Record<string, unknown> | null);
+
   const userPrompt = `Review this room's scope of work and generate questions.
 
 ## Room Details
@@ -208,7 +222,8 @@ Ceiling Height: ${roomCeilingProvided ? `${metrics.ceilingHeightFt} ft` : "NOT E
 Perimeter: ${metrics.effectivePerimeterLF > 0 ? `${metrics.effectivePerimeterLF} LF` : "Not available"}
 Wall SF: ${metrics.wallSF != null ? `${metrics.wallSF} SF` : "Cannot calculate"}
 ${subAreaSection}
-
+${rendrCtx ? `\n## ${rendrCtx}\n` : ""}
+${fixtureCtx}
 ## Scope of Work
 ${room.scopeNarrative}
 
@@ -303,6 +318,52 @@ Generate questions as JSON.`;
 
   const parsed = parseJsonResponse(rawText);
   return parsed?.questions ?? [];
+}
+
+// ---------- Fixture context for Kitchen/Bath rooms ----------
+
+function buildFixtureContext(roomDetail: Record<string, unknown> | null): string {
+  if (!roomDetail) return "";
+
+  const d = roomDetail;
+  const lines: string[] = [];
+
+  if (d.baseCabinetCountExisting != null) {
+    lines.push(`Base Cabinets: ${d.baseCabinetCountExisting} existing${d.baseCabinetLfExisting ? ` (${d.baseCabinetLfExisting} LF)` : ""}, ${d.baseCabinetCountRecommended ?? "?"} recommended${d.baseCabinetLfRecommended ? ` (${d.baseCabinetLfRecommended} LF)` : ""}`);
+  }
+  if (d.wallCabinetCountExisting != null) {
+    lines.push(`Wall Cabinets: ${d.wallCabinetCountExisting} existing${d.wallCabinetLfExisting ? ` (${d.wallCabinetLfExisting} LF)` : ""}, ${d.wallCabinetCountRecommended ?? "?"} recommended${d.wallCabinetLfRecommended ? ` (${d.wallCabinetLfRecommended} LF)` : ""}`);
+  }
+  if (d.countertopSfExisting != null) {
+    lines.push(`Countertop: ${d.countertopSfExisting} SF existing, ${d.countertopSfRecommended ?? "?"} SF recommended`);
+  }
+  if (d.backsplashSfExisting != null) {
+    lines.push(`Backsplash: ${d.backsplashSfExisting} SF existing, ${d.backsplashSfRecommended ?? "?"} SF recommended`);
+  }
+  if (d.sinkCountExisting != null) {
+    lines.push(`Sinks: ${d.sinkCountExisting} existing, ${d.sinkCountRecommended ?? "?"} recommended`);
+  }
+  if (d.vanityCabinetCountExisting != null) {
+    lines.push(`Vanity: ${d.vanityCabinetCountExisting} existing${d.vanityCabinetLfExisting ? ` (${d.vanityCabinetLfExisting} LF)` : ""}, ${d.vanityCabinetCountRecommended ?? "?"} recommended${d.vanityCabinetLfRecommended ? ` (${d.vanityCabinetLfRecommended} LF)` : ""}`);
+  }
+  if (d.toiletCountExisting != null) {
+    lines.push(`Toilets: ${d.toiletCountExisting} existing, ${d.toiletCountRecommended ?? "?"} recommended`);
+  }
+
+  const appliances: string[] = [];
+  if (d.hasStoveExisting === true) appliances.push(`Stove/Range (${d.hasStoveRecommended ? "REPLACING" : "keeping existing"})`);
+  if (d.hasOvenExisting === true) appliances.push(`Oven (${d.hasOvenRecommended ? "REPLACING" : "keeping existing"})`);
+  if (d.hasFridgeExisting === true) appliances.push(`Refrigerator (${d.hasFridgeRecommended ? "REPLACING" : "keeping existing"})`);
+  if (d.hasDishwasherExisting === true) appliances.push(`Dishwasher (${d.hasDishwasherRecommended ? "REPLACING" : "keeping existing"})`);
+  if (appliances.length > 0) lines.push(`Appliances: ${appliances.join(", ")}`);
+
+  if (d.hasTubExisting != null) lines.push(`Tub: ${d.hasTubExisting ? "exists" : "none"} (${d.hasTubRecommended ? "REPLACING/ADDING" : "keeping/none"})`);
+  if (d.hasShowerExisting != null) lines.push(`Shower: ${d.hasShowerExisting ? "exists" : "none"} (${d.hasShowerRecommended ? "REPLACING/ADDING" : "keeping/none"})`);
+  if (d.hasTubShowerComboExisting != null) lines.push(`Tub/Shower Combo: ${d.hasTubShowerComboExisting ? "exists" : "none"} (${d.hasTubShowerComboRecommended ? "REPLACING/ADDING" : "keeping/none"})`);
+
+  if (lines.length === 0) return "";
+
+  return `\n## Fixture & Cabinet Data (from LiDAR scan — ALREADY KNOWN, do NOT ask about these quantities)\nIf you ask a question related to any of these values, use the RECOMMENDED number as the defaultAnswer.\n${lines.join("\n")}\n`;
 }
 
 // ---------- JSON parser helper ----------

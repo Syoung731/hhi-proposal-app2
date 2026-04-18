@@ -100,6 +100,17 @@ Subtitle must always be present in overview. If a value is unknown for other fie
   return parsed;
 }
 
+export type TranscriptFixtures = {
+  baseCabinetCount?: number | null;
+  wallCabinetCount?: number | null;
+  sinkCount?: number | null;
+  toiletCount?: number | null;
+  hasTub?: boolean | null;
+  hasShower?: boolean | null;
+  hasTubShowerCombo?: boolean | null;
+  appliances?: string[];
+};
+
 export type RoomsFromTranscript = {
   rooms: {
     name: string;
@@ -107,6 +118,7 @@ export type RoomsFromTranscript = {
     lengthIn?: number | null;
     widthIn?: number | null;
     ceilingHeightIn?: number | null;
+    fixtures?: TranscriptFixtures | null;
   }[];
 };
 
@@ -131,7 +143,7 @@ type SectionsFromTranscript = {
 /** Normalize one item from AI (section or room) to RoomsFromTranscript room shape. Parses dimension strings or numeric inches. */
 function normalizeSectionOrRoom(
   item: Record<string, unknown>
-): { name: string; scopeNarrative: string; lengthIn: number | null; widthIn: number | null; ceilingHeightIn: number | null } | null {
+): { name: string; scopeNarrative: string; lengthIn: number | null; widthIn: number | null; ceilingHeightIn: number | null; fixtures: TranscriptFixtures | null } | null {
   const name = ((item.title as string) ?? (item.name as string) ?? "").trim();
   const scopeNarrative = ((item.scopeNarrative as string) ?? (item.description as string) ?? "").trim();
   if (!name || !scopeNarrative) return null;
@@ -147,12 +159,17 @@ function normalizeSectionOrRoom(
     parseDimToInches(item.ceilingHeightIn) ??
     parseDimToInches(item.ceilingHeight) ??
     null;
-  return { name, scopeNarrative, lengthIn, widthIn, ceilingHeightIn };
+  const fixtures = item.fixtures && typeof item.fixtures === "object"
+    ? (item.fixtures as TranscriptFixtures)
+    : null;
+  return { name, scopeNarrative, lengthIn, widthIn, ceilingHeightIn, fixtures };
 }
 
 export async function extractRoomsFromTranscript(
   transcript: string,
-  stylePresetPrompt?: string
+  stylePresetPrompt?: string,
+  rendrContext?: string | null,
+  existingSectionNames?: string[],
 ): Promise<RoomsFromTranscript> {
   let systemContent = `You are an expert residential remodeler writing proposal scope-of-work sections.
 
@@ -186,10 +203,89 @@ Rules:
 - Exclude general discussion not tied to a specific section.
 - If transcript has no section-specific scope, return { "sections": [] } or { "rooms": [] }.
 - Do not create sections like "General", "Overview", "Project", "Walkthrough", or similar. Only actual spaces/areas.
-- Output JSON only, no extra text.`;
+- Output JSON only, no extra text.
+
+For sections identified as Kitchen or Bathroom type, also extract fixture information
+if explicitly mentioned in the transcript. Add an optional "fixtures" field:
+
+"fixtures": {
+  "baseCabinetCount": number or null,
+  "wallCabinetCount": number or null,
+  "sinkCount": number or null,
+  "toiletCount": number or null,
+  "hasTub": true/false or null,
+  "hasShower": true/false or null,
+  "hasTubShowerCombo": true/false or null,
+  "appliances": ["stove", "oven", "refrigerator", "dishwasher"]
+}
+
+Only include fixtures explicitly mentioned in the transcript. Do NOT guess counts.
+Omit the "fixtures" field entirely if nothing is mentioned.
+The "appliances" array should only include appliances that are explicitly discussed.`;
+
+  if (rendrContext?.trim()) {
+    systemContent += `
+
+If RENDR LIDAR SCAN DATA is provided alongside the transcript:
+- Use the Rendr room measurements as the source of truth for dimensions.
+  Set lengthIn/widthIn to null (Rendr provides area, not L×W) but note
+  the Rendr area in the scope narrative naturally (e.g., "The 195-square-foot kitchen...").
+- The Rendr room names represent physical spaces. The transcript may refer
+  to these spaces by different names or discuss scope that spans multiple
+  Rendr rooms. Create sections based on the TRANSCRIPT discussion, not
+  the Rendr room list. But use Rendr measurements to inform the details.
+- If the transcript discusses a space that matches a Rendr room, incorporate
+  the Rendr measurements (area, ceiling height, fixture counts) into the
+  scope narrative naturally.
+- If the transcript discusses a space not found in Rendr data, create the
+  section from transcript only (no Rendr measurements).
+- For ceiling heights from Rendr, set ceilingHeightIn to the Rendr value
+  converted to inches (e.g., 8.0 ft = 96 inches).
+- For Kitchen/Bath rooms with Rendr fixture data, include the fixtures
+  field with counts from Rendr (override any conflicting transcript mentions
+  with the more accurate Rendr LiDAR data).`;
+  }
+
+  if (existingSectionNames?.length) {
+    systemContent += `
+
+EXISTING SECTIONS IN THIS PROJECT:
+The following sections already exist in this project (created from LiDAR scan or
+previous generation). You MUST use these exact section names when the transcript
+discusses scope that belongs in these spaces:
+
+${existingSectionNames.map((n) => `  - "${n}"`).join("\n")}
+
+RULES FOR EXISTING SECTIONS:
+1. If the transcript discusses work in a space that matches an existing section,
+   use that EXACT section name as the title. Do not rename it or create a variant.
+   Example: If "Living Room" exists and the transcript discusses wall removal in
+   the living room, the section title must be "Living Room" — NOT "Living Room
+   Kitchen Wall Opening" or "Living Room Renovation".
+
+2. Combine ALL scope discussed for a space into ONE section. If the transcript
+   mentions the living room multiple times (wall removal, flooring, lighting),
+   all of that goes into the "Living Room" scopeNarrative as one paragraph.
+
+3. Only create a NEW section (with a new name) if the transcript discusses a
+   space that does NOT match any existing section. For example, if the transcript
+   discusses a "Screened Porch" that isn't in the existing list, create it as new.
+
+4. For scope that spans multiple rooms (e.g., "remove the wall between the
+   kitchen and living room"), assign it to the section where the PRIMARY work
+   occurs. If it's truly shared, put it in the larger room's section and
+   reference the other room in the narrative.`;
+  }
+
   if (stylePresetPrompt?.trim()) {
     systemContent += `\n\nStyle instructions (apply to tone and language of scope narratives where relevant):\n${stylePresetPrompt.trim()}`;
   }
+
+  let userContent = transcript;
+  if (rendrContext?.trim()) {
+    userContent = `${rendrContext}\n\n---\n\nTRANSCRIPT:\n${transcript}`;
+  }
+
   const response = await callClaude({
     max_tokens: 8192,
     temperature: 0.2,
@@ -197,7 +293,7 @@ Rules:
     messages: [
       {
         role: "user",
-        content: transcript,
+        content: userContent,
       },
     ],
   });

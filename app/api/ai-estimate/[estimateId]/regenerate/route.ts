@@ -73,7 +73,11 @@ export async function POST(
     if (room) {
       const lFt = (room.lengthFt ?? 0) + (room.lengthIn ?? 0) / 12;
       const wFt = (room.widthFt ?? 0) + (room.widthIn ?? 0) / 12;
-      const cFt = (room.ceilingHeightFt ?? 0) + (room.ceilingHeightIn ?? 0) / 12;
+      const cFt = (room.ceilingHeightFt && room.ceilingHeightFt > 0)
+        ? room.ceilingHeightFt
+        : (room.ceilingHeightIn && room.ceilingHeightIn > 0)
+          ? room.ceilingHeightIn / 12
+          : 0;
       roomDimensions = {
         lengthFt: lFt > 0 ? lFt : undefined,
         widthFt: wFt > 0 ? wFt : undefined,

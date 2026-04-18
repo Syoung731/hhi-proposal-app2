@@ -167,7 +167,18 @@ FRAMING AND STRUCTURAL ITEMS:
   For joist work specifically:
   - HHI Builders typically replaces compromised joists or sisters the entire subfloor run, not individual joists
   - If scope mentions joist repair: include "Joist sistering/replacement" as a lump-sum or per-joist item
-  - Note in the description: "Sister or replace as needed per field conditions — quantity is an estimate"`;
+  - Note in the description: "Sister or replace as needed per field conditions — quantity is an estimate"
+
+KITCHEN/BATHROOM SPECIFICATION RULES:
+  If the prompt includes a KITCHEN SPECIFICATIONS or BATHROOM SPECIFICATIONS section,
+  you MUST use those exact quantities for the corresponding line items:
+  - Cabinet line items: use the provided count and LF
+  - Countertop line items: use the provided SF
+  - Backsplash line items: use the provided SF
+  - Fixture line items: use the provided counts
+  - Appliance line items: only include appliances marked for replacement/addition
+  These are pre-measured and pre-approved values. Do not override them with estimates
+  derived from the scope narrative.`;
 
 // ---------- Correction history for feedback loop ----------
 
@@ -300,6 +311,8 @@ export function buildUserPrompt(
   correctionHistory?: string | null,
   roomMetrics?: EffectiveRoomMetrics | null,
   scopeQA?: ScopeQAData | null,
+  roomDetail?: Record<string, unknown> | null,
+  roomDetailType?: "kitchen" | "bathroom" | null,
 ): string {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
@@ -359,15 +372,21 @@ Square Footage: ${roomMetrics ? `${roomMetrics.effectiveSqFt} SF (base room ${ro
 Dimensions: ${dimLine}
 Ceiling Height: ${roomMetrics ? `${roomMetrics.ceilingHeightFt} ft${roomCeilingProvided ? "" : " (defaulted — not specified on room)"}` : roomDimensions?.ceilingHeightFt ? `${roomDimensions.ceilingHeightFt} ft` : "Not provided — assume 9 ft per standard assumptions"}
 Perimeter: ${roomMetrics ? `${roomMetrics.effectivePerimeterLF} LF (base room ${roomMetrics.basePerimeterLF} LF + sub-area perimeters)` : "Not available"}
-Wall Area: ${roomMetrics?.wallSF != null ? `${roomMetrics.wallSF} SF (perimeter ${roomMetrics.effectivePerimeterLF} LF x ceiling ${roomMetrics.ceilingHeightFt} ft)` : "Not available"}
-Ceiling Area: ${roomMetrics ? `${roomMetrics.effectiveSqFt} SF (same as floor area)` : "Not available"}
+Wall Area: ${roomMetrics?.wallSF != null ? `${roomMetrics.wallSF} SF${roomMetrics.paintableSF != null && roomMetrics.paintableSF !== roomMetrics.wallSF ? ` (paintable: ${roomMetrics.paintableSF} SF)` : ""}` : "Not available"}
+Ceiling Area: ${roomMetrics ? `${roomMetrics.ceilingSF} SF` : "Not available"}
+${roomMetrics?.windowCount != null ? `Windows: ${roomMetrics.windowCount}${roomMetrics.windowsSF ? ` (${roomMetrics.windowsSF} SF)` : ""}` : ""}
+${roomMetrics?.doorCount != null ? `Doors: ${roomMetrics.doorCount}${roomMetrics.doorsSF ? ` (${roomMetrics.doorsSF} SF)` : ""}` : ""}
 ${roomMetrics ? `
 PRE-CALCULATED VALUES — USE THESE EXACT NUMBERS:
   - Floor area: ${roomMetrics.effectiveSqFt} SF
   - Wall area (before door/window deductions): ${roomMetrics.wallSF ?? "N/A"} SF
-  - Ceiling area: ${roomMetrics.effectiveSqFt} SF
-  - Total drywall (walls + ceiling, full gut): ${(roomMetrics.wallSF ?? 0) + roomMetrics.effectiveSqFt} SF
-  - Baseboard/trim perimeter: ${roomMetrics.effectivePerimeterLF} LF` : ""}
+  - Ceiling area: ${roomMetrics.ceilingSF} SF
+  - Paintable wall area (walls minus openings): ${roomMetrics.paintableSF ?? "N/A"} SF
+  - Total drywall (walls + ceiling, full gut): ${(roomMetrics.wallSF ?? 0) + roomMetrics.ceilingSF} SF
+  - Baseboard/trim perimeter: ${roomMetrics.effectivePerimeterLF} LF
+  - Windows: ${roomMetrics.windowCount ?? "N/A"} count${roomMetrics.windowsSF ? `, ${roomMetrics.windowsSF} SF opening area` : ""}
+  - Doors: ${roomMetrics.doorCount ?? "N/A"} count${roomMetrics.doorsSF ? `, ${roomMetrics.doorsSF} SF opening area` : ""}` : ""}
+${buildKitchenBathSpecsSection(roomDetail, roomDetailType)}
 ${buildClarificationsSection(scopeQA)}
 ## Scope of Work
 ${scopeNarrative}
@@ -437,6 +456,87 @@ function buildClarificationsSection(scopeQA?: ScopeQAData | null): string {
 ## Scope Clarifications (confirmed by estimator)
 These answers were confirmed before estimating. Use them as facts, not assumptions:
 ${lines.join("\n")}
+`;
+}
+
+// ---------- Kitchen/Bath specifications block ----------
+
+function buildKitchenBathSpecsSection(
+  roomDetail?: Record<string, unknown> | null,
+  roomDetailType?: "kitchen" | "bathroom" | null,
+): string {
+  if (!roomDetail || !roomDetailType) return "";
+
+  const d = roomDetail;
+  const lines: string[] = [];
+
+  if (roomDetailType === "kitchen") {
+    if (d.baseCabinetCountRecommended != null) lines.push(`- Base Cabinets: ${d.baseCabinetCountRecommended} units${d.baseCabinetLfRecommended != null ? `, ${d.baseCabinetLfRecommended} LF` : ""}`);
+    if (d.wallCabinetCountRecommended != null) lines.push(`- Wall Cabinets: ${d.wallCabinetCountRecommended} units${d.wallCabinetLfRecommended != null ? `, ${d.wallCabinetLfRecommended} LF` : ""}`);
+    if (d.countertopSfRecommended != null) lines.push(`- Countertop: ${d.countertopSfRecommended} SF`);
+    if (d.backsplashSfRecommended != null) lines.push(`- Backsplash: ${d.backsplashSfRecommended} SF`);
+    if (d.sinkCountRecommended != null) lines.push(`- Sinks: ${d.sinkCountRecommended}`);
+
+    // Appliances being replaced (need Material + Install line items)
+    const replacingAppliances: string[] = [];
+    if (d.hasStoveRecommended === true) replacingAppliances.push("Stove/Range");
+    if (d.hasOvenRecommended === true) replacingAppliances.push("Oven");
+    if (d.hasFridgeRecommended === true) replacingAppliances.push("Refrigerator");
+    if (d.hasDishwasherRecommended === true) replacingAppliances.push("Dishwasher");
+    if (replacingAppliances.length > 0) {
+      lines.push(`- Appliances being REPLACED/ADDED: ${replacingAppliances.join(", ")}`);
+      lines.push(`  Each requires BOTH a Material line item AND an Install line item.`);
+    }
+
+    // Appliances being kept (no line items needed)
+    const keptAppliances: string[] = [];
+    if (d.hasStoveExisting === true && d.hasStoveRecommended !== true) keptAppliances.push("Stove/Range");
+    if (d.hasOvenExisting === true && d.hasOvenRecommended !== true) keptAppliances.push("Oven");
+    if (d.hasFridgeExisting === true && d.hasFridgeRecommended !== true) keptAppliances.push("Refrigerator");
+    if (d.hasDishwasherExisting === true && d.hasDishwasherRecommended !== true) keptAppliances.push("Dishwasher");
+    if (keptAppliances.length > 0) {
+      lines.push(`- Appliances being KEPT (no replacement): ${keptAppliances.join(", ")}`);
+      lines.push(`  Do NOT include material or install line items for kept appliances.`);
+    }
+  }
+
+  if (roomDetailType === "bathroom") {
+    if (d.vanityCabinetCountRecommended != null) lines.push(`- Vanity: ${d.vanityCabinetCountRecommended} units${d.vanityCabinetLfRecommended != null ? `, ${d.vanityCabinetLfRecommended} LF` : ""}`);
+    if (d.countertopSfRecommended != null) lines.push(`- Countertop: ${d.countertopSfRecommended} SF`);
+    if (d.backsplashSfRecommended != null) lines.push(`- Backsplash: ${d.backsplashSfRecommended} SF`);
+    if (d.sinkCountRecommended != null) lines.push(`- Sinks: ${d.sinkCountRecommended}`);
+    if (d.toiletCountRecommended != null) lines.push(`- Toilets: ${d.toiletCountRecommended}`);
+
+    // Fixtures being replaced (need Material + Install line items)
+    const replacingFixtures: string[] = [];
+    if (d.hasTubRecommended === true) replacingFixtures.push("Tub");
+    if (d.hasShowerRecommended === true) replacingFixtures.push("Shower");
+    if (d.hasTubShowerComboRecommended === true) replacingFixtures.push("Tub/Shower Combo");
+    if (replacingFixtures.length > 0) {
+      lines.push(`- Fixtures being REPLACED/ADDED: ${replacingFixtures.join(", ")} (include Material + Install for each)`);
+    }
+
+    // Fixtures being kept (no line items needed)
+    const keptFixtures: string[] = [];
+    if (d.hasTubExisting === true && d.hasTubRecommended !== true) keptFixtures.push("Tub");
+    if (d.hasShowerExisting === true && d.hasShowerRecommended !== true) keptFixtures.push("Shower");
+    if (d.hasTubShowerComboExisting === true && d.hasTubShowerComboRecommended !== true) keptFixtures.push("Tub/Shower Combo");
+    if (keptFixtures.length > 0) {
+      lines.push(`- Fixtures being KEPT (no replacement): ${keptFixtures.join(", ")} (no line items needed)`);
+    }
+  }
+
+  if (lines.length === 0) return "";
+
+  const header = roomDetailType === "kitchen" ? "KITCHEN" : "BATHROOM";
+  return `
+## ${header} SPECIFICATIONS (use these exact quantities for line items):
+${lines.join("\n")}
+These are the RECOMMENDED (final) specifications for this renovation.
+Use these quantities for all cabinet, countertop, backsplash, and fixture line items.
+Do not estimate these quantities from the scope narrative — use the numbers above.
+For appliances/fixtures marked as REPLACED/ADDED: include BOTH a Material AND an Install line item.
+For appliances/fixtures marked as KEPT: do NOT include any line items — they are not part of this scope.
 `;
 }
 
