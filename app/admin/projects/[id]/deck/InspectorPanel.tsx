@@ -60,7 +60,7 @@ import { HHI_DEFAULT_COPE_ITEMS } from "@/app/lib/cope-defaults";
 import { DEFAULT_DESIGN_RETAINER_BENEFITS, HHI_DESIGN_RETAINER_DEFAULTS } from "@/app/lib/design-retainer-defaults";
 import { HHI_DEFAULT_NEXT_STEPS, HHI_NEXT_STEPS_DEFAULTS } from "@/app/lib/next-steps-defaults";
 import { CLOSING_SLIDE_DEFAULTS } from "@/app/lib/closing-slide-defaults";
-import { TemplateCIconPicker, type TemplateCIcon } from "@/app/admin/projects/[id]/presentation/template-c-icon-picker";
+import { TemplateCIconPicker, type TemplateCIcon } from "@/app/admin/components/template-c-icon-picker";
 import { VISUAL_INSPIRATION_DEFAULTS } from "@/app/lib/visual-inspiration-defaults";
 import { DEFAULT_TESTIMONIALS, TESTIMONIALS_SLIDE_DEFAULTS } from "@/app/lib/testimonial-defaults";
 import { DEFAULT_PILLARS, DEFAULT_GUARANTEES, DEFAULT_DIAGRAM_NODES, DEFAULT_SUPPORT_COLUMNS } from "@/app/lib/design-build-defaults";

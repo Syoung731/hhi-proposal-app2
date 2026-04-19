@@ -37,20 +37,20 @@ export function PublishTab({ projectId, proposalId, publishedVersion }: Props) {
           {proposalId ? (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Open a fullscreen draft preview using the real public presentation route.
+                Open the admin draft preview (live project data, no admin chrome).
               </p>
               <Link
-                href={`/p/${proposalId}?mode=present&draft=1`}
+                href={`/admin/projects/${projectId}/preview/draft`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
-                Open fullscreen draft preview →
+                Open draft preview →
               </Link>
             </div>
           ) : (
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Create a proposal on the Presentation tab to enable draft preview.
+              Publish to enable draft preview.
             </p>
           )}
         </div>
@@ -63,19 +63,14 @@ export function PublishTab({ projectId, proposalId, publishedVersion }: Props) {
           Publishing creates a locked snapshot of the current draft. The public page and PDF will show
           this version until you publish again.
         </p>
-        {publishedVersion > 0 && proposalId && (
+        {publishedVersion > 0 && (
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
-            Current published version: {publishedVersion}. Share link:{" "}
-            <Link
-              href={`/p/${proposalId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-zinc-700 underline dark:text-zinc-300"
-            >
-              /p/{proposalId}
-            </Link>
+            Current published version: {publishedVersion}. Public share link disabled
+            pending Cleanup D (new deck-render route).
           </p>
         )}
+        {/* TODO: Cleanup D — restore Share link and "View public page" button once the
+            new deck-render public route lands. Original target: /p/{proposalId} */}
         <div className="mt-4 flex flex-wrap gap-3">
           <button
             type="button"
@@ -85,16 +80,6 @@ export function PublishTab({ projectId, proposalId, publishedVersion }: Props) {
           >
             {publishing ? "Publishing…" : "Publish"}
           </button>
-          {publishedVersion > 0 && proposalId && (
-            <Link
-              href={`/p/${proposalId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              View public page
-            </Link>
-          )}
         </div>
       </section>
 

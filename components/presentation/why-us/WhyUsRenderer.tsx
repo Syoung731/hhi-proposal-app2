@@ -9,7 +9,7 @@ import {
   COLUMNS_DEFAULT_UNDERLINE_COLOR,
   COLUMNS_DEFAULT_TEXT_COLOR,
 } from "@/app/lib/layout-config";
-import { EditorialSectionHeading } from "@/components/public/blocks";
+import { EditorialSectionHeading } from "@/components/presentation/why-us/EditorialSectionHeading";
 
 const DEFAULT_WHY_US_TITLE = "Why Us";
 

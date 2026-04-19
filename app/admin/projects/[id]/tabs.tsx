@@ -43,7 +43,6 @@ export function ProjectTabs({
   roomTypeHighPct,
   initialMediaRoomId,
   rendrConfigured,
-  children,
 }: {
   project: ProjectForTabs;
   stylePresets: StylePresetForTabs[];
@@ -55,6 +54,7 @@ export function ProjectTabs({
   initialMediaRoomId?: string;
   /** Whether Rendr integration is configured — controls tab visibility. */
   rendrConfigured?: boolean;
+  /** Accepted but unused — removed in Commit 2 alongside the presentation tab. */
   children?: React.ReactNode;
 }) {
   return (
@@ -64,7 +64,7 @@ export function ProjectTabs({
         currentTab={currentTab}
         rendrConfigured={rendrConfigured}
       />
-      <div className={`min-h-[200px] rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${(currentTab === "presentation" && children) || currentTab === "rendr" ? "p-0 overflow-hidden" : "p-8"}`}>
+      <div className={`min-h-[200px] rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${currentTab === "rendr" ? "p-0 overflow-hidden" : "p-8"}`}>
         {currentTab === "overview" && (
           <OverviewTab
             projectId={project.id}
@@ -247,7 +247,6 @@ export function ProjectTabs({
             publishedVersion={project.publishedVersion}
           />
         )}
-        {currentTab === "presentation" && children}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { saveCoreValuesDefaultsAction } from "../actions";
 import type { GlobalCoreValuesSettings } from "@/app/lib/core-values-defaults";
 import type { CoreValue } from "@/app/lib/deck/types";
 import { CORE_VALUES_LAYOUTS } from "@/app/lib/deck/types";
-import { TemplateCIconPicker, type TemplateCIcon } from "@/app/admin/projects/[id]/presentation/template-c-icon-picker";
+import { TemplateCIconPicker, type TemplateCIcon } from "@/app/admin/components/template-c-icon-picker";
 
 const inputClass =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100";

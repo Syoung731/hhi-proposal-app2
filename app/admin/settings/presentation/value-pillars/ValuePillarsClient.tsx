@@ -11,7 +11,7 @@ import {
   type WhyUsDefaultsForUI,
   type ValuePillarForUI,
 } from "./actions";
-import { TemplateCIconPicker } from "@/app/admin/projects/[id]/presentation/template-c-icon-picker";
+import { TemplateCIconPicker } from "@/app/admin/components/template-c-icon-picker";
 import { WhyUsRenderer } from "@/components/presentation/why-us/WhyUsRenderer";
 import type { WhyUsPageConfig } from "@/app/lib/layout-config";
 

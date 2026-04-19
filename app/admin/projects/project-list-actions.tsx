@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   archiveProjectAction,
@@ -17,7 +16,7 @@ type Props = {
   title: string;
 };
 
-export function ProjectListActions({ projectId, proposalId, status, title }: Props) {
+export function ProjectListActions({ projectId, status, title }: Props) {
   const router = useRouter();
   const [archivePending, setArchivePending] = useState(false);
   const [unarchivePending, setUnarchivePending] = useState(false);
@@ -98,19 +97,8 @@ export function ProjectListActions({ projectId, proposalId, status, title }: Pro
       >
         Delete
       </button>
-      {status === ProjectStatus.PUBLISHED && proposalId && (
-        <>
-          <span className="text-zinc-400 dark:text-zinc-500">·</span>
-          <Link
-            href={`/p/${proposalId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            View
-          </Link>
-        </>
-      )}
+      {/* TODO: Cleanup D — restore "View" button once the new deck-render public
+          route lands. Original target: /p/{proposalId} */}
       {error && (
         <p className="w-full text-xs text-red-600 dark:text-red-400" role="alert">
           {error}
