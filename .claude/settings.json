@@ -37,18 +37,5 @@
       "Bash(git push*)",
       "Bash(rm -rf /*)"
     ]
-  },
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && git add -A && git diff-index --quiet HEAD 2>/dev/null || git commit -m \"checkpoint: auto-commit after Claude Code task\" 2>/dev/null || true"
-          }
-        ]
-      }
-    ]
   }
 }
