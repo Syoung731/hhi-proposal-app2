@@ -66,13 +66,98 @@ Sections tab display AND the investment rollup. Never duplicate this math.
 - Search by job number to get internal ID, then query by ID
 - The closed date field (not a custom field) indicates job completion status
 
-## Git Workflow
-- Commits happen automatically via Stop hook after each task
-- Use conventional commit messages: feat:, fix:, refactor:, chore:
-- Do NOT push to remote unless explicitly asked
+## Commit-On-Demand Pattern
+
+### Default Behavior: DO NOT AUTO-COMMIT
+
+Claude Code must NEVER:
+- Commit automatically at the end of a task
+- Use generic commit messages like `checkpoint: auto-commit after Claude Code task`
+- Run `git commit` without first showing the human the exact command and waiting for approval
+- Run `git push` under any circumstances — pushing is always the human's responsibility
+- Use `git add -A` or `git add .` — always use explicit file paths
+
+### At End Of Every Task
+
+After verification passes (tsc/build/tests), Claude Code MUST:
+
+1. Run `git status` and show the output
+2. Verify that only files intentionally edited by this task appear as modified or new
+3. If any unexpected files appear, STOP and report — do not proceed
+4. Print a suggested commit command block in this exact format:
+
+```
+## Suggested Commit
+
+```powershell
+git add <explicit file paths>
+git commit -m "<type>(<scope>): <description>"
+```
+
+Reasoning: [1-2 sentences on why these files, this message, this scope]
+```
+
+5. STOP. Wait for the human to run the commit manually. Do not execute it yourself.
+
+### Commit Message Format
+
+Use Conventional Commits:
+
+- `feat(<scope>): <description>` — new feature or capability
+- `fix(<scope>): <description>` — bug fix
+- `chore(<scope>): <description>` — tooling, config, housekeeping
+- `docs(<scope>): <description>` — documentation only
+- `refactor(<scope>): <description>` — code restructuring without behavior change
+- `test(<scope>): <description>` — test additions or fixes
+
+Scope examples used in this repo: `admin`, `rendr`, `ai`, `estimate`, `db`, `deck`, `cope`, `lib`, `ui`, `docs`, `claude`.
+
+Example good messages:
+- `feat(estimate): add CALC source tag for pre-calculated line items (permit fees)`
+- `fix(deck): correct design retainer slide binding to investment tab value`
+- `chore: gitignore Claude lock file, update launch config`
+
+Example BAD messages (do not use):
+- `checkpoint: auto-commit after Claude Code task`
+- `update files`
+- `wip`
+- `fix stuff`
+
+### When To Split Into Multiple Commits
+
+If a task touches more than ~10 files OR spans multiple logical concerns (e.g., schema change + UI update + new lib utility), suggest splitting into multiple commits by logical scope. Print one suggested commit block per logical grouping.
+
+### High-Risk Changes — Flag Explicitly
+
+If a task touches any of the following, include a ⚠️ warning in the commit reasoning:
+- Database migrations or `schema.prisma`
+- Authentication (Clerk, session handling, auth middleware)
+- External integrations (JobTread, Rendr, AI API clients)
+- Payment or financial calculations
+- Permission or admin gating
+
+Example: `⚠️ This commit includes a Prisma migration. Human must decide whether to deploy migrations before or after this commit lands in production.`
+
+### Override — Explicit Permission To Commit Directly
+
+The human may explicitly instruct Claude Code to commit directly inside a specific prompt with language like:
+- "Commit this yourself when you're done"
+- "Stage and commit using [this exact message]"
+- "Auto-commit at the end"
+
+When this explicit override appears in the prompt, Claude Code MAY execute the commit — but still MUST NOT push, and still MUST use a meaningful Conventional Commits message (never the generic checkpoint message).
+
+Absent explicit override, the default is always: prepare the command, show it to the human, wait.
+
+### If The Git History Is Already Polluted
+
+If Claude Code notices prior commits with generic `checkpoint:` messages, DO NOT attempt to rewrite git history (no `git rebase`, no `git commit --amend` on previous commits, no `git reset`). That's the human's call. Simply continue forward with proper commit hygiene.
+
+### Branch Discipline
+
 - Do NOT create branches unless explicitly asked
-- Work directly on the current branch — do NOT create worktrees or new branches
-- All work happens on proposal-v2 unless explicitly told otherwise
+- Do NOT create worktrees
+- All work happens on the current branch (typically `proposal-v2`) unless explicitly told otherwise
 
 ## Prisma Rules
 - NEVER run `npx prisma db pull` or `npx prisma db pull --force`. This overwrites the hand-crafted schema.prisma with an auto-generated version that loses @updatedAt, onDelete behaviors, comments, relation names, and field ordering.
