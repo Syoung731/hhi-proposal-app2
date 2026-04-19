@@ -54,8 +54,6 @@ export function ProjectTabs({
   initialMediaRoomId?: string;
   /** Whether Rendr integration is configured — controls tab visibility. */
   rendrConfigured?: boolean;
-  /** Accepted but unused — removed in Commit 2 alongside the presentation tab. */
-  children?: React.ReactNode;
 }) {
   return (
     <div className="space-y-6">
