@@ -166,6 +166,8 @@ function SourceBadge({ source }: { source: string }) {
       return <span className={`${base} bg-amber-50 text-amber-700 border border-amber-200`}>ALW</span>;
     case "AI_PRICED":
       return <span className={`${base} border text-brand-accent`} style={{ backgroundColor: "var(--brand-accent-lighter)", borderColor: "var(--brand-accent-spinner-track)" }}>AI</span>;
+    case "CALC":
+      return <span className={`${base} bg-indigo-50 text-indigo-700 border border-indigo-200`}>CALC</span>;
     case "MANUAL":
       return <span className={`${base} bg-blue-50 text-blue-700 border border-blue-200`}>MAN</span>;
     default:
@@ -1066,7 +1068,7 @@ export function AIEstimatePanel({
 
   // Source counts
   const sourceCounts = useMemo(() => {
-    if (!estimate) return { total: 0, catalog: 0, allowance: 0, ai: 0, manual: 0 };
+    if (!estimate) return { total: 0, catalog: 0, allowance: 0, ai: 0, manual: 0, calc: 0 };
     const items = estimate.lineItems;
     return {
       total: items.length,
@@ -1074,6 +1076,7 @@ export function AIEstimatePanel({
       allowance: items.filter((i) => i.source === "ALLOWANCE").length,
       ai: items.filter((i) => i.source === "AI_PRICED").length,
       manual: items.filter((i) => i.source === "MANUAL").length,
+      calc: items.filter((i) => i.source === "CALC").length,
     };
   }, [estimate]);
 
@@ -1109,6 +1112,7 @@ export function AIEstimatePanel({
   const sourceCountParts: string[] = [];
   if (sourceCounts.catalog > 0) sourceCountParts.push(`${sourceCounts.catalog} catalog`);
   if (sourceCounts.allowance > 0) sourceCountParts.push(`${sourceCounts.allowance} allowance`);
+  if (sourceCounts.calc > 0) sourceCountParts.push(`${sourceCounts.calc} calc`);
   if (sourceCounts.ai > 0) sourceCountParts.push(`${sourceCounts.ai} AI`);
   if (sourceCounts.manual > 0) sourceCountParts.push(`${sourceCounts.manual} manual`);
 

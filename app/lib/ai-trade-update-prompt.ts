@@ -44,7 +44,7 @@ export interface TradeUpdateProposal {
     unitCost: number;
     unitPrice: number;
     catalogItemId?: string | null;
-    source?: "CATALOG" | "AI_PRICED" | "ALLOWANCE" | "MANUAL";
+    source?: "CATALOG" | "AI_PRICED" | "ALLOWANCE" | "MANUAL" | "CALC";
     reason: string;
   }>;
   update: Array<{

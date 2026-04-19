@@ -3,6 +3,7 @@
  *
  * Source-type multipliers widen the range for less certain items:
  *   CATALOG (high confidence): 1.0x  → uses settings range as-is
+ *   CALC (pre-calculated):     1.0x  → exact value from code (e.g. permit fees)
  *   AI_PRICED (medium):        1.25x → widens range by 25%
  *   ALLOWANCE (low):           1.5x  → widens range by 50%
  *   MANUAL (user-set):         1.0x  → same confidence as catalog
@@ -10,6 +11,7 @@
 
 const SOURCE_MULTIPLIERS: Record<string, number> = {
   CATALOG: 1.0,
+  CALC: 1.0,
   AI_PRICED: 1.25,
   ALLOWANCE: 1.5,
   MANUAL: 1.0,

@@ -22,6 +22,7 @@ const SOURCE_COLORS: Record<string, string> = {
   ALLOWANCE: "#f59e0b",
   AI_PRICED: "#3b82f6",
   MANUAL: "#8b5cf6",
+  CALC: "#6366f1",
 };
 
 function formatDollar(v: number) {

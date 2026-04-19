@@ -6,7 +6,7 @@ import { fuzzyMatch } from "@/app/lib/fuzzy-catalog-match";
 interface RawEstimateItem {
   name: string;
   catalogMatch?: boolean;
-  source: "CATALOG" | "AI_PRICED" | "ALLOWANCE";
+  source: "CATALOG" | "AI_PRICED" | "ALLOWANCE" | "CALC";
   quantity: number;
   unit: string;
   unitCost: number;
@@ -37,7 +37,7 @@ export interface ParsedLineItem {
   unitPrice: number;
   totalCost: number;
   totalPrice: number;
-  source: "CATALOG" | "AI_PRICED" | "ALLOWANCE";
+  source: "CATALOG" | "AI_PRICED" | "ALLOWANCE" | "CALC";
   confidence: number;
   notes: string | null;
   matchScore: number | null;
@@ -204,16 +204,38 @@ export function parseEstimateResponse(
     if (!group.items || !Array.isArray(group.items)) continue;
 
     for (const rawItem of group.items) {
-      // Use fuzzy matching instead of exact name lookup
-      const match = fuzzyMatch(rawItem.name, fuzzyCandidates);
-      const catalogItem = match ? catalogById.get(match.item.id) ?? null : null;
-      let matchScore: number | null = match ? match.score : null;
-
       let source = rawItem.source;
       let catalogItemId: string | null = null;
       let unitCost = rawItem.unitCost ?? 0;
       let unitPrice = rawItem.unitPrice ?? 0;
       let confidence = rawItem.confidence ?? 0.5;
+
+      // CALC items carry pre-calculated values from code (e.g., permit fees).
+      // Honor them exactly — no fuzzy matching, no catalog override.
+      if (source === "CALC") {
+        const quantity = rawItem.quantity ?? 1;
+        items.push({
+          catalogItemId: null,
+          tradeGroup: group.name,
+          name: rawItem.name,
+          quantity,
+          unit: rawItem.unit ?? "EA",
+          unitCost,
+          unitPrice,
+          totalCost: quantity * unitCost,
+          totalPrice: quantity * unitPrice,
+          source: "CALC",
+          confidence: 0.95,
+          notes: rawItem.notes ?? null,
+          matchScore: null,
+        });
+        continue;
+      }
+
+      // Use fuzzy matching instead of exact name lookup
+      const match = fuzzyMatch(rawItem.name, fuzzyCandidates);
+      const catalogItem = match ? catalogById.get(match.item.id) ?? null : null;
+      let matchScore: number | null = match ? match.score : null;
 
       if (rawItem.catalogMatch || source === "CATALOG" || source === "ALLOWANCE") {
         if (catalogItem) {

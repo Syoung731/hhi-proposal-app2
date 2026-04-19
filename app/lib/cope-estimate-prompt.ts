@@ -35,12 +35,12 @@ PERMIT FEES — PRE-CALCULATED (do NOT recalculate):
 
   1. "[ADM] Building Permit - Material": The actual government permit fee.
      - unitCost and unitPrice = the pre-calculated baseFee from the user prompt (government fees, no markup)
-     - source: "ALLOWANCE"
+     - source: "CALC"  ← pre-calculated in code; do NOT change to ALLOWANCE/AI_PRICED/CATALOG
      - quantity: 1
 
   2. "[ADM] Plan Review Fee": 50% of the permit fee if required.
      - unitCost and unitPrice = the pre-calculated planReviewFee from the user prompt (government fees, no markup)
-     - source: "ALLOWANCE"
+     - source: "CALC"  ← pre-calculated in code; do NOT change to ALLOWANCE/AI_PRICED/CATALOG
      - quantity: 1 if required, 0 if not required (see user prompt for determination)
 
   3. "[ADM] Building Permit - Labor": Labor for someone to pick up, post, and manage the permit.
@@ -120,6 +120,7 @@ TAG EVERY ITEM:
   - "CATALOG" = using a real catalog price where unitPrice > 0
   - "ALLOWANCE" = catalog item exists but unitPrice is $0, you estimated the price
   - "AI_PRICED" = no matching catalog item exists at all
+  - "CALC" = the dollar amount was pre-calculated in code and supplied verbatim in the user prompt (e.g., permit fees). Use this tag whenever you are passing a number through unchanged from the prompt — do NOT mis-tag pre-calc values as AI_PRICED.
 
 CONFIDENCE SCORES:
   - CATALOG items: 0.95
