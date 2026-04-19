@@ -5,6 +5,7 @@ import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { ProjectStatus } from "@/app/generated/prisma";
 import type { SnapshotData } from "@/app/lib/snapshot";
+import { serializeDeckForSnapshot } from "@/app/lib/snapshot-serializer";
 
 export async function publishProjectAction(projectId: string): Promise<{ error?: string }> {
   await requireAdmin();
@@ -34,7 +35,9 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
     };
   });
   const newVersion = project.publishedVersion + 1;
+  const deck = await serializeDeckForSnapshot(projectId);
   const snapshot: SnapshotData = {
+    schema: deck ? "v2-deck" : "v1-legacy",
     version: newVersion,
     project: {
       title: project.title,
@@ -74,6 +77,7 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
       sortOrder: p.sortOrder,
     })),
     investmentLineItems: effectiveInvestmentItems,
+    ...(deck ? { deck } : {}),
   };
   const [, , proposal] = await prisma.$transaction([
     prisma.publishedSnapshot.create({

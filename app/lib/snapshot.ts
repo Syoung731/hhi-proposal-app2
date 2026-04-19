@@ -1,8 +1,16 @@
 /**
  * Shape of the JSON stored in PublishedSnapshot. Must be serializable and sufficient
  * to render the public proposal page without touching the database.
+ *
+ * Schema discriminator:
+ *   - "v1-legacy" — original page-by-page shape (project + rooms + media + timeline + investment).
+ *     Old snapshot rows in the DB may lack the `schema` field entirely; readers should treat
+ *     `undefined` as "v1-legacy" for backward compatibility.
+ *   - "v2-deck"   — same legacy fields PLUS a serialized `deck` payload of DeckSlide rows,
+ *     written by the post-Cleanup C publish flow.
  */
 export type SnapshotData = {
+  schema: "v1-legacy" | "v2-deck";
   version: number;
   project: {
     title: string;
@@ -55,4 +63,44 @@ export type SnapshotData = {
     sortOrder: number;
     includeInTotals?: boolean;
   }>;
+  /** Present iff schema === "v2-deck". Snapshot of the project's ProposalDeck at publish time. */
+  deck?: SerializedDeck;
+};
+
+/**
+ * Snapshot-frozen copy of a ProposalDeck. The renderer reads project.title etc. from the
+ * outer SnapshotData.project — no need to repeat it here.
+ */
+export type SerializedDeck = {
+  id: string;
+  slides: SerializedDeckSlide[];
+};
+
+/**
+ * Snapshot-frozen copy of a DeckSlide. Mirrors the DeckSlide DB columns 1:1, omitting:
+ *   - deckId    (implicit from parent)
+ *   - createdAt (irrelevant in snapshot)
+ *   - updatedAt (irrelevant in snapshot)
+ *
+ * Note: aiBackground lives inside `content` JSON, not as a top-level column — see
+ * app/lib/deck/db.ts for the convention.
+ */
+export type SerializedDeckSlide = {
+  id: string;
+  type: string;
+  layoutKey: string;
+  order: number;
+  isEnabled: boolean;
+  isUserHidden: boolean;
+  isUserModified: boolean;
+  source: string;
+  sectionId: string | null;
+  headline: string | null;
+  subheadline: string | null;
+  body: string | null;
+  content: Record<string, unknown> | null;
+  isLocked: boolean;
+  lockPosition: string | null;
+  backgroundId: string | null;
+  textZone: Record<string, unknown> | null;
 };

@@ -48,6 +48,9 @@ model Project {
   bullets             String[]             @default([])
   scopeOverview       String?
   publishedVersion    Int                  @default(0)
+  // Cursor for the version the public link should resolve to. Null = follow latest snapshot.
+  // Set by the Send-to-Client flow (Cleanup H) so re-publishing doesn't move the URL out from under the client.
+  clientFacingVersion Int?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   addressLine1        String?
@@ -342,15 +345,22 @@ model InvestmentLineItem {
 }
 
 model PublishedSnapshot {
-  id           String   @id @default(cuid())
-  projectId    String
-  version      Int
-  snapshotJson Json
-  createdAt    DateTime @default(now())
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id               String    @id @default(cuid())
+  projectId        String
+  version          Int
+  snapshotJson     Json
+  createdAt        DateTime  @default(now())
+  // Send-to-Client tracking — populated by Cleanup H, null until first send.
+  sentAt           DateTime?
+  sentByEmployeeId String?
+  sentToEmail      String?
+  label            String?
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sentByEmployee   Employee? @relation(fields: [sentByEmployeeId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, version])
   @@index([projectId])
+  @@index([sentByEmployeeId])
 }
 
 enum ProjectStatus {
@@ -440,17 +450,18 @@ enum PricingBasis {
 }
 
 model Employee {
-  id        String   @id @default(cuid())
-  firstName String
-  lastName  String
-  roleTitle String?  // e.g., Project Director, PM, Designer
-  email     String?  @unique
-  phone     String?
-  isActive  Boolean  @default(true)
-  isAdmin   Boolean  @default(false)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String              @id @default(cuid())
+  firstName     String
+  lastName      String
+  roleTitle     String?             // e.g., Project Director, PM, Designer
+  email         String?             @unique
+  phone         String?
+  isActive      Boolean             @default(true)
+  isAdmin       Boolean             @default(false)
+  sortOrder     Int                 @default(0)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  sentSnapshots PublishedSnapshot[]
 
   @@index([sortOrder])
 }

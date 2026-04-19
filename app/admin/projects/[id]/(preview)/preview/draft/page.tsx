@@ -46,6 +46,7 @@ export default async function AdminProjectPreviewDraftPage({
   });
 
   const snapshot: SnapshotData = {
+    schema: "v1-legacy",
     version: project.publishedVersion + 1,
     project: {
       title: project.title,
