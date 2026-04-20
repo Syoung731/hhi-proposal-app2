@@ -43,6 +43,10 @@ export function ProjectTabs({
   roomTypeHighPct,
   initialMediaRoomId,
   rendrConfigured,
+  latestSnapshotId,
+  latestSnapshotVersion,
+  latestSnapshotCreatedAt,
+  latestSnapshotSentAt,
 }: {
   project: ProjectForTabs;
   stylePresets: StylePresetForTabs[];
@@ -54,6 +58,11 @@ export function ProjectTabs({
   initialMediaRoomId?: string;
   /** Whether Rendr integration is configured — controls tab visibility. */
   rendrConfigured?: boolean;
+  /** Latest PublishedSnapshot metadata — null when nothing is published. */
+  latestSnapshotId?: string | null;
+  latestSnapshotVersion?: number | null;
+  latestSnapshotCreatedAt?: string | null;
+  latestSnapshotSentAt?: string | null;
 }) {
   return (
     <div className="space-y-6">
@@ -243,6 +252,10 @@ export function ProjectTabs({
             projectId={project.id}
             proposalId={project.proposal?.id ?? null}
             publishedVersion={project.publishedVersion}
+            latestSnapshotId={latestSnapshotId ?? null}
+            latestSnapshotVersion={latestSnapshotVersion ?? null}
+            latestSnapshotCreatedAt={latestSnapshotCreatedAt ?? null}
+            latestSnapshotSentAt={latestSnapshotSentAt ?? null}
           />
         )}
       </div>

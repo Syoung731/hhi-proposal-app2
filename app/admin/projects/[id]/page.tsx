@@ -60,12 +60,17 @@ export default async function AdminProjectPage({
   // investmentLineItems returned by getProject always reflect the latest SectionType
   // rates — even for rooms whose totalLow/totalHigh was never written (stale rows
   // set via updateRoomsSectionType before Fix A).
-  const [project, stylePresets, sectionTypes, companySettings, rendrConfigured] = await Promise.all([
+  const [project, stylePresets, sectionTypes, companySettings, rendrConfigured, latestSnapshot] = await Promise.all([
     recomputeInvestmentRollups(id).catch(() => null).then(() => getProject(id)),
     listActiveStylePresets(),
     listSectionTypes(),
     getOrCreateCompanySettings(),
     isRendrConfigured().catch(() => false),
+    prisma.publishedSnapshot.findFirst({
+      where: { projectId: id },
+      orderBy: { version: "desc" },
+      select: { id: true, version: true, createdAt: true, sentAt: true },
+    }),
   ]);
   if (!project) notFound();
   const roomTypeLowPct = companySettings.roomTypeLowPct ?? -10;
@@ -96,6 +101,10 @@ export default async function AdminProjectPage({
         roomTypeHighPct={roomTypeHighPct}
         initialMediaRoomId={roomIdFromUrl}
         rendrConfigured={rendrConfigured}
+        latestSnapshotId={latestSnapshot?.id ?? null}
+        latestSnapshotVersion={latestSnapshot?.version ?? null}
+        latestSnapshotCreatedAt={latestSnapshot?.createdAt.toISOString() ?? null}
+        latestSnapshotSentAt={latestSnapshot?.sentAt?.toISOString() ?? null}
       />
     </div>
   );
