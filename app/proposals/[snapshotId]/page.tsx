@@ -5,6 +5,7 @@ import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getDeckForProject } from "@/app/lib/deck/db";
 import { deserializeSnapshotSlides } from "@/app/lib/deck/deserialize-snapshot";
 import { PresentationFrame } from "./presentation-frame";
+import { PrintStack } from "./print-stack";
 import type { SnapshotData, SerializedDeckSlide } from "@/app/lib/snapshot";
 import type {
   BrandBackgroundForUI,
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ snapshotId: string }>;
-  searchParams: Promise<{ draft?: string; projectId?: string }>;
+  searchParams: Promise<{ draft?: string; projectId?: string; print?: string }>;
 }
 
 export default async function ProposalPublicRenderer({
@@ -36,6 +37,7 @@ export default async function ProposalPublicRenderer({
   const sp = await searchParams;
 
   const isDraft = sp.draft === "1" && snapshotId === "draft";
+  const isPrint = sp.print === "1";
 
   // Load brand backgrounds once — used by both paths so slide.backgroundId can
   // resolve to a full BrandBackgroundForUI for the composite layer.
@@ -51,6 +53,17 @@ export default async function ProposalPublicRenderer({
 
     const draft = await loadDraftDeck(projectId);
     if (!draft) notFound();
+
+    if (isPrint) {
+      return (
+        <PrintStack
+          slides={draft.slides}
+          branding={branding}
+          brandBackgrounds={brandBackgrounds}
+          draftMarker={`DRAFT — PROPOSAL v${draft.nextVersion}`}
+        />
+      );
+    }
 
     return (
       <PresentationFrame
@@ -82,6 +95,17 @@ export default async function ProposalPublicRenderer({
 
   const slides = deserializeSnapshotSlides(data.deck.slides as SerializedDeckSlide[]);
 
+  if (isPrint) {
+    return (
+      <PrintStack
+        slides={slides}
+        branding={branding}
+        brandBackgrounds={brandBackgrounds}
+        draftMarker={null}
+      />
+    );
+  }
+
   return (
     <PresentationFrame
       slides={slides}
@@ -99,6 +123,7 @@ export default async function ProposalPublicRenderer({
 async function loadDraftDeck(projectId: string): Promise<{
   slides: ProposalSlide[];
   projectTitle: string;
+  nextVersion: number;
 } | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -118,6 +143,7 @@ async function loadDraftDeck(projectId: string): Promise<{
       state: true,
       zip: true,
       coverHeroImageId: true,
+      publishedVersion: true,
       media: {
         select: { id: true, url: true, kind: true },
         orderBy: { sortOrder: "asc" },
@@ -319,6 +345,7 @@ async function loadDraftDeck(projectId: string): Promise<{
   return {
     slides: slides.filter((s) => s.isEnabled !== false),
     projectTitle: project.title,
+    nextVersion: (project.publishedVersion ?? 0) + 1,
   };
 }
 

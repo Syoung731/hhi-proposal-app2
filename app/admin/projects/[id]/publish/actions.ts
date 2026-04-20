@@ -79,13 +79,14 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
     investmentLineItems: effectiveInvestmentItems,
     ...(deck ? { deck } : {}),
   };
-  const [, , proposal] = await prisma.$transaction([
+  const [createdSnapshot] = await prisma.$transaction([
     prisma.publishedSnapshot.create({
       data: {
         projectId: project.id,
         version: newVersion,
         snapshotJson: snapshot as unknown as object,
       },
+      select: { id: true },
     }),
     prisma.project.update({
       where: { id: projectId },
@@ -99,7 +100,7 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
     }),
   ]);
   revalidatePath(`/admin/projects/${projectId}`);
-  revalidatePath(`/p/${proposal.id}`);
-  revalidatePath(`/p/${proposal.id}/pdf`);
+  revalidatePath(`/proposals/${createdSnapshot.id}`);
+  revalidatePath(`/proposals/${createdSnapshot.id}/pdf`);
   return {};
 }
