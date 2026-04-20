@@ -63,7 +63,7 @@ export async function getEmailProvider(): Promise<EmailProvider> {
       "Email provider integration is present but has no encrypted secret. Re-save the service account JSON.",
     );
   }
-  const meta = readMeta(integration.metaJson);
+  const meta = readEmailIntegrationMeta(integration.metaJson);
   // NEVER log the decrypted value. Treat the whole JSON blob as a secret.
   const serviceAccountJson = decryptSecret(integration.encryptedSecret);
 
@@ -80,7 +80,13 @@ export async function getEmailProvider(): Promise<EmailProvider> {
   );
 }
 
-function readMeta(metaJson: unknown): EmailProviderMeta {
+/**
+ * Parse + validate the metaJson blob on an Integration row. Exported so the
+ * verify server action can reuse it — verify needs to reach past the
+ * isActive filter that gates `getEmailProvider()`, and parsing the same
+ * metadata in two places would invite drift.
+ */
+export function readEmailIntegrationMeta(metaJson: unknown): EmailProviderMeta {
   if (!metaJson || typeof metaJson !== "object") {
     throw new Error(
       "Email integration metaJson is missing. Re-save the integration with authorizedDomain + defaultSenderEmail.",
