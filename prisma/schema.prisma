@@ -361,6 +361,8 @@ model PublishedSnapshot {
   project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   sentByEmployee   Employee?      @relation(fields: [sentByEmployeeId], references: [id], onDelete: SetNull)
   emailSendLogs    EmailSendLog[]
+  pdfDownloadLogs   PdfDownloadLog[]
+  shareLinkCopyLogs ShareLinkCopyLog[]
 
   @@unique([projectId, version])
   @@index([projectId])
@@ -482,6 +484,8 @@ model Employee {
   updatedAt        DateTime            @updatedAt
   sentSnapshots    PublishedSnapshot[]
   emailSendLogs    EmailSendLog[]
+  pdfDownloadLogs   PdfDownloadLog[]
+  shareLinkCopyLogs ShareLinkCopyLog[]
 
   @@index([sortOrder])
 }
@@ -1173,4 +1177,46 @@ model EmailSendLog {
   @@index([snapshotId])
   @@index([employeeId])
   @@index([sentAt])
+}
+
+// ---------------------------------------------------------------------------
+// Delivery Audit Logs (Cleanup H)
+// ---------------------------------------------------------------------------
+// Per-action audit trails for the two non-email delivery paths: PDF download
+// (in-person meetings) and share-link copy (ad-hoc delivery). Kept separate
+// from EmailSendLog so per-method reporting stays simple — no delivery_type
+// enum + where-clause contortions.
+//
+// Unlike EmailSendLog, these do NOT update PublishedSnapshot.sentAt —
+// downloads and copies don't confirm the client received anything, only
+// email has that signal via provider message ids.
+//
+// Relations use Cascade on snapshot (audit dies with the snapshot it
+// references — downloads of a deleted snapshot are meaningless) and
+// SetNull on employee (retention of the download event survives employee
+// deletion, just with a null attribution).
+// ---------------------------------------------------------------------------
+
+model PdfDownloadLog {
+  id           String            @id @default(cuid())
+  snapshotId   String
+  snapshot     PublishedSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  employeeId   String?
+  employee     Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  downloadedAt DateTime          @default(now())
+
+  @@index([snapshotId])
+  @@index([employeeId])
+}
+
+model ShareLinkCopyLog {
+  id         String            @id @default(cuid())
+  snapshotId String
+  snapshot   PublishedSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  employeeId String?
+  employee   Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  copiedAt   DateTime          @default(now())
+
+  @@index([snapshotId])
+  @@index([employeeId])
 }
