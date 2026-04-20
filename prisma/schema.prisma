@@ -22,13 +22,13 @@ model User {
 }
 
 model StylePreset {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id        String    @id @default(cuid())
+  name      String    @unique
   prompt    String
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   media     Media[]
   projects  Project[]
   rooms     Room[]
@@ -37,43 +37,43 @@ model StylePreset {
 }
 
 model Project {
-  id                  String               @id @default(cuid())
-  slug                String               @unique
-  status              ProjectStatus        @default(DRAFT)
-  title               String
-  subtitle            String?
-  coverHeroImageId    String?
-  objective           String?
-  supportingText      String?
-  bullets             String[]             @default([])
-  scopeOverview       String?
-  publishedVersion    Int                  @default(0)
+  id                       String                    @id @default(cuid())
+  slug                     String                    @unique
+  status                   ProjectStatus             @default(DRAFT)
+  title                    String
+  subtitle                 String?
+  coverHeroImageId         String?
+  objective                String?
+  supportingText           String?
+  bullets                  String[]                  @default([])
+  scopeOverview            String?
+  publishedVersion         Int                       @default(0)
   // Cursor for the version the public link should resolve to. Null = follow latest snapshot.
   // Set by the Send-to-Client flow (Cleanup H) so re-publishing doesn't move the URL out from under the client.
-  clientFacingVersion Int?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  addressLine1        String?
-  addressLine2        String?
-  city                String?
-  state               String?
-  zip                 String?
-  client1First        String?
-  client1Last         String?
-  client2First        String?
-  client2Last         String?
-  transcriptText      String?
-  stylePresetId       String?
-  stylePreset         StylePreset?         @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
-  investmentLineItems InvestmentLineItem[]
-  media               Media[]
-  publishedSnapshots  PublishedSnapshot[]
-  rooms               Room[]
-  timelinePhases      TimelinePhase[]
-  proposal            Proposal?
+  clientFacingVersion      Int?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  addressLine1             String?
+  addressLine2             String?
+  city                     String?
+  state                    String?
+  zip                      String?
+  client1First             String?
+  client1Last              String?
+  client2First             String?
+  client2Last              String?
+  transcriptText           String?
+  stylePresetId            String?
+  stylePreset              StylePreset?              @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  investmentLineItems      InvestmentLineItem[]
+  media                    Media[]
+  publishedSnapshots       PublishedSnapshot[]
+  rooms                    Room[]
+  timelinePhases           TimelinePhase[]
+  proposal                 Proposal?
   extensionPairCodes       ExtensionPairCode[]
   zillowBrowserConnections ZillowBrowserConnection[]
-  defaultCeilingHeightFt   Float?               @default(9)
+  defaultCeilingHeightFt   Float?                    @default(9)
   projectQA                Json?
   proposalDeck             ProposalDeck?
   // Rendr LiDAR integration (optional)
@@ -83,10 +83,10 @@ model Project {
   rendrImportedAt          DateTime?
 
   // Design/Feasibility Retainer (shown on investment + retainer slides)
-  retainerEnabled          Boolean              @default(true)
-  retainerPercent          Float                @default(0.08)
-  retainerRoundTo          Int                  @default(1000)
-  retainerOverride         Int?
+  retainerEnabled  Boolean @default(true)
+  retainerPercent  Float   @default(0.08)
+  retainerRoundTo  Int     @default(1000)
+  retainerOverride Int?
 
   @@index([status])
   @@index([createdAt])
@@ -120,18 +120,18 @@ enum ZillowHandshakeMethod {
 }
 
 model ZillowBrowserConnection {
-  id                String                   @id @default(cuid())
-  userId            String                   // Clerk user id (authenticated user who started the session)
+  id                String                 @id @default(cuid())
+  userId            String // Clerk user id (authenticated user who started the session)
   projectId         String?
-  status            ZillowConnectionStatus   @default(PENDING)
-  nonce             String                   @unique
-  createdAt         DateTime                 @default(now())
+  status            ZillowConnectionStatus @default(PENDING)
+  nonce             String                 @unique
+  createdAt         DateTime               @default(now())
   expiresAt         DateTime
   verifiedAt        DateTime?
-  browserMetadata   Json?                    // { userAgent?, browserFamily?, version?, platform? }
-  extensionMetadata Json?                  // { extensionId?, extensionVersion? }
-  handshakeMethod   ZillowHandshakeMethod   @default(DIRECT)
-  project           Project?                 @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  browserMetadata   Json? // { userAgent?, browserFamily?, version?, platform? }
+  extensionMetadata Json? // { extensionId?, extensionVersion? }
+  handshakeMethod   ZillowHandshakeMethod  @default(DIRECT)
+  project           Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([nonce])
   @@index([userId])
@@ -141,84 +141,84 @@ model ZillowBrowserConnection {
 }
 
 model Proposal {
-  id                  String   @id @default(cuid())
-  projectId            String   @unique
-  isPublic             Boolean  @default(false)
-  publicLayoutConfig   Json?
-  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id                 String  @id @default(cuid())
+  projectId          String  @unique
+  isPublic           Boolean @default(false)
+  publicLayoutConfig Json?
+  project            Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([isPublic])
 }
 
 model Room {
-  id                   String            @id @default(cuid())
-  projectId            String
-  roomTypeId           String?
-  stylePresetId        String?
-  sectionTypeId        String?
-  estPricePerSqFt      Float?
-  lengthFt             Float?
-  widthFt              Float?
-  ceilingHeightFt      Float?
-  lengthIn             Int?
-  widthIn              Int?
-  ceilingHeightIn      Int?
-  scopeNarrative       String            @default("")
-  sortOrder            Int               @default(0)
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  name                 String
-  scopeSource          String            @default("AI")
-  scopeUpdatedAt       DateTime          @default(now())
-  selectedRenderMediaId String?
+  id                         String           @id @default(cuid())
+  projectId                  String
+  roomTypeId                 String?
+  stylePresetId              String?
+  sectionTypeId              String?
+  estPricePerSqFt            Float?
+  lengthFt                   Float?
+  widthFt                    Float?
+  ceilingHeightFt            Float?
+  lengthIn                   Int?
+  widthIn                    Int?
+  ceilingHeightIn            Int?
+  scopeNarrative             String           @default("")
+  sortOrder                  Int              @default(0)
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  name                       String
+  scopeSource                String           @default("AI")
+  scopeUpdatedAt             DateTime         @default(now())
+  selectedRenderMediaId      String?
   // Section / measurement fields
-  measurementMode      MeasurementMode?
-  areaSqFt             Float?
-  quantity             Int?
-  origin               SectionOrigin     @default(MANUAL)
+  measurementMode            MeasurementMode?
+  areaSqFt                   Float?
+  quantity                   Int?
+  origin                     SectionOrigin    @default(MANUAL)
   // Estimating fields
-  estimateUnit         EstimateUnit?
-  customUnitLabel      String?
-  unitRate             Float?
-  unitQuantity         Float?
-  unitQuantityManualOverride Boolean @default(false)
-  roomTemplateId   String?
-  pricingTier      RoomPricingTier  @default(PROFILE)
-  isProjectOverhead Boolean         @default(false)
+  estimateUnit               EstimateUnit?
+  customUnitLabel            String?
+  unitRate                   Float?
+  unitQuantity               Float?
+  unitQuantityManualOverride Boolean          @default(false)
+  roomTemplateId             String?
+  pricingTier                RoomPricingTier  @default(PROFILE)
+  isProjectOverhead          Boolean          @default(false)
   // Section pricing (Low/Target/High)
-  unitRateLow          Float?
-  unitRateTarget       Float?
-  unitRateHigh         Float?
-  totalLow             Float?
-  totalTarget          Float?
-  totalHigh            Float?
-  pricingNotes         String?
-  scopeQA              Json?
-  estimateStaleReason  String?
-  bucket               SectionBucket           @default(BASE)
+  unitRateLow                Float?
+  unitRateTarget             Float?
+  unitRateHigh               Float?
+  totalLow                   Float?
+  totalTarget                Float?
+  totalHigh                  Float?
+  pricingNotes               String?
+  scopeQA                    Json?
+  estimateStaleReason        String?
+  bucket                     SectionBucket    @default(BASE)
   // Structured measurement fields (from Rendr LiDAR or manual entry)
-  wallsSF              Float?
-  ceilingSF            Float?
-  perimeterLF          Float?
-  paintableSF          Float?
-  windowCount          Int?
-  windowsSF            Float?
-  doorCount            Int?
-  doorsSF              Float?
-  measurementSource    String?                 // 'rendr' | 'transcript' | 'manual'
-  rendrCeilingHeightFt Float?                  // Ceiling height from Rendr geometry (preserved)
+  wallsSF                    Float?
+  ceilingSF                  Float?
+  perimeterLF                Float?
+  paintableSF                Float?
+  windowCount                Int?
+  windowsSF                  Float?
+  doorCount                  Int?
+  doorsSF                    Float?
+  measurementSource          String? // 'rendr' | 'transcript' | 'manual'
+  rendrCeilingHeightFt       Float? // Ceiling height from Rendr geometry (preserved)
   // Rendr room mapping (persists the import pairing)
-  rendrRoomMappings    Json?                   // [{ index: number, label: string }]
+  rendrRoomMappings          Json? // [{ index: number, label: string }]
   // Kitchen/Bath structured detail (Phase 7B will populate)
-  roomDetail           Json?
-  media                     Media[]
-  subAreas                 RoomSubArea[]
-  project                   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  roomType                  RoomType?           @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
-  stylePreset               StylePreset?        @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
-  sectionType               SectionType?        @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
-  roomTemplate              RoomTemplate?       @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
+  roomDetail                 Json?
+  media                      Media[]
+  subAreas                   RoomSubArea[]
+  project                    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  roomType                   RoomType?        @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
+  stylePreset                StylePreset?     @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  sectionType                SectionType?     @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
+  roomTemplate               RoomTemplate?    @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([projectId, bucket])
@@ -234,21 +234,22 @@ model Room {
 
 /// Optional finer-grained measurement segments for a Room/Section
 model RoomSubArea {
-  id              String    @id @default(cuid())
+  id              String   @id @default(cuid())
   roomId          String
   name            String
   lengthIn        Int?
   widthIn         Int?
   ceilingHeightIn Int?
   areaSqFt        Float?
-  sortOrder       Int       @default(0)
-  includeInArea   Boolean   @default(true)  // <‑‑ add this line
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sortOrder       Int      @default(0)
+  includeInArea   Boolean  @default(true) // <‑‑ add this line
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([roomId, sortOrder])
 }
+
 enum MediaPlacement {
   SECTION
   FRONT_PAGE
@@ -256,20 +257,22 @@ enum MediaPlacement {
 }
 
 model Media {
-  id              String          @id @default(cuid())
+  id              String         @id @default(cuid())
   projectId       String
   roomId          String?
   kind            MediaKind
   url             String
   fileKey         String
-  /** Original source URL (e.g. Zillow image URL) for duplicate detection. */
+  /**
+   * Original source URL (e.g. Zillow image URL) for duplicate detection.
+   */
   sourceUrl       String?
   width           Int?
   height          Int?
   caption         String?
   tags            String[]
-  sortOrder       Int             @default(0)
-  createdAt       DateTime        @default(now())
+  sortOrder       Int            @default(0)
+  createdAt       DateTime       @default(now())
   sourceMediaId   String?
   parentMediaId   String?
   editInstruction String?
@@ -278,15 +281,15 @@ model Media {
   renderModel     String?
   renderStatus    RenderStatus?
   renderError     String?
-  promptVersion   Int             @default(1)
-  placement       MediaPlacement  @default(UNASSIGNED)
-  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  room            Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  sourceMedia     Media?          @relation("MediaSource", fields: [sourceMediaId], references: [id], onDelete: SetNull)
-  renderingsFrom  Media[]         @relation("MediaSource")
-  parent          Media?          @relation("MediaParent", fields: [parentMediaId], references: [id], onDelete: SetNull)
+  promptVersion   Int            @default(1)
+  placement       MediaPlacement @default(UNASSIGNED)
+  project         Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room            Room?          @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  sourceMedia     Media?         @relation("MediaSource", fields: [sourceMediaId], references: [id], onDelete: SetNull)
+  renderingsFrom  Media[]        @relation("MediaSource")
+  parent          Media?         @relation("MediaParent", fields: [parentMediaId], references: [id], onDelete: SetNull)
   children        Media[]        @relation("MediaParent")
-  stylePreset     StylePreset?    @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  stylePreset     StylePreset?   @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
   type            MediaType      @default(EXISTING)
 
   @@index([projectId])
@@ -345,18 +348,19 @@ model InvestmentLineItem {
 }
 
 model PublishedSnapshot {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   projectId        String
   version          Int
   snapshotJson     Json
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime       @default(now())
   // Send-to-Client tracking — populated by Cleanup H, null until first send.
   sentAt           DateTime?
   sentByEmployeeId String?
   sentToEmail      String?
   label            String?
-  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  sentByEmployee   Employee? @relation(fields: [sentByEmployeeId], references: [id], onDelete: SetNull)
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sentByEmployee   Employee?      @relation(fields: [sentByEmployeeId], references: [id], onDelete: SetNull)
+  emailSendLogs    EmailSendLog[]
 
   @@unique([projectId, version])
   @@index([projectId])
@@ -450,129 +454,135 @@ enum PricingBasis {
 }
 
 model Employee {
-  id            String              @id @default(cuid())
-  firstName     String
-  lastName      String
-  roleTitle     String?             // e.g., Project Director, PM, Designer
-  email         String?             @unique
-  phone         String?
-  isActive      Boolean             @default(true)
-  isAdmin       Boolean             @default(false)
-  sortOrder     Int                 @default(0)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  sentSnapshots PublishedSnapshot[]
+  id               String              @id @default(cuid())
+  firstName        String
+  lastName         String
+  roleTitle        String? // e.g., Project Director, PM, Designer
+  email            String?             @unique
+  phone            String?
+  isActive         Boolean             @default(true)
+  isAdmin          Boolean             @default(false)
+  sortOrder        Int                 @default(0)
+  // Email-send tracking (Cleanup F). dailySentCount is rolled over when
+  // dailySentResetAt < now by sendProposalEmail. Cleanup G adds signature fields.
+  lastSentAt       DateTime?
+  dailySentCount   Int                 @default(0)
+  dailySentResetAt DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  sentSnapshots    PublishedSnapshot[]
+  emailSendLogs    EmailSendLog[]
 
   @@index([sortOrder])
 }
 
 // Singleton: one row for company-wide settings. Use findFirst and create if none.
 model CompanySettings {
-  id                      String   @id @default(cuid())
-  companyName             String   @default("")
-  addressLine1            String?
-  addressLine2            String?
-  city                    String?
-  state                   String?
-  zip                     String?
-  phone                   String?
-  email                   String?
-  websiteUrl              String?
-  logoUrl                 String?
-  logoLightUrl            String?
-  logoDarkUrl             String?
-  primaryColor            String?
-  primaryColorHex         String?  // accent color
-  textColorHex            String?  // text/headline color
-  defaultProposalDisclaimer String? @default("")
-  defaultTimelineNote     String?
-  integrationsJson       Json?
-  roomTypeLowPct         Float?   // default -10 in UI; low = target * (1 + lowPct/100)
-  roomTypeHighPct        Float?   // default +10 in UI; high = target * (1 + highPct/100)
-  anthropicModel         String?  // selected Claude model ID (e.g. "claude-sonnet-4-6")
-  geminiImageModel       String?  // Gemini image/vision model (e.g. "gemini-2.5-flash-image")
-  geminiImageGenModel    String?  // Gemini text-to-image Imagen model (e.g. "imagen-4.0-fast-generate-001")
-  coreValuesDefaultsJson Json?   // GlobalCoreValuesSettings: default values, layout, headline for new core-values slides
-  copeDefaultsJson       Json?   // GlobalCopeSettings: default COPE items, layout, headline for new cope-page slides
-  nextStepsDefaultsJson  Json?   // GlobalNextStepsSettings: default steps, layout, headline for new next-steps slides
-  designBuildDefaultsJson Json?  // GlobalDesignBuildSettings: default pillars, guarantees, diagram for new design-build-advantage slides
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  id                        String   @id @default(cuid())
+  companyName               String   @default("")
+  addressLine1              String?
+  addressLine2              String?
+  city                      String?
+  state                     String?
+  zip                       String?
+  phone                     String?
+  email                     String?
+  websiteUrl                String?
+  logoUrl                   String?
+  logoLightUrl              String?
+  logoDarkUrl               String?
+  primaryColor              String?
+  primaryColorHex           String? // accent color
+  textColorHex              String? // text/headline color
+  defaultProposalDisclaimer String?  @default("")
+  defaultTimelineNote       String?
+  integrationsJson          Json?
+  roomTypeLowPct            Float? // default -10 in UI; low = target * (1 + lowPct/100)
+  roomTypeHighPct           Float? // default +10 in UI; high = target * (1 + highPct/100)
+  anthropicModel            String? // selected Claude model ID (e.g. "claude-sonnet-4-6")
+  geminiImageModel          String? // Gemini image/vision model (e.g. "gemini-2.5-flash-image")
+  geminiImageGenModel       String? // Gemini text-to-image Imagen model (e.g. "imagen-4.0-fast-generate-001")
+  coreValuesDefaultsJson    Json? // GlobalCoreValuesSettings: default values, layout, headline for new core-values slides
+  copeDefaultsJson          Json? // GlobalCopeSettings: default COPE items, layout, headline for new cope-page slides
+  nextStepsDefaultsJson     Json? // GlobalNextStepsSettings: default steps, layout, headline for new next-steps slides
+  designBuildDefaultsJson   Json? // GlobalDesignBuildSettings: default pillars, guarantees, diagram for new design-build-advantage slides
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 }
 
 // Singleton company for value pillars / why-us defaults (single-tenant).
 model Company {
-  id              String          @id @default(cuid())
-  name            String          @default("Default Company")
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  valuePillars    ValuePillar[]
-  whyUsDefaults   WhyUsDefaults?
+  id            String         @id @default(cuid())
+  name          String         @default("Default Company")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  valuePillars  ValuePillar[]
+  whyUsDefaults WhyUsDefaults?
 }
 
 model ValuePillar {
-  id          String    @id @default(cuid())
-  companyId   String
-  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  title       String    // pillar title (e.g. "No Change Order Guarantee")
-  body        String    @default("") // pillar body copy
+  title       String // pillar title (e.g. "No Change Order Guarantee")
+  body        String     @default("") // pillar body copy
   brandIconId String?
   brandIcon   BrandIcon? @relation(fields: [brandIconId], references: [id], onDelete: SetNull)
 
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([companyId, sortOrder])
 }
 
 model WhyUsDefaults {
-  id         String   @id @default(cuid())
-  companyId  String   @unique
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  title      String   @default("Why Us")
+  title String @default("Why Us")
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model BrandIcon {
-  id        String           @id @default(cuid())
-  slug      String           @unique
-  name      String
+  id           String            @id @default(cuid())
+  slug         String            @unique
+  name         String
   // PNG icon stored in R2
-  imageUrl  String           // public URL to the PNG in R2
-  imageKey  String           // object key in R2 for deletes / moves
-  width     Int?             // optional metadata
-  height    Int?             // optional metadata
+  imageUrl     String // public URL to the PNG in R2
+  imageKey     String // object key in R2 for deletes / moves
+  width        Int? // optional metadata
+  height       Int? // optional metadata
   // Deprecated: legacy inline SVG markup, kept nullable for safe migrations
-  svg       String?
-  tags      String[]
-  category  String?
-  isActive  Boolean          @default(true)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  backgrounds BrandBackground[]
+  svg          String?
+  tags         String[]
+  category     String?
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  backgrounds  BrandBackground[]
   valuePillars ValuePillar[]
 
   @@index([name])
 }
 
 model BrandBackground {
-  id             String   @id @default(cuid())
-  slug           String   @unique
-  name           String
-  baseColorHex   String?  // e.g. #FFFFFF
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  name            String
+  baseColorHex    String? // e.g. #FFFFFF
   // Overlay choice: either an uploaded/generated image OR a pattern icon reference
   overlayImageUrl String?
   overlayImageKey String?
-  overlayIconId   String?  // references BrandIcon.id (optional)
-  overlayOpacity  Int      @default(6)   // percent 0-100 (we’ll keep it percent)
+  overlayIconId   String? // references BrandIcon.id (optional)
+  overlayOpacity  Int      @default(6) // percent 0-100 (we’ll keep it percent)
   overlayScale    Int      @default(100) // percent
   overlaySpacing  Int      @default(120) // px
-  overlayRotation Int      @default(0)   // degrees
+  overlayRotation Int      @default(0) // degrees
   // Cached PNG preview for fast grids/pickers
   previewImageUrl String?
   previewImageKey String?
@@ -583,8 +593,8 @@ model BrandBackground {
   sortOrder       Int      @default(0)
   tags            String[] // optional for search/filter
   // Generation provenance — null for manually-configured or pre-refactor records
-  generationMode  String?  // "subtle-texture" | "blueprint-overlay" | "slide-visual"
-  stylePreset     String?  // "architectural" | "editorial" | "technical" | "warm-luxury"
+  generationMode  String? // "subtle-texture" | "blueprint-overlay" | "slide-visual"
+  stylePreset     String? // "architectural" | "editorial" | "technical" | "warm-luxury"
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -641,26 +651,26 @@ enum LibraryOrientation {
 }
 
 model LibraryMedia {
-  id                  String             @id @default(cuid())
-  fileKey             String
-  url                 String
-  thumbnailKey        String?
-  thumbnailUrl        String?
-  title               String?
-  description         String?
-  roomTypeIds         String[]
-  tags                String[]
-  useType             LibraryUseType     @default(AFTER)
-  quality             LibraryQuality     @default(STANDARD)
-  orientation         LibraryOrientation @default(UNKNOWN)
-  marketingApproved   Boolean            @default(false)
-  sourceProjectName   String?
-  sourceProjectId     String?
-  photographer        String?
-  createdByUserId     String?
-  sortOrder           Int                @default(0)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  id                String             @id @default(cuid())
+  fileKey           String
+  url               String
+  thumbnailKey      String?
+  thumbnailUrl      String?
+  title             String?
+  description       String?
+  roomTypeIds       String[]
+  tags              String[]
+  useType           LibraryUseType     @default(AFTER)
+  quality           LibraryQuality     @default(STANDARD)
+  orientation       LibraryOrientation @default(UNKNOWN)
+  marketingApproved Boolean            @default(false)
+  sourceProjectName String?
+  sourceProjectId   String?
+  photographer      String?
+  createdByUserId   String?
+  sortOrder         Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([useType])
   @@index([quality])
@@ -680,23 +690,23 @@ model LibraryTag {
 
 // Section types (UI: Sections). Defines category, default measurement mode, estimate unit, and pricing.
 model SectionType {
-  id                    String           @id @default(cuid())
-  name                  String           @unique
-  category              SectionCategory
+  id                     String              @id @default(cuid())
+  name                   String              @unique
+  category               SectionCategory
   defaultMeasurementMode MeasurementMode
-  defaultEstimateUnit   EstimateUnit
-  customUnitLabel       String?
-  pricingBasis          PricingBasis      @default(NONE)
-  priceLow              Float?
-  priceTarget           Float?
-  priceHigh             Float?
-  pricePerSqFtLow       Float?           // deprecated: use priceLow when pricingBasis = PER_SF
-  pricePerSqFtTarget    Float?
-  pricePerSqFtHigh      Float?
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
-  rooms                 Room[]
-  pricingSourceRooms    PricingSourceRoom[]
+  defaultEstimateUnit    EstimateUnit
+  customUnitLabel        String?
+  pricingBasis           PricingBasis        @default(NONE)
+  priceLow               Float?
+  priceTarget            Float?
+  priceHigh              Float?
+  pricePerSqFtLow        Float? // deprecated: use priceLow when pricingBasis = PER_SF
+  pricePerSqFtTarget     Float?
+  pricePerSqFtHigh       Float?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  rooms                  Room[]
+  pricingSourceRooms     PricingSourceRoom[]
 
   @@index([category])
 }
@@ -706,17 +716,17 @@ model SectionType {
 // ---------------------------------------------------------------------------
 model Integration {
   id              String    @id @default(cuid())
-  provider        String    // e.g. "jobtread"
-  name            String    // e.g. "JobTread Production"
+  provider        String // e.g. "jobtread"
+  name            String // e.g. "JobTread Production"
   isActive        Boolean   @default(true)
   baseUrl         String?
   encryptedSecret String?
   metaJson        Json?
   lastTestedAt    DateTime?
-  lastStatus      String?   // success | error | never_tested
+  lastStatus      String? // success | error | never_tested
   lastMessage     String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([provider, name])
   @@index([provider])
@@ -732,7 +742,7 @@ model Testimonial {
   quote       String
   clientName  String
   projectName String?
-  rating      Int      @default(5)        // 1–5
+  rating      Int      @default(5) // 1–5
   source      String   @default("manual") // "google" | "manual"
   approved    Boolean  @default(true)
   sortOrder   Int      @default(0)
@@ -744,56 +754,56 @@ model Testimonial {
 // Canonical JobTread budget (single source of truth for official pricing).
 // ---------------------------------------------------------------------------
 model SyncedBudgetJob {
-  id                  String    @id @default(cuid())
-  jobId               String    @unique
-  jobName             String
-  jobNumber           String?
-  stage               String?
-  location            String?
-  lastSyncedAt        DateTime?
-  lastSyncStatus      String?   // success | warning | error | never_synced
-  lastSyncMessage     String?
-  lastRowCount        Int       @default(0)
-  officialSellTotal   Decimal   @default(0) @db.Decimal(19, 4)
-  officialCostTotal   Decimal   @default(0) @db.Decimal(19, 4)
-  sourceSummarySell   Decimal?  @db.Decimal(19, 4)
-  sourceSummaryCost   Decimal?  @db.Decimal(19, 4)
-  rawBudgetJson       Json?
-  sourceRowCount      Int?      // row count from last sync (for fingerprint comparison)
-  sourceSellTotal     Decimal?  @db.Decimal(19, 4)
-  sourceCostTotal     Decimal?  @db.Decimal(19, 4)
-  sourceFingerprint   String?   // hash of normalized payload; unchanged => skip sync
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  rows                SyncedBudgetRow[]
+  id                String            @id @default(cuid())
+  jobId             String            @unique
+  jobName           String
+  jobNumber         String?
+  stage             String?
+  location          String?
+  lastSyncedAt      DateTime?
+  lastSyncStatus    String? // success | warning | error | never_synced
+  lastSyncMessage   String?
+  lastRowCount      Int               @default(0)
+  officialSellTotal Decimal           @default(0) @db.Decimal(19, 4)
+  officialCostTotal Decimal           @default(0) @db.Decimal(19, 4)
+  sourceSummarySell Decimal?          @db.Decimal(19, 4)
+  sourceSummaryCost Decimal?          @db.Decimal(19, 4)
+  rawBudgetJson     Json?
+  sourceRowCount    Int? // row count from last sync (for fingerprint comparison)
+  sourceSellTotal   Decimal?          @db.Decimal(19, 4)
+  sourceCostTotal   Decimal?          @db.Decimal(19, 4)
+  sourceFingerprint String? // hash of normalized payload; unchanged => skip sync
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  rows              SyncedBudgetRow[]
 
   @@index([lastSyncStatus])
   @@index([lastSyncedAt])
 }
 
 model SyncedBudgetRow {
-  id                     String   @id @default(cuid())
-  jobId                  String
-  jobName                String
-  externalBudgetItemId   String
-  groupName              String?  // cost group name (item's direct group)
-  costGroupId            String?  // item's cost group id
-  parentCostGroupId      String?  // parent cost group id (null = top-level = room)
-  parentCostGroupName    String?  // parent cost group name (room name when item is under a trade)
-  itemName               String
+  id                   String          @id @default(cuid())
+  jobId                String
+  jobName              String
+  externalBudgetItemId String
+  groupName            String? // cost group name (item's direct group)
+  costGroupId          String? // item's cost group id
+  parentCostGroupId    String? // parent cost group id (null = top-level = room)
+  parentCostGroupName  String? // parent cost group name (room name when item is under a trade)
+  itemName             String
   costCode             String?
   costCodeName         String?
   costType             String?
   unit                 String?
-  quantity             Decimal? @db.Decimal(19, 6)
-  unitCost             Decimal? @db.Decimal(19, 4)
-  unitPrice            Decimal? @db.Decimal(19, 4)
-  extCost              Decimal  @db.Decimal(19, 4)
-  extSell              Decimal  @db.Decimal(19, 4)
+  quantity             Decimal?        @db.Decimal(19, 6)
+  unitCost             Decimal?        @db.Decimal(19, 4)
+  unitPrice            Decimal?        @db.Decimal(19, 4)
+  extCost              Decimal         @db.Decimal(19, 4)
+  extSell              Decimal         @db.Decimal(19, 4)
   rawPayloadJson       Json
-  syncedAt             DateTime @default(now())
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  syncedAt             DateTime        @default(now())
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
   job                  SyncedBudgetJob @relation(fields: [jobId], references: [jobId], onDelete: Cascade)
 
   @@unique([jobId, externalBudgetItemId])
@@ -807,16 +817,16 @@ model SyncedBudgetRow {
 // ---------------------------------------------------------------------------
 
 model PricingSourceJob {
-  id                 String   @id @default(cuid())
-  jobId              String   @unique
+  id                 String    @id @default(cuid())
+  jobId              String    @unique
   jobName            String
   jobNumber          String?
-  includeInPricing   Boolean  @default(false)
+  includeInPricing   Boolean   @default(false)
   sourceLastSyncedAt DateTime?
-  totalCost          Decimal  @default(0) @db.Decimal(19, 4)
-  totalSell          Decimal  @default(0) @db.Decimal(19, 4)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  totalCost          Decimal   @default(0) @db.Decimal(19, 4)
+  totalSell          Decimal   @default(0) @db.Decimal(19, 4)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   rooms  PricingSourceRoom[]
   trades PricingSourceTrade[]
@@ -843,8 +853,8 @@ model PricingSourceRoom {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  job         PricingSourceJob @relation(fields: [pricingJobId], references: [id], onDelete: Cascade)
-  sectionType SectionType?     @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
+  job         PricingSourceJob     @relation(fields: [pricingJobId], references: [id], onDelete: Cascade)
+  sectionType SectionType?         @relation(fields: [sectionTypeId], references: [id], onDelete: SetNull)
   trades      PricingSourceTrade[]
 
   @@unique([jobId, roomName])
@@ -884,27 +894,27 @@ model ProposalDeck {
 }
 
 model DeckSlide {
-  id             String       @id @default(cuid())
+  id             String           @id @default(cuid())
   deckId         String
   type           String
   layoutKey      String
-  order          Int          @default(0)
-  isEnabled      Boolean      @default(true)
-  isUserHidden   Boolean      @default(false)
-  isUserModified Boolean      @default(false)
-  source         String       @default("manual")
+  order          Int              @default(0)
+  isEnabled      Boolean          @default(true)
+  isUserHidden   Boolean          @default(false)
+  isUserModified Boolean          @default(false)
+  source         String           @default("manual")
   sectionId      String?
   headline       String?
   subheadline    String?
   body           String?
   content        Json?
-  isLocked       Boolean      @default(false)
+  isLocked       Boolean          @default(false)
   lockPosition   String?
   backgroundId   String?
   textZone       Json?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  deck           ProposalDeck  @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deck           ProposalDeck     @relation(fields: [deckId], references: [id], onDelete: Cascade)
   background     BrandBackground? @relation(fields: [backgroundId], references: [id], onDelete: SetNull)
 
   @@index([deckId, order])
@@ -918,20 +928,20 @@ model DeckSlide {
 // ---------------------------------------------------------------------------
 
 model PricingCatalogItem {
-  id             String              @id @default(cuid())
-  jobtreadId     String              @unique
-  name           String
-  description    String?
-  costCode       String?
-  costType       String?
-  unitCost       Float?
-  unitPrice      Float?
-  unit           String              @default("EA")
-  trade          String?
-  active         Boolean             @default(true)
-  lastSyncedAt   DateTime            @default(now())
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  id                String             @id @default(cuid())
+  jobtreadId        String             @unique
+  name              String
+  description       String?
+  costCode          String?
+  costType          String?
+  unitCost          Float?
+  unitPrice         Float?
+  unit              String             @default("EA")
+  trade             String?
+  active            Boolean            @default(true)
+  lastSyncedAt      DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   roomTemplateItems RoomTemplateItem[]
   estimateLineItems EstimateLineItem[]
 
@@ -941,17 +951,17 @@ model PricingCatalogItem {
 }
 
 model RoomTemplate {
-  id               String                   @id @default(cuid())
-  jobtreadId       String?                  @unique
-  name             String
-  displayName      String?
-  active           Boolean                  @default(true)
-  isProjectOverhead Boolean                 @default(false)
-  createdAt        DateTime                 @default(now())
-  updatedAt        DateTime                 @updatedAt
-  tradeGroups      RoomTemplateTradeGroup[]
-  aiEstimates      AIEstimate[]
-  rooms            Room[]
+  id                String                   @id @default(cuid())
+  jobtreadId        String?                  @unique
+  name              String
+  displayName       String?
+  active            Boolean                  @default(true)
+  isProjectOverhead Boolean                  @default(false)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  tradeGroups       RoomTemplateTradeGroup[]
+  aiEstimates       AIEstimate[]
+  rooms             Room[]
 
   @@index([active])
 }
@@ -971,19 +981,19 @@ model RoomTemplateTradeGroup {
 }
 
 model RoomTemplateItem {
-  id              String                @id @default(cuid())
-  tradeGroupId    String
-  catalogItemId   String?
-  jobtreadItemId  String?
-  name            String
-  costCode        String?
-  costType        String?
-  sortOrder       Int                   @default(0)
-  isActive        Boolean               @default(true)
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  tradeGroup      RoomTemplateTradeGroup @relation(fields: [tradeGroupId], references: [id], onDelete: Cascade)
-  catalogItem     PricingCatalogItem?    @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  id             String                 @id @default(cuid())
+  tradeGroupId   String
+  catalogItemId  String?
+  jobtreadItemId String?
+  name           String
+  costCode       String?
+  costType       String?
+  sortOrder      Int                    @default(0)
+  isActive       Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  tradeGroup     RoomTemplateTradeGroup @relation(fields: [tradeGroupId], references: [id], onDelete: Cascade)
+  catalogItem    PricingCatalogItem?    @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
 
   @@index([tradeGroupId])
   @@index([catalogItemId])
@@ -994,19 +1004,19 @@ model RoomTemplateItem {
 // ---------------------------------------------------------------------------
 
 model AIEstimate {
-  id               String              @id @default(cuid())
+  id               String             @id @default(cuid())
   projectId        String
   sectionId        String
   roomTemplateId   String?
-  status           String              @default("draft")
+  status           String             @default("draft")
   totalCost        Float?
   totalPrice       Float?
   promptTokens     Int?
   completionTokens Int?
   rawResponse      String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  roomTemplate     RoomTemplate?       @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  roomTemplate     RoomTemplate?      @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
   lineItems        EstimateLineItem[]
   priceCorrections PriceCorrection[]
 
@@ -1017,28 +1027,28 @@ model AIEstimate {
 }
 
 model EstimateLineItem {
-  id              String              @id @default(cuid())
-  estimateId      String
-  catalogItemId   String?
-  tradeGroup      String
-  name            String
-  description     String?
-  quantity        Float               @default(1)
-  unit            String              @default("EA")
-  unitCost        Float               @default(0)
-  unitPrice       Float               @default(0)
-  totalCost       Float               @default(0)
-  totalPrice      Float               @default(0)
-  totalPriceLow   Float               @default(0)
-  totalPriceHigh  Float               @default(0)
-  source          String              @default("AI_PRICED")
-  confidence      Float?
-  notes           String?
-  sortOrder       Int                 @default(0)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  estimate        AIEstimate          @relation(fields: [estimateId], references: [id], onDelete: Cascade)
-  catalogItem     PricingCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  id               String              @id @default(cuid())
+  estimateId       String
+  catalogItemId    String?
+  tradeGroup       String
+  name             String
+  description      String?
+  quantity         Float               @default(1)
+  unit             String              @default("EA")
+  unitCost         Float               @default(0)
+  unitPrice        Float               @default(0)
+  totalCost        Float               @default(0)
+  totalPrice       Float               @default(0)
+  totalPriceLow    Float               @default(0)
+  totalPriceHigh   Float               @default(0)
+  source           String              @default("AI_PRICED")
+  confidence       Float?
+  notes            String?
+  sortOrder        Int                 @default(0)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  estimate         AIEstimate          @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  catalogItem      PricingCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
   priceCorrections PriceCorrection[]
 
   @@index([estimateId])
@@ -1116,12 +1126,41 @@ model CatalogSuggestion {
 
 model IntegrationSetting {
   id             String    @id @default(cuid())
-  service        String    @unique  // e.g. "rendr"
+  service        String    @unique // e.g. "rendr"
   clientId       String
-  clientSecret   String    // stored encrypted (AES-256-CBC)
+  clientSecret   String // stored encrypted (AES-256-CBC)
   isActive       Boolean   @default(false)
   lastTestedAt   DateTime?
-  lastTestResult String?   // "success" | "failed"
+  lastTestResult String? // "success" | "failed"
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Email Send Audit Log (Cleanup F)
+// ---------------------------------------------------------------------------
+// Per-send audit trail for every outbound proposal email. Written by
+// sendProposalEmail() — both successes and failures. Cleanup H reads the
+// `error` column for retry logic. Relations set to SetNull so retention of
+// audit history doesn't block deletion of snapshots or employees.
+// ---------------------------------------------------------------------------
+
+model EmailSendLog {
+  id                String             @id @default(cuid())
+  snapshotId        String?
+  snapshot          PublishedSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  employeeId        String?
+  employee          Employee?          @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  fromAddress       String
+  toAddress         String
+  subject           String
+  providerName      String
+  providerMessageId String?
+  sentAt            DateTime           @default(now())
+  error             String?
+  metadataJson      Json?
+
+  @@index([snapshotId])
+  @@index([employeeId])
+  @@index([sentAt])
 }

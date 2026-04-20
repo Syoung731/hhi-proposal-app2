@@ -165,6 +165,19 @@ If Claude Code notices prior commits with generic `checkpoint:` messages, DO NOT
 - To verify schema is in sync: `npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-migrations prisma/migrations`
 - Only use `npx prisma migrate dev` for migrations and `npx prisma generate` for client generation.
 
+### Checksum drift on an applied migration
+
+If `prisma migrate dev` fails with "migration was modified after it was applied" but `prisma migrate status` reports "Database schema is up to date", the DB schema is fine — only Prisma's stored checksum is stale (usually because the `migration.sql` file was reformatted after the first apply). This is metadata drift, not schema drift.
+
+- **DO NOT run `prisma migrate reset`** — it drops all data.
+- Use the checksum-repair pattern: write a one-shot script (see `scripts/repair-phase7a-migration-checksum.ts` for the canonical template) that:
+  1. runs `prisma migrate status` and aborts if the DB is NOT up-to-date
+  2. computes the current `migration.sql` SHA-256
+  3. prints the before row from `_prisma_migrations`
+  4. requires an explicit `--confirm` flag to issue the `UPDATE _prisma_migrations SET checksum = ...` write
+  5. prints the after row
+- Commit the repair script alongside the fix so the change is auditable in `git log`.
+
 ## Code Quality Rules
 - Run tsc --noEmit after every set of changes — zero errors required
 - Do not break existing auto-save or hydration pipelines
