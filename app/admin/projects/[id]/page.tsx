@@ -4,6 +4,7 @@ import { prisma } from "@/app/lib/prisma";
 import { listActiveStylePresets, listSectionTypes, getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 import { isRendrConfigured } from "@/app/lib/rendr/rendrClient";
+import { getCurrentEmployeeId, NoCurrentEmployeeError } from "@/app/lib/current-employee";
 import { ProjectTabs } from "./tabs";
 
 const TAB = "tab";
@@ -60,7 +61,17 @@ export default async function AdminProjectPage({
   // investmentLineItems returned by getProject always reflect the latest SectionType
   // rates — even for rooms whose totalLow/totalHigh was never written (stale rows
   // set via updateRoomsSectionType before Fix A).
-  const [project, stylePresets, sectionTypes, companySettings, rendrConfigured, latestSnapshot] = await Promise.all([
+  const [
+    project,
+    stylePresets,
+    sectionTypes,
+    companySettings,
+    rendrConfigured,
+    latestSnapshot,
+    priorSentSnapshot,
+    activeEmployees,
+    defaultSenderEmployeeId,
+  ] = await Promise.all([
     recomputeInvestmentRollups(id).catch(() => null).then(() => getProject(id)),
     listActiveStylePresets(),
     listSectionTypes(),
@@ -69,7 +80,48 @@ export default async function AdminProjectPage({
     prisma.publishedSnapshot.findFirst({
       where: { projectId: id },
       orderBy: { version: "desc" },
-      select: { id: true, version: true, createdAt: true, sentAt: true },
+      select: {
+        id: true,
+        version: true,
+        createdAt: true,
+        sentAt: true,
+        sentToEmail: true,
+        sentByEmployee: { select: { firstName: true, lastName: true } },
+        _count: { select: { pdfDownloadLogs: true, shareLinkCopyLogs: true } },
+      },
+    }),
+    // Pre-fill recipient for the Send modal — most recent sentToEmail across
+    // any snapshot of this project, not just the latest. Lets re-publish
+    // preserve "we last sent this to X" even if X hasn't received the new
+    // version yet.
+    prisma.publishedSnapshot.findFirst({
+      where: { projectId: id, sentToEmail: { not: null } },
+      orderBy: { sentAt: "desc" },
+      select: { sentToEmail: true },
+    }),
+    prisma.employee.findMany({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { firstName: "asc" }],
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        jobTitle: true,
+        headshotUrl: true,
+        signatureQuote: true,
+        directPhone: true,
+        mobilePhone: true,
+        linkedInUrl: true,
+        signatureEnabled: true,
+      },
+    }),
+    // Best-effort — if no employees are seeded yet the helper throws; we
+    // fall back to null so the UI can render a helpful empty state
+    // instead of crashing the whole page.
+    getCurrentEmployeeId().catch((err) => {
+      if (err instanceof NoCurrentEmployeeError) return null;
+      throw err;
     }),
   ]);
   if (!project) notFound();
@@ -105,6 +157,17 @@ export default async function AdminProjectPage({
         latestSnapshotVersion={latestSnapshot?.version ?? null}
         latestSnapshotCreatedAt={latestSnapshot?.createdAt.toISOString() ?? null}
         latestSnapshotSentAt={latestSnapshot?.sentAt?.toISOString() ?? null}
+        latestSnapshotSentToEmail={latestSnapshot?.sentToEmail ?? null}
+        latestSnapshotSentByName={
+          latestSnapshot?.sentByEmployee
+            ? `${latestSnapshot.sentByEmployee.firstName} ${latestSnapshot.sentByEmployee.lastName}`.trim()
+            : null
+        }
+        latestSnapshotPdfDownloadCount={latestSnapshot?._count.pdfDownloadLogs ?? 0}
+        latestSnapshotShareCopyCount={latestSnapshot?._count.shareLinkCopyLogs ?? 0}
+        priorSentToEmail={priorSentSnapshot?.sentToEmail ?? null}
+        activeEmployees={activeEmployees}
+        defaultSenderEmployeeId={defaultSenderEmployeeId}
       />
     </div>
   );

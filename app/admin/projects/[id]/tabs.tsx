@@ -7,6 +7,7 @@ import { RoomsTab } from "./rooms/rooms-tab";
 import { TimelineTab } from "./timeline/timeline-tab";
 import { InvestmentTab } from "./investment/investment-tab";
 import { PublishTab } from "./publish/publish-tab";
+import type { SendableEmployee } from "./publish/send-email-modal";
 import { RendrTab } from "./rendr/rendr-tab";
 import { ProjectTabNav } from "./ProjectTabNav";
 
@@ -47,6 +48,13 @@ export function ProjectTabs({
   latestSnapshotVersion,
   latestSnapshotCreatedAt,
   latestSnapshotSentAt,
+  latestSnapshotSentToEmail,
+  latestSnapshotSentByName,
+  latestSnapshotPdfDownloadCount,
+  latestSnapshotShareCopyCount,
+  priorSentToEmail,
+  activeEmployees,
+  defaultSenderEmployeeId,
 }: {
   project: ProjectForTabs;
   stylePresets: StylePresetForTabs[];
@@ -63,6 +71,13 @@ export function ProjectTabs({
   latestSnapshotVersion?: number | null;
   latestSnapshotCreatedAt?: string | null;
   latestSnapshotSentAt?: string | null;
+  latestSnapshotSentToEmail?: string | null;
+  latestSnapshotSentByName?: string | null;
+  latestSnapshotPdfDownloadCount?: number;
+  latestSnapshotShareCopyCount?: number;
+  priorSentToEmail?: string | null;
+  activeEmployees?: SendableEmployee[];
+  defaultSenderEmployeeId?: string | null;
 }) {
   return (
     <div className="space-y-6">
@@ -250,12 +265,21 @@ export function ProjectTabs({
         {currentTab === "publish" && (
           <PublishTab
             projectId={project.id}
+            projectTitle={project.title}
+            clientFirstName={project.client1First}
             proposalId={project.proposal?.id ?? null}
             publishedVersion={project.publishedVersion}
             latestSnapshotId={latestSnapshotId ?? null}
             latestSnapshotVersion={latestSnapshotVersion ?? null}
             latestSnapshotCreatedAt={latestSnapshotCreatedAt ?? null}
             latestSnapshotSentAt={latestSnapshotSentAt ?? null}
+            latestSnapshotSentToEmail={latestSnapshotSentToEmail ?? null}
+            latestSnapshotSentByName={latestSnapshotSentByName ?? null}
+            latestSnapshotPdfDownloadCount={latestSnapshotPdfDownloadCount ?? 0}
+            latestSnapshotShareCopyCount={latestSnapshotShareCopyCount ?? 0}
+            priorSentToEmail={priorSentToEmail ?? null}
+            employees={activeEmployees ?? []}
+            defaultSenderEmployeeId={defaultSenderEmployeeId ?? null}
           />
         )}
       </div>

@@ -4,9 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { publishProjectAction } from "./actions";
+import { logShareLinkCopy } from "./delivery-actions";
+import { DeliveryButtons } from "./delivery-buttons";
+import type { SendableEmployee } from "./send-email-modal";
 
 type Props = {
   projectId: string;
+  projectTitle: string;
+  clientFirstName: string | null;
   proposalId: string | null;
   publishedVersion: number;
   /** Latest PublishedSnapshot metadata — null when no version has been published yet. */
@@ -15,6 +20,14 @@ type Props = {
   /** ISO strings — `null` when no snapshot exists. */
   latestSnapshotCreatedAt: string | null;
   latestSnapshotSentAt: string | null;
+  latestSnapshotSentToEmail: string | null;
+  latestSnapshotSentByName: string | null;
+  latestSnapshotPdfDownloadCount: number;
+  latestSnapshotShareCopyCount: number;
+  /** Most recent recipient across all snapshots for this project — modal pre-fill. */
+  priorSentToEmail: string | null;
+  employees: SendableEmployee[];
+  defaultSenderEmployeeId: string | null;
 };
 
 function formatDate(iso: string | null): string | null {
@@ -34,12 +47,21 @@ function formatDate(iso: string | null): string | null {
 
 export function PublishTab({
   projectId,
+  projectTitle,
+  clientFirstName,
   proposalId,
   publishedVersion,
   latestSnapshotId,
   latestSnapshotVersion,
   latestSnapshotCreatedAt,
   latestSnapshotSentAt,
+  latestSnapshotSentToEmail,
+  latestSnapshotSentByName,
+  latestSnapshotPdfDownloadCount,
+  latestSnapshotShareCopyCount,
+  priorSentToEmail,
+  employees,
+  defaultSenderEmployeeId,
 }: Props) {
   const router = useRouter();
   const [publishing, setPublishing] = useState(false);
@@ -55,24 +77,48 @@ export function PublishTab({
   }
 
   const draftPreviewUrl = `/proposals/draft?projectId=${encodeURIComponent(projectId)}&draft=1`;
-  const shareUrl = latestSnapshotId
+  const shareUrlRelative = latestSnapshotId
     ? `/proposals/${encodeURIComponent(latestSnapshotId)}`
     : null;
 
+  // Absolute share URL — needed by the Send modal (which has no window
+  // access until it mounts, and we want the preview URL populated
+  // immediately). Computed on the client, so safe to use window.origin.
+  const absoluteShareUrl =
+    shareUrlRelative && typeof window !== "undefined"
+      ? `${window.location.origin}${shareUrlRelative}`
+      : shareUrlRelative ?? "";
+
   async function copyShareLink() {
-    if (!shareUrl) return;
+    if (!shareUrlRelative || !latestSnapshotId) return;
+    const absolute =
+      typeof window !== "undefined"
+        ? `${window.location.origin}${shareUrlRelative}`
+        : shareUrlRelative;
     try {
-      const absolute =
-        typeof window !== "undefined"
-          ? `${window.location.origin}${shareUrl}`
-          : shareUrl;
       await navigator.clipboard.writeText(absolute);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // ignore
+      return;
+    }
+    // Fire-and-forget audit log — the copy already happened, the user
+    // doesn't care if logging fails. Refresh afterward so the counter
+    // increments in the sent-status panel.
+    if (defaultSenderEmployeeId) {
+      logShareLinkCopy({
+        snapshotId: latestSnapshotId,
+        currentEmployeeId: defaultSenderEmployeeId,
+      })
+        .then(() => router.refresh())
+        .catch(() => {
+          /* ignore — logging is best-effort */
+        });
     }
   }
+
+  const hasLatestSnapshot =
+    latestSnapshotId != null && latestSnapshotVersion != null;
 
   return (
     <div className="space-y-6">
@@ -106,8 +152,8 @@ export function PublishTab({
         </div>
       </section>
 
-      {/* Share Link */}
-      {shareUrl && latestSnapshotVersion != null && (
+      {/* Share Link + Delivery */}
+      {hasLatestSnapshot && shareUrlRelative && (
         <section className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-800/30">
           <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             Share Link
@@ -117,7 +163,7 @@ export function PublishTab({
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <code className="flex-1 min-w-0 truncate rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-              {shareUrl}
+              {shareUrlRelative}
             </code>
             <button
               type="button"
@@ -127,7 +173,7 @@ export function PublishTab({
               {copied ? "Copied" : "Copy"}
             </button>
             <Link
-              href={shareUrl}
+              href={shareUrlRelative}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900"
@@ -135,12 +181,49 @@ export function PublishTab({
               Open →
             </Link>
           </div>
-          <div className="mt-3 space-y-0.5 text-xs text-zinc-500 dark:text-zinc-500">
+
+          <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+            <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Send to client
+            </h3>
+            <DeliveryButtons
+              snapshotId={latestSnapshotId!}
+              snapshotVersion={latestSnapshotVersion!}
+              projectTitle={projectTitle}
+              clientFirstName={clientFirstName}
+              proposalUrl={absoluteShareUrl}
+              priorSentToEmail={priorSentToEmail}
+              employees={employees}
+              defaultSenderEmployeeId={defaultSenderEmployeeId}
+            />
+          </div>
+
+          <div className="mt-4 space-y-1 border-t border-zinc-200 pt-3 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-500">
             {latestSnapshotCreatedAt && (
               <p>Published: {formatDate(latestSnapshotCreatedAt)}</p>
             )}
-            {latestSnapshotSentAt && (
-              <p>Sent to client: {formatDate(latestSnapshotSentAt)}</p>
+            {latestSnapshotSentAt && latestSnapshotSentToEmail && (
+              <p>
+                v{latestSnapshotVersion} sent by email to{" "}
+                <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                  {latestSnapshotSentToEmail}
+                </span>
+                {latestSnapshotSentByName ? ` by ${latestSnapshotSentByName}` : ""}
+                {" on "}
+                {formatDate(latestSnapshotSentAt)}
+              </p>
+            )}
+            {latestSnapshotPdfDownloadCount > 0 && (
+              <p>
+                v{latestSnapshotVersion} PDF downloaded{" "}
+                {latestSnapshotPdfDownloadCount}×
+              </p>
+            )}
+            {latestSnapshotShareCopyCount > 0 && (
+              <p>
+                v{latestSnapshotVersion} link copied{" "}
+                {latestSnapshotShareCopyCount}×
+              </p>
             )}
           </div>
         </section>
