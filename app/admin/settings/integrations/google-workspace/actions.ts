@@ -27,6 +27,65 @@ import { GoogleWorkspaceDWDProvider } from "@/app/lib/email/providers/google-wor
 const PROVIDER = EMAIL_PROVIDER_GOOGLE_WORKSPACE_DWD;
 const INTEGRATION_NAME = "HHI Builders Workspace";
 
+// ─── Read action ─────────────────────────────────────────────────────────────
+
+export interface GoogleWorkspaceIntegrationStatus {
+  configured: boolean;
+  isActive: boolean;
+  authorizedDomain: string | null;
+  defaultSenderEmail: string | null;
+  lastTestedAt: string | null;
+  lastStatus: string | null;
+  lastMessage: string | null;
+}
+
+/**
+ * Non-sensitive read for the GW integration row. The encryptedSecret is never
+ * selected — this action returns the same shape regardless of caller, so it's
+ * safe to call from both the dedicated page and the inline integrations-tab.
+ */
+export async function getGoogleWorkspaceIntegrationStatusAction(): Promise<GoogleWorkspaceIntegrationStatus> {
+  await requireAdmin();
+  const row = await prisma.integration.findFirst({
+    where: { provider: PROVIDER },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      isActive: true,
+      metaJson: true,
+      lastTestedAt: true,
+      lastStatus: true,
+      lastMessage: true,
+      encryptedSecret: true,
+    },
+  });
+  const meta = extractMeta(row?.metaJson);
+  return {
+    configured: Boolean(row?.encryptedSecret),
+    isActive: row?.isActive ?? false,
+    authorizedDomain: meta.authorizedDomain,
+    defaultSenderEmail: meta.defaultSenderEmail,
+    lastTestedAt: row?.lastTestedAt ? row.lastTestedAt.toISOString() : null,
+    lastStatus: row?.lastStatus ?? null,
+    lastMessage: row?.lastMessage ?? null,
+  };
+}
+
+function extractMeta(metaJson: unknown): {
+  authorizedDomain: string | null;
+  defaultSenderEmail: string | null;
+} {
+  if (!metaJson || typeof metaJson !== "object") {
+    return { authorizedDomain: null, defaultSenderEmail: null };
+  }
+  const m = metaJson as Record<string, unknown>;
+  return {
+    authorizedDomain:
+      typeof m.authorizedDomain === "string" ? m.authorizedDomain : null,
+    defaultSenderEmail:
+      typeof m.defaultSenderEmail === "string" ? m.defaultSenderEmail : null,
+  };
+}
+
 // ─── Save action ─────────────────────────────────────────────────────────────
 
 export interface SaveGoogleWorkspaceInput {
@@ -124,6 +183,7 @@ export async function saveGoogleWorkspaceIntegrationAction(
   });
 
   revalidatePath("/admin/settings/integrations/google-workspace");
+  revalidatePath("/admin/settings/integrations");
   return { ok: true };
 }
 
@@ -199,6 +259,7 @@ export async function verifyGoogleWorkspaceIntegrationAction(
   });
 
   revalidatePath("/admin/settings/integrations/google-workspace");
+  revalidatePath("/admin/settings/integrations");
 
   return {
     ok: result.ok,

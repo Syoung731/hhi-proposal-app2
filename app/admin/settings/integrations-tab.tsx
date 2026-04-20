@@ -25,6 +25,7 @@ import {
   saveGoogleReviewsCredentialsAction,
   testGoogleReviewsConnectionAction,
 } from "./actions";
+import { GoogleWorkspaceForm } from "./integrations/google-workspace/GoogleWorkspaceForm";
 import type { CompanySettingsForUI } from "./settings-tabs";
 
 const labelClass =
@@ -1360,6 +1361,23 @@ export function IntegrationsTab({ settings }: Props) {
         )}
       </section>
 
+      {/* Google Workspace (outbound email) */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+            Google Workspace (Outbound Email)
+          </h3>
+        </div>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Outbound email pipeline for proposal deliveries. Uses a Google Cloud
+          service account with Domain-Wide Delegation to send via Gmail API on
+          behalf of any Workspace user in the authorized domain.
+        </p>
+        {/* GoogleWorkspaceForm is self-loading (own status fetch). It also
+            renders on its own page at /admin/settings/integrations/google-workspace/. */}
+        <GoogleWorkspaceForm currentAdminEmail={null} />
+      </section>
+
       {/* ------------------------------------------------------------------ */}
       {/* Rendr LiDAR Integration                                            */}
       {/* ------------------------------------------------------------------ */}
@@ -1451,38 +1469,43 @@ function RendrIntegrationCard() {
     }
   };
 
-  const connectionStatus = isActive && lastTestResult === "success"
-    ? "Connected"
-    : lastTestResult === "failed"
-      ? "Connection failed"
-      : "Not connected";
-
-  const statusColor = isActive && lastTestResult === "success"
-    ? "text-green-600 dark:text-green-400"
-    : lastTestResult === "failed"
-      ? "text-red-600 dark:text-red-400"
-      : "text-zinc-500 dark:text-zinc-400";
+  const rendrPill: "connected" | "error" | "not_connected" =
+    isActive && lastTestResult === "success"
+      ? "connected"
+      : lastTestResult === "failed"
+        ? "error"
+        : "not_connected";
+  const rendrPillLabel =
+    rendrPill === "connected"
+      ? "Connected"
+      : rendrPill === "error"
+        ? "Error"
+        : "Not connected";
+  const rendrPillClass =
+    rendrPill === "connected"
+      ? "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-800/40 dark:text-green-200"
+      : rendrPill === "error"
+        ? "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800/40 dark:text-red-200"
+        : "inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300";
 
   if (!loaded) return null;
 
   return (
     <section className="space-y-4 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Rendr LiDAR</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Connect your Rendr account to import LiDAR scan data into project rooms.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-sm font-medium ${statusColor}`}>{connectionStatus}</span>
-          {lastTestedAt && lastTestResult === "success" && (
-            <span className="text-xs text-zinc-400">
-              {new Date(lastTestedAt).toLocaleDateString()}
-            </span>
-          )}
-        </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+          Rendr LiDAR
+        </h2>
+        <span className={rendrPillClass}>{rendrPillLabel}</span>
+        {lastTestedAt && lastTestResult === "success" && (
+          <span className="text-xs text-zinc-400">
+            {new Date(lastTestedAt).toLocaleDateString()}
+          </span>
+        )}
       </div>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        Connect your Rendr account to import LiDAR scan data into project rooms.
+      </p>
 
       <div className="space-y-3">
         <div>
