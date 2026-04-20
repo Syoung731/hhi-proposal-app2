@@ -118,6 +118,14 @@ export type EmployeeForUI = {
   isActive: boolean;
   isAdmin: boolean;
   sortOrder: number;
+  // Signature fields (Cleanup G)
+  headshotUrl: string | null;
+  jobTitle: string | null;
+  signatureQuote: string | null;
+  directPhone: string | null;
+  mobilePhone: string | null;
+  linkedInUrl: string | null;
+  signatureEnabled: boolean;
 };
 
 export type SectionTypeForUI = {

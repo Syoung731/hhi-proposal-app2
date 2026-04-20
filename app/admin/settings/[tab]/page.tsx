@@ -157,6 +157,13 @@ export default async function SettingsTabPage({
         isActive: e.isActive,
         isAdmin: e.isAdmin,
         sortOrder: e.sortOrder,
+        headshotUrl: e.headshotUrl,
+        jobTitle: e.jobTitle,
+        signatureQuote: e.signatureQuote,
+        directPhone: e.directPhone,
+        mobilePhone: e.mobilePhone,
+        linkedInUrl: e.linkedInUrl,
+        signatureEnabled: e.signatureEnabled,
       }))}
       currentUserIsAdmin={currentUserIsAdmin}
     />

@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createEmployee,
-  updateEmployee,
   toggleEmployeeActive,
   toggleEmployeeAdmin,
   deleteEmployee,
 } from "./actions";
 import type { EmployeeForUI } from "./settings-tabs";
 import { SUPER_ADMIN_EMAIL } from "@/app/lib/constants";
+import { EmployeeEditDrawer } from "./EmployeeEditDrawer";
 
 const inputClass =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100";
@@ -31,14 +31,9 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
   });
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editEmp, setEditEmp] = useState<{
-    firstName: string;
-    lastName: string;
-    roleTitle: string;
-    email: string;
-    phone: string;
-  }>({ firstName: "", lastName: "", roleTitle: "", email: "", phone: "" });
+  const [editingEmployee, setEditingEmployee] = useState<EmployeeForUI | null>(
+    null,
+  );
 
   const sorted = [...initialEmployees].sort(
     (a, b) => a.sortOrder - b.sortOrder || a.lastName.localeCompare(b.lastName)
@@ -67,7 +62,7 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
     setTimeout(() => setStatus("idle"), 3000);
   }
 
-  async function handleToggleActive(id: string, current: boolean) {
+  async function handleToggleActive(id: string, _current: boolean) {
     await toggleEmployeeActive(id);
     router.refresh();
   }
@@ -80,39 +75,6 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
       setStatus("error");
     }
     router.refresh();
-  }
-
-  function startEdit(emp: EmployeeForUI) {
-    setEditingId(emp.id);
-    setEditEmp({
-      firstName: emp.firstName,
-      lastName: emp.lastName,
-      roleTitle: emp.roleTitle ?? "",
-      email: emp.email ?? "",
-      phone: emp.phone ?? "",
-    });
-    setErrorMessage(null);
-  }
-
-  async function handleSaveEdit(id: string) {
-    setStatus("saving");
-    setErrorMessage(null);
-    const result = await updateEmployee(id, {
-      firstName: editEmp.firstName.trim(),
-      lastName: editEmp.lastName.trim(),
-      roleTitle: editEmp.roleTitle.trim() || null,
-      email: editEmp.email.trim() || null,
-      phone: editEmp.phone.trim() || null,
-    });
-    if (result.error) {
-      setErrorMessage(result.error);
-      setStatus("error");
-      return;
-    }
-    setEditingId(null);
-    setStatus("saved");
-    router.refresh();
-    setTimeout(() => setStatus("idle"), 3000);
   }
 
   async function handleDelete(id: string) {
@@ -260,10 +222,9 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
           const isSuperAdmin =
             (emp.email ?? "").toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
           const email = emp.email ?? "";
-          const activeBadgeClass =
-            emp.isActive
-              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-              : "bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400";
+          const activeBadgeClass = emp.isActive
+            ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+            : "bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400";
 
           return (
             <div
@@ -273,81 +234,25 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
               {/* Desktop row (lg+) */}
               <div className="hidden lg:grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                 {/* Name */}
-                <div className="col-span-3 font-medium text-zinc-900 dark:text-zinc-100 whitespace-nowrap min-w-0">
-                  {editingId === emp.id ? (
-                    <div className="flex items-center gap-2 flex-nowrap">
-                      <input
-                        type="text"
-                        value={editEmp.firstName}
-                        onChange={(e) =>
-                          setEditEmp((p) => ({ ...p, firstName: e.target.value }))
-                        }
-                        className="max-w-[80px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                        placeholder="First"
-                      />
-                      <input
-                        type="text"
-                        value={editEmp.lastName}
-                        onChange={(e) =>
-                          setEditEmp((p) => ({ ...p, lastName: e.target.value }))
-                        }
-                        className="max-w-[80px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                        placeholder="Last"
-                      />
-                    </div>
-                  ) : (
-                    `${emp.firstName} ${emp.lastName}`.trim() || "—"
-                  )}
+                <div className="col-span-3 flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-100 min-w-0">
+                  <Avatar employee={emp} />
+                  <span className="truncate">
+                    {`${emp.firstName} ${emp.lastName}`.trim() || "—"}
+                  </span>
                 </div>
                 {/* Title */}
                 <div className="col-span-2 text-zinc-600 dark:text-zinc-400 whitespace-nowrap min-w-0">
-                  {editingId === emp.id ? (
-                    <input
-                      type="text"
-                      value={editEmp.roleTitle}
-                      onChange={(e) =>
-                        setEditEmp((p) => ({ ...p, roleTitle: e.target.value }))
-                      }
-                      className="w-full max-w-[120px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                      placeholder="Role"
-                    />
-                  ) : (
-                    emp.roleTitle ?? "—"
-                  )}
+                  {emp.roleTitle ?? "—"}
                 </div>
                 {/* Email */}
                 <div className="col-span-3 min-w-0">
-                  {editingId === emp.id ? (
-                    <input
-                      type="email"
-                      value={editEmp.email}
-                      onChange={(e) =>
-                        setEditEmp((p) => ({ ...p, email: e.target.value }))
-                      }
-                      className="w-full min-w-0 rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                      placeholder="email@example.com"
-                    />
-                  ) : (
-                    <span className="block truncate" title={email || undefined}>
-                      {email || "—"}
-                    </span>
-                  )}
+                  <span className="block truncate" title={email || undefined}>
+                    {email || "—"}
+                  </span>
                 </div>
                 {/* Phone */}
                 <div className="col-span-2 text-zinc-600 dark:text-zinc-400 whitespace-nowrap min-w-0">
-                  {editingId === emp.id ? (
-                    <input
-                      type="tel"
-                      value={editEmp.phone}
-                      onChange={(e) =>
-                        setEditEmp((p) => ({ ...p, phone: e.target.value }))
-                      }
-                      className="w-full max-w-[120px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                      placeholder="Phone"
-                    />
-                  ) : (
-                    emp.phone ?? "—"
-                  )}
+                  {emp.phone ?? "—"}
                 </div>
                 {/* Active */}
                 <div className="col-span-1 flex justify-center">
@@ -379,72 +284,29 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
                 </div>
                 {/* Actions */}
                 <div className="col-span-1 inline-flex gap-3 flex-nowrap">
-                  {editingId === emp.id ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveEdit(emp.id)}
-                        className="font-medium text-zinc-700 hover:underline dark:text-zinc-300 whitespace-nowrap"
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditingId(null)}
-                        className="text-zinc-500 hover:underline whitespace-nowrap"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => startEdit(emp)}
-                        className="hover:underline whitespace-nowrap"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(emp.id)}
-                        className="text-red-600 hover:underline dark:text-red-400 whitespace-nowrap"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setEditingEmployee(emp)}
+                    className="hover:underline whitespace-nowrap"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(emp.id)}
+                    className="text-red-600 hover:underline dark:text-red-400 whitespace-nowrap"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
 
               {/* Mobile/tablet: stacked row (<lg) */}
               <div className="lg:hidden px-6 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {editingId === emp.id ? (
-                      <span className="flex flex-wrap items-center gap-2">
-                        <input
-                          type="text"
-                          value={editEmp.firstName}
-                          onChange={(e) =>
-                            setEditEmp((p) => ({ ...p, firstName: e.target.value }))
-                          }
-                          className="max-w-[80px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                          placeholder="First"
-                        />
-                        <input
-                          type="text"
-                          value={editEmp.lastName}
-                          onChange={(e) =>
-                            setEditEmp((p) => ({ ...p, lastName: e.target.value }))
-                          }
-                          className="max-w-[80px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                          placeholder="Last"
-                        />
-                      </span>
-                    ) : (
-                      `${emp.firstName} ${emp.lastName}`.trim() || "—"
-                    )}
+                  <span className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-100">
+                    <Avatar employee={emp} />
+                    <span>{`${emp.firstName} ${emp.lastName}`.trim() || "—"}</span>
                   </span>
                   <button
                     type="button"
@@ -457,51 +319,13 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
                   </button>
                 </div>
                 <div className="mt-1 text-zinc-600 dark:text-zinc-400">
-                  {editingId === emp.id ? (
-                    <input
-                      type="text"
-                      value={editEmp.roleTitle}
-                      onChange={(e) =>
-                        setEditEmp((p) => ({ ...p, roleTitle: e.target.value }))
-                      }
-                      className="w-full max-w-[200px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                      placeholder="Role"
-                    />
-                  ) : (
-                    emp.roleTitle ?? "—"
-                  )}
+                  {emp.roleTitle ?? "—"}
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-zinc-600 dark:text-zinc-400">
                   <span className="truncate" title={email || undefined}>
-                    {editingId === emp.id ? (
-                      <input
-                        type="email"
-                        value={editEmp.email}
-                        onChange={(e) =>
-                          setEditEmp((p) => ({ ...p, email: e.target.value }))
-                        }
-                        className="w-full min-w-0 max-w-[220px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                        placeholder="email@example.com"
-                      />
-                    ) : (
-                      email || "—"
-                    )}
+                    {email || "—"}
                   </span>
-                  <span>
-                    {editingId === emp.id ? (
-                      <input
-                        type="tel"
-                        value={editEmp.phone}
-                        onChange={(e) =>
-                          setEditEmp((p) => ({ ...p, phone: e.target.value }))
-                        }
-                        className="w-full max-w-[140px] rounded border border-zinc-300 px-2 py-1 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                        placeholder="Phone"
-                      />
-                    ) : (
-                      emp.phone ?? "—"
-                    )}
-                  </span>
+                  <span>{emp.phone ?? "—"}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <label className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
@@ -517,41 +341,20 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
                     </span>
                   </label>
                   <div className="inline-flex gap-3">
-                    {editingId === emp.id ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleSaveEdit(emp.id)}
-                          className="font-medium text-zinc-700 hover:underline dark:text-zinc-300"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="text-zinc-500 hover:underline"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => startEdit(emp)}
-                          className="hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(emp.id)}
-                          className="text-red-600 hover:underline dark:text-red-400"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setEditingEmployee(emp)}
+                      className="hover:underline"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(emp.id)}
+                      className="text-red-600 hover:underline dark:text-red-400"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               </div>
@@ -559,6 +362,43 @@ export function EmployeesTab({ employees: initialEmployees, currentUserIsAdmin }
           );
         })}
       </div>
+
+      {editingEmployee && (
+        <EmployeeEditDrawer
+          employee={editingEmployee}
+          currentUserIsAdmin={currentUserIsAdmin}
+          onClose={() => setEditingEmployee(null)}
+          onSaved={() => {
+            setEditingEmployee(null);
+            setStatus("saved");
+            router.refresh();
+            setTimeout(() => setStatus("idle"), 3000);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Round 32px avatar for the list row. Shows the employee's headshot if
+ * present, otherwise falls back to initials on a zinc background.
+ */
+function Avatar({ employee }: { employee: EmployeeForUI }) {
+  const initials = `${(employee.firstName[0] ?? "").toUpperCase()}${(employee.lastName[0] ?? "").toUpperCase()}`;
+  if (employee.headshotUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={employee.headshotUrl}
+        alt=""
+        className="h-8 w-8 shrink-0 rounded-full border border-zinc-200 object-cover dark:border-zinc-700"
+      />
+    );
+  }
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+      {initials || "?"}
+    </span>
   );
 }

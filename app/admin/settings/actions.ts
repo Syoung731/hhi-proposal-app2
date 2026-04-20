@@ -1211,8 +1211,21 @@ export type UpdateEmployeeData = {
   roleTitle?: string | null;
   email?: string | null;
   phone?: string | null;
+  // Signature fields (Cleanup G). Undefined = leave unchanged; null/"" = clear.
+  headshotUrl?: string | null;
+  jobTitle?: string | null;
+  signatureQuote?: string | null;
+  directPhone?: string | null;
+  mobilePhone?: string | null;
+  linkedInUrl?: string | null;
+  signatureEnabled?: boolean;
 };
 
+/**
+ * Apply a patch to an Employee record. Fields left `undefined` in `data`
+ * preserve their existing values; fields passed as `null` or empty string
+ * clear the column (except for firstName/lastName which are required).
+ */
 export async function updateEmployee(
   id: string,
   data: UpdateEmployeeData
@@ -1233,9 +1246,35 @@ export async function updateEmployee(
     });
     if (duplicate) return { error: "An employee with this email already exists" };
   }
+
+  // Signature fields — only apply when the caller passed a value. `null` and
+  // `""` both mean clear; anything else is trim-and-store.
+  const sigPatch: Record<string, string | boolean | null> = {};
+  if (data.headshotUrl !== undefined) {
+    sigPatch.headshotUrl = (data.headshotUrl ?? "").trim() || null;
+  }
+  if (data.jobTitle !== undefined) {
+    sigPatch.jobTitle = (data.jobTitle ?? "").trim() || null;
+  }
+  if (data.signatureQuote !== undefined) {
+    sigPatch.signatureQuote = (data.signatureQuote ?? "").trim() || null;
+  }
+  if (data.directPhone !== undefined) {
+    sigPatch.directPhone = (data.directPhone ?? "").trim() || null;
+  }
+  if (data.mobilePhone !== undefined) {
+    sigPatch.mobilePhone = (data.mobilePhone ?? "").trim() || null;
+  }
+  if (data.linkedInUrl !== undefined) {
+    sigPatch.linkedInUrl = (data.linkedInUrl ?? "").trim() || null;
+  }
+  if (data.signatureEnabled !== undefined) {
+    sigPatch.signatureEnabled = data.signatureEnabled;
+  }
+
   await prisma.employee.update({
     where: { id },
-    data: { firstName, lastName, roleTitle, email, phone },
+    data: { firstName, lastName, roleTitle, email, phone, ...sigPatch },
   });
   revalidatePath("/admin/settings");
   return {};
