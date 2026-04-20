@@ -464,10 +464,20 @@ model Employee {
   isAdmin          Boolean             @default(false)
   sortOrder        Int                 @default(0)
   // Email-send tracking (Cleanup F). dailySentCount is rolled over when
-  // dailySentResetAt < now by sendProposalEmail. Cleanup G adds signature fields.
+  // dailySentResetAt < now by sendProposalEmail.
   lastSentAt       DateTime?
   dailySentCount   Int                 @default(0)
   dailySentResetAt DateTime?
+  // Email signature (Cleanup G). Consumed by buildEmployeeSignature() to
+  // compose the HTML + text signature blocks used in outbound proposal email.
+  // signatureEnabled=false → builder returns empty strings.
+  headshotUrl      String?
+  jobTitle         String? // client-facing title (distinct from operational roleTitle)
+  signatureQuote   String?
+  directPhone      String?
+  mobilePhone      String?
+  linkedInUrl      String?
+  signatureEnabled Boolean             @default(true)
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   sentSnapshots    PublishedSnapshot[]
