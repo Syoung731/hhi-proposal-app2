@@ -1436,6 +1436,22 @@ function ObjectiveInspector({
   const isLight = slide.layoutKey !== "dark-statement";
   const headlineColorDefault = isLight ? "#1B2A4A" : "#FFFFFF";
 
+  // ── Pillars editor (new structured layout) ─────────────────────────────
+  // The slide renders the 3-pillar layout when `content.pillars` has exactly 3
+  // valid entries. Editing any field below writes straight into slide content.
+  const pillarSlots: { title: string; body: string }[] = (() => {
+    const seed = (content.pillars ?? []).slice(0, 3);
+    while (seed.length < 3) seed.push({ title: "", body: "" });
+    return seed;
+  })();
+
+  function updatePillar(index: 0 | 1 | 2, patch: Partial<{ title: string; body: string }>) {
+    const next = pillarSlots.map((p, i) => (i === index ? { ...p, ...patch } : p));
+    // Only persist a defined pillars array when the user has entered content.
+    const hasAny = next.some((p) => p.title.trim() || p.body.trim());
+    updateContent({ pillars: hasAny ? next : undefined });
+  }
+
   return (
     <>
       {/* ── HEADLINE ─────────────────────────────────────────────────────── */}
@@ -1447,6 +1463,41 @@ function ObjectiveInspector({
           placeholder="e.g. Project Objective"
         />
       </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      {/* ── PILLARS (new 3-pillar layout — Phase 8A) ───────────────────── */}
+      <SectionLabel>Pillars (3 required for new layout)</SectionLabel>
+      <FieldGroup label="Objective (short, ≤50 words)">
+        <TextArea
+          value={content.objective ?? ""}
+          onChange={(v) => updateContent({ objective: v })}
+          placeholder="2-3 sentence opener — frames the project as a single vision."
+          rows={3}
+        />
+      </FieldGroup>
+      {([0, 1, 2] as const).map((i) => (
+        <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
+          <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>
+            <TextInput
+              value={pillarSlots[i].title}
+              onChange={(v) => updatePillar(i, { title: v })}
+              placeholder={i === 0 ? "The Space" : i === 1 ? "The Connection" : "The Protection"}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Pillar ${i + 1} — Body (≤20 words)`}>
+            <TextArea
+              value={pillarSlots[i].body}
+              onChange={(v) => updatePillar(i, { body: v })}
+              placeholder="One sentence describing this dimension."
+              rows={2}
+            />
+          </FieldGroup>
+        </div>
+      ))}
+
+      {PF_GROUP_DIVIDER}
+
       <FieldGroup label="Font">
         <PFontSelect
           value={content.headlineFont ?? SLIDE_FONTS.defaults.headline}

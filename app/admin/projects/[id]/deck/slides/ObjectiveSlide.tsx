@@ -397,9 +397,153 @@ function DarkStatementLayout({ slide, branding, hasAiBackground }: Props) {
   );
 }
 
+// ─── 3. Pillar Layout (new Phase 8A structured objective) ─────────────────────
+
+function PillarLayout({ slide, branding, hasAiBackground }: Props) {
+  const content = (slide.content ?? {}) as ObjectiveContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+
+  // Fall back to statementText when `objective` is absent (lets legacy data
+  // benefit from the pillar layout once pillars are set).
+  const objective = (content.objective ?? content.statementText ?? "").trim();
+  const pillars = (content.pillars ?? []).slice(0, 3);
+
+  const headlineColor = content.headlineColor ?? "#1B2A4A";
+  const headlineShadow = makeOutlineShadow(content.headlineOutline);
+  const objectiveColor = content.statementColor ?? "#1A2332";
+  const pillarTitleColor = content.headlineColor ?? "#1B2A4A";
+  const pillarBodyColor = content.supportingColor ?? "#374151";
+
+  return (
+    <div
+      className="relative w-full h-full overflow-hidden"
+      style={{
+        background: hasBg ? "transparent" : "#FAFAF8",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: "6%",
+          top: "8%",
+          right: "6%",
+          bottom: "8%",
+          display: "flex",
+          flexDirection: "column",
+          zIndex: 2,
+        }}
+      >
+        {/* Headline */}
+        <h1
+          className="font-serif"
+          style={{
+            fontSize: "2.4em",
+            fontWeight: (content.headlineBold ?? true) ? 700 : 400,
+            fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+            color: headlineColor,
+            lineHeight: 1.1,
+            marginBottom: "1.8%",
+            textShadow: headlineShadow,
+            fontStyle: content.headlineItalic ? "italic" : undefined,
+          }}
+        >
+          {slide.headline || "Project Objective"}
+        </h1>
+
+        <TitleAccentRule accentColor={accent} marginBottom="3%" />
+
+        {/* Short objective paragraph */}
+        {objective && (
+          <p
+            className="font-serif"
+            style={{
+              fontSize: "1.1em",
+              color: objectiveColor,
+              lineHeight: 1.55,
+              marginBottom: "5%",
+              maxWidth: "82%",
+              fontWeight: 400,
+            }}
+          >
+            {objective}
+          </p>
+        )}
+
+        {/* 3-column pillar grid */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "4%",
+            marginTop: "auto",
+          }}
+        >
+          {pillars.map((pillar, i) => (
+            <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+              <div
+                style={{
+                  borderTop: `3px solid ${accent}`,
+                  paddingTop: "0.8em",
+                  marginBottom: "0.6em",
+                }}
+              />
+              <h3
+                className="font-serif"
+                style={{
+                  fontSize: "1.15em",
+                  fontWeight: 700,
+                  color: pillarTitleColor,
+                  lineHeight: 1.2,
+                  marginBottom: "0.5em",
+                  fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+                }}
+              >
+                {pillar.title}
+              </h3>
+              <p
+                style={{
+                  fontSize: "0.78em",
+                  color: pillarBodyColor,
+                  lineHeight: 1.55,
+                  fontFamily: content.supportingTextFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body,
+                }}
+              >
+                {pillar.body}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {
+  const content = (slide.content ?? {}) as ObjectiveContent;
+
+  // New structured layout: if exactly 3 valid pillars are present, render the
+  // Pillar layout regardless of the stored layoutKey. This makes the upgrade
+  // implicit — once pillars arrive on the slide, the user sees the new UI.
+  const pillars = content.pillars ?? [];
+  if (
+    pillars.length === 3 &&
+    pillars.every((p) => p?.title?.trim() && p?.body?.trim())
+  ) {
+    return <PillarLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+  }
+
   // Migration fallbacks: map removed/renamed layouts to their replacements
   const layout = slide.layoutKey;
   const effectiveLayout =

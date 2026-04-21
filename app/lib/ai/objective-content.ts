@@ -193,15 +193,44 @@ ${overviewRaw || "(none)"}
   };
 }
 
+export type LuxuryObjectivePillar = {
+  title: string;
+  body: string;
+};
+
 export type LuxuryObjectiveResult = {
+  /** Short opener, 2-3 sentences, ≤50 words. */
   objective: string;
+  /** Exactly 3 pillars. Titles 2-4 words; bodies ≤20 words each. */
+  pillars: LuxuryObjectivePillar[];
+  /** Back-compat — empty string under the new prompt; legacy decks still render. */
   supportingText: string;
+  /** Back-compat — derived from pillars as "Title — body" strings. */
   bullets: string[];
 };
 
+const OBJECTIVE_FALLBACK: LuxuryObjectiveResult = {
+  objective: "[Objective needs review]",
+  pillars: [
+    { title: "Design Clarity", body: "A single team plans every detail before construction begins." },
+    { title: "Fixed-Price Build", body: "The contract price is locked before the first swing of a hammer." },
+    { title: "Seamless Execution", body: "One point of accountability from concept through final walkthrough." },
+  ],
+  supportingText: "",
+  bullets: [],
+};
+
+function wordCount(s: string): number {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
+
 /**
- * Generate a luxury, client-facing Project Objective paragraph, supporting text,
- * and bullet points from a transcript in a single API call.
+ * Generate a luxury, client-facing Project Objective paragraph + 3 pillars
+ * from a transcript in a single API call.
+ *
+ * Output shape (Phase 8A): structured `{ objective, pillars }` — short opener +
+ * 3 noun-phrase pillars for the new 3-column layout. A back-compat `bullets`
+ * array is derived as "Title — body" strings so legacy decks keep rendering.
  */
 export async function generateLuxuryObjectiveParagraph(options: {
   transcriptText: string;
@@ -218,73 +247,76 @@ export async function generateLuxuryObjectiveParagraph(options: {
   const address = (options.projectAddress ?? "").trim();
   const client = (options.clientName ?? "").trim();
 
-  const systemContent = `You are a senior proposal writer for a luxury design-build remodeling company called ${company} on Hilton Head Island, SC. You specialize in writing client-facing proposal content that is persuasive, confident, and emotionally resonant — the kind of writing that makes a homeowner feel that they are in expert hands and that their investment is worthwhile.
+  const systemContent = `You are a senior proposal writer for a luxury design-build remodeling company called ${company} on Hilton Head Island, SC. You write client-facing proposal content that is confident, specific, and professionally elevated.
 
-Your task is to write a Project Objective statement, supporting text, and bullet points for a proposal based on a transcript from an initial client meeting or site visit.
+Your task is to produce a Project Objective opener + 3 supporting pillars for a proposal slide, based on a transcript from an initial client meeting or site visit.
 
-THE PROJECT OBJECTIVE MUST:
+OUTPUT STRUCTURE (STRICT):
+Return a JSON object with exactly these two fields — no extras, no prose before or after.
 
-1. Open with a strong scene-setting sentence that acknowledges the current state of the space — what problem exists, what opportunity it presents, or what the client's vision is. This is not a list of problems. It is a narrative opening that makes the client feel heard and understood.
+{
+  "objective": "2-3 sentence opener (maximum 50 words)",
+  "pillars": [
+    { "title": "2-4 word noun phrase", "body": "single sentence (maximum 20 words)" },
+    { "title": "2-4 word noun phrase", "body": "single sentence (maximum 20 words)" },
+    { "title": "2-4 word noun phrase", "body": "single sentence (maximum 20 words)" }
+  ]
+}
 
-2. State the transformation objective clearly — not what will be removed or repaired, but what will be achieved. Focus on outcomes for the client (the feeling, the function, the quality of life improvement) rather than on contractor tasks.
+Return exactly 3 pillars. Not 2, not 4. Three.
 
-3. Describe the scope in elevated, specific language. Use the actual room names, materials, and project details from the transcript. Do not be generic. If the transcript mentions heated floors, name them. If it mentions removing a soffit, explain why that matters to the client (openness, light, luxury feel). Every scope item should be connected to a client benefit.
+OBJECTIVE (the opener):
+- 2 to 3 sentences. Hard ceiling of 50 words total.
+- Frames the entire project as a single cohesive vision — not a list of rooms.
+- Acknowledges the current state or client goal, then names the transformation.
+- Outcome-focused: what the client will experience, not what contractors will do.
+- No bullet points. No headers. Single short paragraph.
 
-4. Include a confidence statement — a sentence or two that positions ${company} as the right partner for this project. Reference the design-build advantage: single point of accountability, fixed-price contract, no surprises. This should feel earned and natural, not like a sales pitch bolted onto the end.
+PILLARS (3 required):
+Each pillar captures one supporting dimension of the project. Choose dimensions from options like:
+  - The Space (layout, openness, flow)
+  - The Connection (indoor/outdoor, room relationships)
+  - The Protection (weather, durability, longevity, insurance)
+  - The Systems (mechanical, electrical, plumbing, climate)
+  - The Materials (finishes, quality, luxury)
+  - The Process (design-build advantage, fixed-price, accountability)
+  - The Integration (matching existing architecture, harmony with existing home)
 
-5. Close with a single powerful sentence — a vision statement for what this project becomes when it is complete. Short. Confident. Memorable.
+Title rules:
+- 2-4 words.
+- Noun-phrase only. Start with "The" when natural (e.g., "The Space", "The Connection").
+- No verbs, no commands.
+- Memorable, specific to this project where possible.
 
-SUPPORTING TEXT:
-A single focused paragraph of 2-4 sentences that dives deeper into one specific and compelling aspect of this project. This could be the technical challenge being solved, the design opportunity being seized, or the transformation the client will experience. It should feel like the second beat of the story — the objective sets the scene, the supporting text goes deeper on one dimension.
+Body rules:
+- Exactly 1 sentence.
+- Maximum 20 words. Count carefully.
+- Client-facing benefit framing, not contractor tasks.
+- Active voice. Specific. No filler words.
 
-Tone: Same elevated, client-facing language as the objective. No contractor jargon. Active voice. Specific to this project.
-Length: 40-80 words. One tight paragraph.
-
-BULLET POINTS (up to 3):
-Three short, scannable highlights that capture the most important client benefits or project features. Each bullet is a complete thought in 6-10 words. They should feel like the "why this matters" version of the scope — focused on outcome and benefit, not on tasks.
-
-Format each bullet to start with a strong action or outcome word.
-Examples of good bullets:
-- "Structural damage resolved with zero compromises"
-- "Open, column-free layout reimagined from the ground up"
-- "Heated floors and premium finishes throughout"
-
-Bad bullets (do not write these):
-- "Remove and replace damaged subfloor"
-- "Install new fixtures and tile"
-- "Coordinate with licensed trades"
+EXAMPLE (for a home addition project, shape only — do not copy):
+{
+  "objective": "Turning an empty side yard into conditioned living space that feels like it was always part of the home. The new wing adds square footage without sacrificing the existing architectural language.",
+  "pillars": [
+    { "title": "The Space", "body": "A fully conditioned addition that extends family living without compromising the home's original proportions." },
+    { "title": "The Connection", "body": "Seamless sightlines and traffic flow between the existing home and new wing feel effortless." },
+    { "title": "The Protection", "body": "New exterior envelope built to withstand coastal weather with a 50-year material warranty." }
+  ]
+}
 
 TONE AND STYLE:
-- Professional but warm — like a trusted advisor, not a contractor
-- Specific and detailed — use real details from the transcript
-- Elevated but not pretentious — accessible luxury language
-- Active voice throughout — "we will" not "work will be performed"
-- Written in third person for the space, first person plural for the company ("we", "our team", "our approach")
-- Never use contractor jargon: no "demo", "rough-in", "punch list", "scope of work", "line items"
-- Instead use: "carefully removed", "precisely installed", "thoughtfully designed", "meticulously planned"
-
-LENGTH AND STRUCTURE (for the objective only):
-- 3 to 4 substantial paragraphs
-- Each paragraph 3 to 5 sentences
-- No bullet points in the objective — this is narrative prose
-- No headers — flowing paragraphs only
-- Total length: 180 to 280 words
-- Long enough to fill a slide comfortably, short enough to read in under 90 seconds
-
-WHAT TO AVOID:
-- Do not start with "This project" or "The project"
-- Do not use the word "renovation" in the first sentence
-- Do not list tasks sequentially (remove X, install Y, add Z)
-- Do not mention budget, cost, or pricing
-- Do not use passive voice ("will be removed", "will be installed")
-- Do not use filler phrases ("world-class", "state-of-the-art", "cutting-edge", "seamless experience")
-- Do not include caveats or qualifications ("depending on", "subject to", "if applicable")`;
+- Professional, warm, confident — a trusted advisor voice, not a contractor voice.
+- Specific to the transcript details — do not return generic copy.
+- Active voice only.
+- No contractor jargon: no "demo", "rough-in", "punch list", "FFE", "MEP", "scope of work", "line items".
+- No filler phrases: no "world-class", "state-of-the-art", "cutting-edge", "seamless experience".
+- No pricing, no scheduling promises, no caveats.`;
 
   const shortTranscriptNote = transcript.length < 300
-    ? "\n\nNote: The transcript is brief. Use the available details and fill in reasonable assumptions appropriate for a luxury design-build project of this type. Do not mention that the transcript was limited."
+    ? "\n\nNote: The transcript is brief. Fill in reasonable assumptions appropriate for a luxury design-build project of this type. Do not mention that the transcript was limited."
     : "";
 
-  const userContent = `Based on the following transcript from an initial client meeting or site visit, write a Project Objective statement, supporting text, and bullet points for a luxury design-build proposal.
+  const userContent = `Based on the following transcript from an initial client meeting or site visit, return the structured objective JSON.
 
 Project address: ${address || "(not provided)"}
 Client name: ${client || "(not provided)"}
@@ -292,15 +324,11 @@ Client name: ${client || "(not provided)"}
 Transcript:
 ${transcript}${shortTranscriptNote}
 
-Return your response in this exact JSON format with no additional text, no markdown, no code fences:
-
-{"objective": "full objective text here", "supportingText": "supporting paragraph here", "bullets": ["first bullet here", "second bullet here", "third bullet here"]}
-
-If the transcript does not support 3 meaningful bullets, return 2 or 1. Never return empty or generic bullets.`;
+Return ONLY the JSON object — no markdown, no code fences, no commentary.`;
 
   const response = await callClaude({
-    max_tokens: 1200,
-    temperature: 0.7,
+    max_tokens: 800,
+    temperature: 0.6,
     system: systemContent,
     messages: [
       { role: "user", content: userContent },
@@ -309,32 +337,51 @@ If the transcript does not support 3 meaningful bullets, return 2 or 1. Never re
 
   const rawText = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
   if (!rawText) {
-    throw new Error("No AI response for luxury objective generation.");
+    console.warn("[generateLuxuryObjectiveParagraph] empty response; returning fallback");
+    return OBJECTIVE_FALLBACK;
   }
 
-  let parsed: { objective?: string; supportingText?: string; bullets?: string[] };
+  let parsed: { objective?: string; pillars?: { title?: string; body?: string }[] };
   try {
     parsed = JSON.parse(stripJsonFences(rawText)) as typeof parsed;
-  } catch {
-    // Fallback: treat entire response as objective text if JSON parse fails
-    return {
-      objective: rawText,
-      supportingText: "",
-      bullets: [],
-    };
+  } catch (e) {
+    console.warn("[generateLuxuryObjectiveParagraph] JSON parse failed; returning fallback:", e);
+    return OBJECTIVE_FALLBACK;
   }
 
-  const objective = (parsed.objective ?? "").trim();
-  if (!objective) {
-    throw new Error("AI response missing objective text.");
+  const objective = String(parsed.objective ?? "").trim();
+  const pillarsRaw = Array.isArray(parsed.pillars) ? parsed.pillars : [];
+
+  // Validate: exactly 3 pillars, objective ≤50 words, each body ≤20 words.
+  if (!objective || wordCount(objective) > 60 || pillarsRaw.length !== 3) {
+    console.warn("[generateLuxuryObjectiveParagraph] validation failed; returning fallback", {
+      hasObjective: !!objective,
+      objectiveWords: wordCount(objective),
+      pillarCount: pillarsRaw.length,
+    });
+    return OBJECTIVE_FALLBACK;
   }
 
-  const supportingText = (parsed.supportingText ?? "").trim();
-  const bullets = Array.isArray(parsed.bullets)
-    ? parsed.bullets.map((b) => String(b ?? "").trim()).filter(Boolean).slice(0, 3)
-    : [];
+  const pillars: LuxuryObjectivePillar[] = pillarsRaw.map((p) => ({
+    title: String(p?.title ?? "").trim(),
+    body: String(p?.body ?? "").trim(),
+  }));
 
-  return { objective, supportingText, bullets };
+  // Any pillar missing content → fallback.
+  if (pillars.some((p) => !p.title || !p.body || wordCount(p.body) > 25)) {
+    console.warn("[generateLuxuryObjectiveParagraph] pillar validation failed; returning fallback");
+    return OBJECTIVE_FALLBACK;
+  }
+
+  // Back-compat derived fields for legacy decks that still read bullets.
+  const bullets = pillars.map((p) => `${p.title} — ${p.body}`);
+
+  return {
+    objective,
+    pillars,
+    supportingText: "",
+    bullets,
+  };
 }
 
 /**

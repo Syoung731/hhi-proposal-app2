@@ -53,6 +53,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       zip: true,
       coverHeroImageId: true,
       hasAddition: true,
+      objectivePillars: true,
       media: {
         select: { id: true, url: true, kind: true },
         orderBy: { sortOrder: "asc" },
@@ -356,9 +357,25 @@ export default async function DeckEditorPage({ params }: PageProps) {
   // Sources (in priority order):
   //   1. Proposal.publicLayoutConfig.pages.objective  (Presentation tab title/subtitle)
   //   2. Project.objective / .supportingText / .bullets (Overview tab, AI-generated)
+  //   3. Project.objectivePillars (new 3-pillar layout — Phase 8A)
   // Applied every load when isUserModified !== true.
   // Once the user edits the slide in the deck inspector, isUserModified = true
   // and this injection is skipped — their deck-specific copy is preserved.
+  const objectivePillars = (() => {
+    const raw = project.objectivePillars as unknown;
+    if (!Array.isArray(raw) || raw.length !== 3) return null;
+    const pillars = raw
+      .map((p) => {
+        if (!p || typeof p !== "object") return null;
+        const title = String((p as { title?: unknown }).title ?? "").trim();
+        const body = String((p as { body?: unknown }).body ?? "").trim();
+        if (!title || !body) return null;
+        return { title, body };
+      })
+      .filter((p): p is { title: string; body: string } => p !== null);
+    return pillars.length === 3 ? pillars : null;
+  })();
+
   for (const slide of slides) {
     if (slide.type !== "objective" || slide.isUserModified) continue;
 
@@ -371,7 +388,15 @@ export default async function DeckEditorPage({ params }: PageProps) {
     const title = objectiveConfig?.title?.trim() || null;
 
     // Only hydrate when there is at least some real content to inject.
-    if (!statementText && !supportingText && bullets.length === 0 && !title) continue;
+    if (
+      !statementText &&
+      !supportingText &&
+      bullets.length === 0 &&
+      !title &&
+      !objectivePillars
+    ) {
+      continue;
+    }
 
     const existingContent = (slide.content ?? {}) as ObjectiveContent;
     slide.headline = title ?? slide.headline ?? "Project Objective";
@@ -380,6 +405,10 @@ export default async function DeckEditorPage({ params }: PageProps) {
       statementText,
       supportingText,
       bullets,
+      // New structured layout fields. Only overwritten when the project
+      // actually has structured data — legacy projects keep their prose.
+      ...(project.objective ? { objective: project.objective.trim() } : {}),
+      ...(objectivePillars ? { pillars: objectivePillars } : {}),
     };
   }
 

@@ -91,6 +91,12 @@ model Project {
   // Scope flag: when true, the default deck includes an Addition Overview slide.
   hasAddition Boolean @default(false)
 
+  // Structured objective pillars for the new Objective slide layout.
+  // Shape: Array<{ title: string; body: string }> (exactly 3 items when set).
+  // Null when the project has never run the new Generate Overview flow — the
+  // deck falls back to the legacy objective/supportingText/bullets prose.
+  objectivePillars Json?
+
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])

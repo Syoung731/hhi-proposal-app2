@@ -163,11 +163,24 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
   overview.workSummary = projectType;
   // subtitle: keep AI's descriptive sentence (required from extractFromTranscript); do not overwrite
 
-  // Replace the short extracted objective with the luxury narrative version
+  // Replace the short extracted objective with the luxury narrative version.
+  // Pillars are stored on the Project (objectivePillars) so the deck's
+  // Objective slide can render the new 3-pillar layout on every load.
   if (luxuryResult) {
     overview.objective = luxuryResult.objective;
     (overview as Record<string, unknown>).supportingText = luxuryResult.supportingText;
     (overview as Record<string, unknown>).bullets = luxuryResult.bullets;
+    try {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          objectivePillars: luxuryResult.pillars as any,
+        },
+      });
+    } catch (err) {
+      console.warn("[generateOverviewFromTranscript] failed to persist objectivePillars:", err);
+    }
   }
 
   // Regression: title (address — projectType) must not equal subtitle (summary sentence)

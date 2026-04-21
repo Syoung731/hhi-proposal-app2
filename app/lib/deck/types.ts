@@ -261,10 +261,25 @@ export interface CoverContent extends SharedSlideFields {
   taglineFont?: string | null;
 }
 
+/**
+ * A single pillar on the new Objective slide layout.
+ * Targets: title 2-4 words, body 1 sentence ≤20 words.
+ */
+export interface ObjectivePillar {
+  title: string;
+  body: string;
+}
+
 export interface ObjectiveContent extends SharedSlideFields {
   statementText?: string | null;
   supportingText?: string | null;
   bullets?: string[];
+
+  // ── New structured fields (Phase 8A) ──────────────────────────────────────
+  /** Short opener (≤50 words, 2-3 sentences). New layout uses this over statementText. */
+  objective?: string | null;
+  /** Exactly 3 pillars for the new 3-column layout. When absent → legacy prose layout. */
+  pillars?: ObjectivePillar[];
 
   // ── Per-field text styling ────────────────────────────────────────────────
   // Headline
