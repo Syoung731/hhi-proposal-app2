@@ -6,19 +6,28 @@
  * it is a plain server-side library imported by server components and
  * server actions alike.
  *
- * Gap-based ordering:
- *   cover         0
- *   objective   100
- *   scope-ov    200
- *   before-after 300 + roomIndex * 10   (auto)
- *   scope-brkdn 400                     (auto)
- *   why-us      500
- *   risk-brief  550
- *   process     560
- *   core-values 570
- *   timeline    575
- *   cope-page   580
- *   investment  600
+ * Gap-based ordering (Phase 8A — spaced 100 apart for insertion headroom):
+ *   cover             100   (locked first)
+ *   objective         200
+ *   scope-overview    300
+ *   scope-breakdown   400                       (auto, if rooms.length >= 2)
+ *   before-after      500 + roomIndex * 10      (auto, per room)
+ *   cope-page         600
+ *   visual-inspir     700
+ *   why-us            800
+ *   project-timeline  900
+ *   investment       1000
+ *   design-retainer  1100
+ *   next-steps       1200
+ *   addition-overview 1300  (only if project.hasAddition === true)
+ *   closing-slide    1400   (locked last)
+ *
+ * Composition is defined in `default-spec.ts` — seed + backfill both call
+ * `buildDefaultDeckSpec(project)`. Never hardcode a slide list here.
+ *
+ * Optional slides (not in default spec; added manually via + Add Slide):
+ *   risk-brief, process, core-values, design-build-advantage,
+ *   client-testimonials.
  */
 
 import { prisma } from "@/app/lib/prisma";
@@ -41,6 +50,12 @@ import type {
 } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
 import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
+import {
+  buildDefaultDeckSpec,
+  AUTO_SYNCED_SLIDE_TYPES,
+  type DefaultSlideSpec,
+  type ProjectForDeckSpec,
+} from "./default-spec";
 
 // ─── Internal type alias ─────────────────────────────────────────────────────
 
@@ -79,88 +94,219 @@ function dbToSlide(row: DbRow): ProposalSlide {
   };
 }
 
-// ─── Default slide seeds ──────────────────────────────────────────────────────
+// ─── Default slide content builder ───────────────────────────────────────────
 
-async function seedDefaultSlides(
-  deckId: string,
-  projectTitle: string,
-  clientName: string | null,
-  address: string | null,
-  cvDefaults?: import("@/app/lib/core-values-defaults").GlobalCoreValuesSettings,
-  copeDefaults?: import("@/app/lib/cope-defaults").GlobalCopeSettings,
-  nextStepsDefaults?: import("@/app/lib/next-steps-defaults").GlobalNextStepsSettings,
-  designBuildDefaults?: import("@/app/lib/design-build-defaults").GlobalDesignBuildSettings,
-): Promise<void> {
-  await prisma.deckSlide.createMany({
-    data: [
-      {
-        deckId,
+type SeedContext = {
+  projectTitle: string;
+  clientName: string | null;
+  address: string | null;
+  cvDefaults?: import("@/app/lib/core-values-defaults").GlobalCoreValuesSettings;
+  copeDefaults?: import("@/app/lib/cope-defaults").GlobalCopeSettings;
+  nextStepsDefaults?: import("@/app/lib/next-steps-defaults").GlobalNextStepsSettings;
+  designBuildDefaults?: import("@/app/lib/design-build-defaults").GlobalDesignBuildSettings;
+};
+
+type SlideRowData = {
+  type: string;
+  layoutKey: string;
+  order: number;
+  isEnabled: boolean;
+  isLocked: boolean;
+  lockPosition: "first" | "last" | null;
+  source: "auto" | "manual";
+  headline: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  content: any;
+};
+
+/**
+ * Produces the full DB row payload for a given default slot. Returns null for
+ * slide types that are owned by the auto-sync pipeline (before-after,
+ * scope-breakdown) — those rows are created by the sync functions, not seed.
+ *
+ * Global default settings (core values, cope, next steps, design-build) are
+ * layered onto the hardcoded defaults where present.
+ */
+function buildSlideDataFromSpec(
+  spec: DefaultSlideSpec,
+  ctx: SeedContext,
+): SlideRowData | null {
+  if (AUTO_SYNCED_SLIDE_TYPES.has(spec.type)) return null;
+
+  const base = {
+    order: spec.order,
+    isEnabled: true,
+    isLocked: spec.isLocked ?? false,
+    lockPosition: spec.lockPosition ?? null,
+    source: "manual" as const,
+  };
+
+  switch (spec.type) {
+    case "cover":
+      return {
+        ...base,
         type: "cover",
-        layoutKey: "right-panel-overlay",
-        order: 0,
-        isEnabled: true,
-        isLocked: true,
-        lockPosition: "first",
-        source: "manual",
-        headline: projectTitle,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        layoutKey: spec.layoutKey,
+        headline: ctx.projectTitle,
         content: {
           heroImageUrl: null,
-          preparedFor: clientName,
+          preparedFor: ctx.clientName,
           tagline: null,
           date: new Date().toLocaleDateString("en-US", {
             year: "numeric",
             month: "long",
             day: "numeric",
           }),
-        } as any,
-      },
-      {
-        deckId,
+        },
+      };
+
+    case "objective":
+      return {
+        ...base,
         type: "objective",
-        layoutKey: "light-statement",
-        order: 100,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
+        layoutKey: spec.layoutKey,
         headline: "Project Objective",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: { statementText: null, supportingText: null, bullets: [] } as any,
-      },
-      {
-        deckId,
+        content: { statementText: null, supportingText: null, bullets: [] },
+      };
+
+    case "scope-overview":
+      return {
+        ...base,
         type: "scope-overview",
-        layoutKey: "split-panel",
-        order: 200,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
+        layoutKey: spec.layoutKey,
         headline: "Project Scope",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: { description: null, selectedPhotos: [] } as any,
-      },
-      {
-        deckId,
+        content: { description: null, selectedPhotos: [] },
+      };
+
+    case "cope-page":
+      return {
+        ...base,
+        type: "cope-page",
+        layoutKey: ctx.copeDefaults?.defaultLayout ?? spec.layoutKey,
+        headline: ctx.copeDefaults?.defaultHeadline ?? "The Cost of Project Execution",
+        content: {
+          sectionLabel: ctx.copeDefaults?.defaultSectionLabel ?? "WHAT\u2019S INCLUDED",
+          subheadline: ctx.copeDefaults?.defaultSubheadline ?? null,
+          items: ctx.copeDefaults?.defaultItems ?? [],
+        },
+      };
+
+    case "visual-inspiration":
+      return {
+        ...base,
+        type: "visual-inspiration",
+        layoutKey: spec.layoutKey,
+        headline: "Design Inspiration",
+        content: {
+          subtitle: "A curated vision for your space.",
+          photos: [],
+        },
+      };
+
+    case "why-us":
+      return {
+        ...base,
         type: "why-us",
-        layoutKey: "pillars-grid",
-        order: 500,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
+        layoutKey: spec.layoutKey,
         headline: "The HHI Difference",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: { sectionTitle: null, pillars: [], selectedPillarIds: [] } as any,
-      },
-      {
-        deckId,
+        content: { sectionTitle: null, pillars: [], selectedPillarIds: [] },
+      };
+
+    case "project-timeline":
+      return {
+        ...base,
+        type: "project-timeline",
+        layoutKey: spec.layoutKey,
+        headline: "Projected Timeline",
+        content: {
+          sectionLabel: "YOUR PROJECT",
+          phases: buildProjectPhases([]),
+        },
+      };
+
+    case "investment":
+      return {
+        ...base,
+        type: "investment",
+        layoutKey: spec.layoutKey,
+        headline: "Projected Investment",
+        content: {
+          lineItems: [],
+          retainerLabel: null,
+          retainerAmount: null,
+          disclaimer: null,
+          address: ctx.address,
+        },
+      };
+
+    case "design-retainer":
+      return {
+        ...base,
+        type: "design-retainer",
+        layoutKey: spec.layoutKey,
+        headline: "Your Design Retainer",
+        content: {
+          sectionLabel: "DESIGN RETAINER",
+          tagline: "Your investment in certainty before construction begins.",
+          retainerAmount: "$22,000",
+          benefits: [
+            "Full architectural design and space planning",
+            "HOA / ARB submission and approval management",
+            "Complete material and finish specifications",
+            "Fixed-price build contract before construction begins",
+          ],
+        },
+      };
+
+    case "next-steps":
+      return {
+        ...base,
+        type: "next-steps",
+        layoutKey: ctx.nextStepsDefaults?.defaultLayout ?? spec.layoutKey,
+        headline: ctx.nextStepsDefaults?.defaultHeadline ?? "Your Path Forward",
+        content: {
+          sectionLabel: ctx.nextStepsDefaults?.defaultSectionLabel ?? "WHAT HAPPENS NEXT",
+          contactEmail: ctx.nextStepsDefaults?.defaultContactEmail ?? null,
+          contactPhone: ctx.nextStepsDefaults?.defaultContactPhone ?? null,
+          steps: ctx.nextStepsDefaults?.defaultSteps ?? [],
+        },
+      };
+
+    case "addition-overview":
+      return {
+        ...base,
+        type: "addition-overview",
+        layoutKey: spec.layoutKey,
+        headline: "Proposed Addition Area",
+        content: {
+          cadGenerationStatus: null,
+          boundingBox: null,
+          calloutLabel: null,
+          bullets: [],
+        },
+      };
+
+    case "closing-slide":
+      return {
+        ...base,
+        type: "closing-slide",
+        layoutKey: spec.layoutKey,
+        headline: "Let\u2019s Build Something Extraordinary",
+        content: {
+          tagline: "Design. Build. Remodel.",
+          validityNote: "This proposal is valid for 30 days.",
+        },
+      };
+
+    // Types that are reclassified as optional (NOT in default spec) but still
+    // fully supported when added manually. If they ever appear in the spec in
+    // the future, these builders remain valid.
+    case "risk-brief":
+      return {
+        ...base,
         type: "risk-brief",
-        layoutKey: "two-column",
-        order: 550,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
+        layoutKey: spec.layoutKey,
         headline: "The Stress-Free Remodel: How We Eliminate Common Risks",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         content: {
           leftHeader: "Why Remodels Go Wrong",
           leftBullets: [
@@ -177,18 +323,15 @@ async function seedDefaultSlides(
           rowLabels: ["Accountability", "Budgeting", "Design"],
           bottomStatement:
             "You'll know exactly what's being built, what it costs, and what to expect — before construction starts.",
-        } as any,
-      },
-      {
-        deckId,
+        },
+      };
+
+    case "process":
+      return {
+        ...base,
         type: "process",
-        layoutKey: "three-stages",
-        order: 560,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
+        layoutKey: spec.layoutKey,
         headline: "Our Process: From Vision to Finished Home",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         content: {
           stages: [
             {
@@ -218,122 +361,72 @@ async function seedDefaultSlides(
           ],
           bottomStatement:
             "Every detail is planned before we break ground—so the build stays on schedule, on budget, and free of surprises.",
-        } as any,
-      },
-      {
-        deckId,
+        },
+      };
+
+    case "core-values":
+      return {
+        ...base,
         type: "core-values",
-        layoutKey: cvDefaults?.defaultLayout ?? "cards-row",
-        order: 570,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: cvDefaults?.defaultHeadline ?? "Built on a Foundation of Values",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        layoutKey: ctx.cvDefaults?.defaultLayout ?? spec.layoutKey,
+        headline: ctx.cvDefaults?.defaultHeadline ?? "Built on a Foundation of Values",
         content: {
-          sectionLabel: cvDefaults?.defaultSectionLabel ?? "WHO WE ARE",
-          values: cvDefaults?.defaultValues ?? [],
-        } as any,
-      },
-      {
-        deckId,
-        type: "project-timeline",
-        layoutKey: "vertical-dot",
-        order: 575,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Projected Timeline",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: "YOUR PROJECT",
-          phases: buildProjectPhases([]),
-        } as any,
-      },
-      {
-        deckId,
-        type: "cope-page",
-        layoutKey: copeDefaults?.defaultLayout ?? "icon-columns",
-        order: 580,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: copeDefaults?.defaultHeadline ?? "The Cost of Project Execution",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: copeDefaults?.defaultSectionLabel ?? "WHAT\u2019S INCLUDED",
-          subheadline: copeDefaults?.defaultSubheadline ?? null,
-          items: copeDefaults?.defaultItems ?? [],
-        } as any,
-      },
-      {
-        deckId,
-        type: "investment",
-        layoutKey: "table-callout",
-        order: 600,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Projected Investment",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          lineItems: [],
-          retainerLabel: null,
-          retainerAmount: null,
-          disclaimer: null,
-          address,
-        } as any,
-      },
-      {
-        deckId,
-        type: "next-steps",
-        layoutKey: nextStepsDefaults?.defaultLayout ?? "numbered-photo",
-        order: 700,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: nextStepsDefaults?.defaultHeadline ?? "Your Path Forward",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: nextStepsDefaults?.defaultSectionLabel ?? "WHAT HAPPENS NEXT",
-          contactEmail: nextStepsDefaults?.defaultContactEmail ?? null,
-          contactPhone: nextStepsDefaults?.defaultContactPhone ?? null,
-          steps: nextStepsDefaults?.defaultSteps ?? [],
-        } as any,
-      },
-      {
-        deckId,
-        type: "closing-slide",
-        layoutKey: "dark-centered",
-        order: 900,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Let\u2019s Build Something Extraordinary",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          tagline: "Design. Build. Remodel.",
-          validityNote: "This proposal is valid for 30 days.",
-        } as any,
-      },
-      {
-        deckId,
+          sectionLabel: ctx.cvDefaults?.defaultSectionLabel ?? "WHO WE ARE",
+          values: ctx.cvDefaults?.defaultValues ?? [],
+        },
+      };
+
+    case "design-build-advantage":
+      return {
+        ...base,
         type: "design-build-advantage",
-        layoutKey: designBuildDefaults?.defaultLayout ?? "icon-cards",
-        order: 555,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: designBuildDefaults?.defaultHeadline ?? "The Design-Build Advantage",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        layoutKey: ctx.designBuildDefaults?.defaultLayout ?? spec.layoutKey,
+        headline:
+          ctx.designBuildDefaults?.defaultHeadline ?? "The Design-Build Advantage",
         content: {
-          pillars: designBuildDefaults?.defaultPillars ?? [],
-          guarantees: designBuildDefaults?.defaultGuarantees ?? [],
-          diagramNodes: designBuildDefaults?.defaultDiagramNodes ?? [],
-          supportColumns: designBuildDefaults?.defaultSupportColumns ?? [],
-        } as any,
-      },
-    ],
+          pillars: ctx.designBuildDefaults?.defaultPillars ?? [],
+          guarantees: ctx.designBuildDefaults?.defaultGuarantees ?? [],
+          diagramNodes: ctx.designBuildDefaults?.defaultDiagramNodes ?? [],
+          supportColumns: ctx.designBuildDefaults?.defaultSupportColumns ?? [],
+        },
+      };
+
+    case "client-testimonials":
+      return {
+        ...base,
+        type: "client-testimonials",
+        layoutKey: spec.layoutKey,
+        headline: "What Our Clients Say",
+        content: {
+          showStars: true,
+          testimonials: [],
+        },
+      };
+
+    // before-after and scope-breakdown fall through — returned as null above.
+    default:
+      return null;
+  }
+}
+
+// ─── Default slide seeds ──────────────────────────────────────────────────────
+
+async function seedDefaultSlides(
+  deckId: string,
+  project: ProjectForDeckSpec,
+  ctx: SeedContext,
+): Promise<void> {
+  const spec = buildDefaultDeckSpec(project);
+  const rows = spec
+    .map((slot) => buildSlideDataFromSpec(slot, ctx))
+    .filter((r): r is SlideRowData => r !== null)
+    .map((r) => ({ ...r, deckId }));
+
+  if (rows.length === 0) return;
+
+  await prisma.deckSlide.createMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: rows as any,
   });
 }
 
@@ -376,7 +469,7 @@ async function syncBeforeAfterSlides(
 
     const beforeMedia = room.beforeMedia[0];
     const caption = stripScopeClarifications(room.scopeNarrative ?? "") || null;
-    const order = 300 + i * 10;
+    const order = 500 + i * 10;
 
     const existingRow = existingByRoom.get(room.id);
 
@@ -720,290 +813,31 @@ async function syncRetainerFromProject(
 // ─── Backfill: default slides added after initial seed ────────────────────────
 
 /**
- * Ensures every "always-present" default slide exists in an already-seeded deck.
- * Called on every page load so decks created before a new default was added
- * automatically receive that slide without requiring manual recreation.
+ * Ensures every slot in `buildDefaultDeckSpec(project)` exists in an
+ * already-seeded deck. Called on every page load so decks created before a
+ * new default was added automatically receive that slide.
  *
- * Only creates slides that are completely absent — never overwrites existing ones.
+ * Only creates slides that are completely absent — never overwrites existing
+ * rows. Auto-synced types (before-after, scope-breakdown) are skipped; their
+ * sync functions own them. Reclassified slides (risk-brief, process,
+ * core-values, design-build-advantage, client-testimonials) are NOT in the
+ * spec, so backfill will not resurrect them if a user removes them.
  */
 async function backfillMissingDefaults(
   deckId: string,
   existing: DbRow[],
-  cvDefaults?: import("@/app/lib/core-values-defaults").GlobalCoreValuesSettings,
-  copeDefaults?: import("@/app/lib/cope-defaults").GlobalCopeSettings,
-  nextStepsDefaults?: import("@/app/lib/next-steps-defaults").GlobalNextStepsSettings,
-  designBuildDefaults?: import("@/app/lib/design-build-defaults").GlobalDesignBuildSettings,
+  project: ProjectForDeckSpec,
+  ctx: SeedContext,
 ): Promise<void> {
-  const types = new Set(existing.map((r) => r.type));
+  const existingTypes = new Set(existing.map((r) => r.type));
+  const spec = buildDefaultDeckSpec(project);
 
-  if (!types.has("risk-brief")) {
+  for (const slot of spec) {
+    if (existingTypes.has(slot.type)) continue;
+    const row = buildSlideDataFromSpec(slot, ctx);
+    if (!row) continue; // auto-synced type — skip
     await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "risk-brief",
-        layoutKey: "two-column",
-        order: 550,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "The Stress-Free Remodel: How We Eliminate Common Risks",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          leftHeader: "Why Remodels Go Wrong",
-          leftBullets: [
-            "Too many separate contractors means no single person is accountable.",
-            "Designs get approved before anyone confirms they fit the budget.",
-            "Hidden problems get discovered mid-construction, stalling everything.",
-          ],
-          rightHeader: "How We Prevent That",
-          rightBullets: [
-            "One team handles design and construction from start to finish.",
-            "Your budget is set before a single detail is finalized.",
-            "We identify and resolve potential issues before work ever begins.",
-          ],
-          rowLabels: ["Accountability", "Budgeting", "Design"],
-          bottomStatement:
-            "You'll know exactly what's being built, what it costs, and what to expect — before construction starts.",
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("process")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "process",
-        layoutKey: "three-stages",
-        order: 560,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Our Process: From Vision to Finished Home",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          stages: [
-            {
-              name: "Discovery & Design",
-              bullets: [
-                "We learn your goals, priorities, and how you use your space.",
-                "Scope and early budget direction are established upfront.",
-                "Potential issues are identified before they become surprises.",
-              ],
-            },
-            {
-              name: "Plan & Select",
-              bullets: [
-                "Layouts, materials, and finishes are finalized to match your vision.",
-                "Every selection is reviewed against your target investment.",
-                "A complete, build-ready plan is approved before construction begins.",
-              ],
-            },
-            {
-              name: "Build & Deliver",
-              bullets: [
-                "A dedicated project team executes the work from start to finish.",
-                "You receive regular updates so you always know what's happening.",
-                "Your home is returned clean, complete, and ready to enjoy.",
-              ],
-            },
-          ],
-          bottomStatement:
-            "Every detail is planned before we break ground—so the build stays on schedule, on budget, and free of surprises.",
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("core-values")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "core-values",
-        layoutKey: cvDefaults?.defaultLayout ?? "cards-row",
-        order: 570,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: cvDefaults?.defaultHeadline ?? "Built on a Foundation of Values",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: cvDefaults?.defaultSectionLabel ?? "WHO WE ARE",
-          values: cvDefaults?.defaultValues ?? [],
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("project-timeline")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "project-timeline",
-        layoutKey: "vertical-dot",
-        order: 575,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Projected Timeline",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: "YOUR PROJECT",
-          phases: buildProjectPhases([]),
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("cope-page")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "cope-page",
-        layoutKey: copeDefaults?.defaultLayout ?? "icon-columns",
-        order: 580,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: copeDefaults?.defaultHeadline ?? "The Cost of Project Execution",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: copeDefaults?.defaultSectionLabel ?? "WHAT\u2019S INCLUDED",
-          subheadline: copeDefaults?.defaultSubheadline ?? null,
-          items: copeDefaults?.defaultItems ?? [],
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("design-retainer")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "design-retainer",
-        layoutKey: "centered-hero",
-        order: 590,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Your Design Retainer",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: "DESIGN RETAINER",
-          tagline: "Your investment in certainty before construction begins.",
-          retainerAmount: "$22,000",
-          benefits: [
-            "Full architectural design and space planning",
-            "HOA / ARB submission and approval management",
-            "Complete material and finish specifications",
-            "Fixed-price build contract before construction begins",
-          ],
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("next-steps")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "next-steps",
-        layoutKey: nextStepsDefaults?.defaultLayout ?? "numbered-photo",
-        order: 700,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: nextStepsDefaults?.defaultHeadline ?? "Your Path Forward",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          sectionLabel: nextStepsDefaults?.defaultSectionLabel ?? "WHAT HAPPENS NEXT",
-          contactEmail: nextStepsDefaults?.defaultContactEmail ?? null,
-          contactPhone: nextStepsDefaults?.defaultContactPhone ?? null,
-          steps: nextStepsDefaults?.defaultSteps ?? [],
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("closing-slide")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "closing-slide",
-        layoutKey: "dark-centered",
-        order: 900,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Let\u2019s Build Something Extraordinary",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          tagline: "Design. Build. Remodel.",
-          validityNote: "This proposal is valid for 30 days.",
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("visual-inspiration")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "visual-inspiration",
-        layoutKey: "hero-plus-stacked",
-        order: 250,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "Design Inspiration",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          subtitle: "A curated vision for your space.",
-          photos: [],
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("client-testimonials")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "client-testimonials",
-        layoutKey: "quote-cards",
-        order: 565,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: "What Our Clients Say",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          showStars: true,
-          testimonials: [],
-        } as any,
-      },
-    });
-  }
-
-  if (!types.has("design-build-advantage")) {
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "design-build-advantage",
-        layoutKey: designBuildDefaults?.defaultLayout ?? "icon-cards",
-        order: 555,
-        isEnabled: true,
-        isLocked: false,
-        source: "manual",
-        headline: designBuildDefaults?.defaultHeadline ?? "The Design-Build Advantage",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: {
-          pillars: designBuildDefaults?.defaultPillars ?? [],
-          guarantees: designBuildDefaults?.defaultGuarantees ?? [],
-          diagramNodes: designBuildDefaults?.defaultDiagramNodes ?? [],
-          supportColumns: designBuildDefaults?.defaultSupportColumns ?? [],
-        } as any,
-      },
+      data: { deckId, ...row },
     });
   }
 }
@@ -1048,15 +882,32 @@ export async function getDeckForProject({
     orderBy: { order: "asc" },
   });
 
-  // Load global core values defaults once for seeding/backfill.
+  // Load global defaults once for seeding/backfill.
   const cvDefaults = await getCoreValuesDefaults();
   const copeDefaults = await getCopeDefaults();
   const nextStepsDefaults = await getNextStepsDefaults();
   const designBuildDefaults = await getDesignBuildDefaults();
 
+  const seedCtx: SeedContext = {
+    projectTitle,
+    clientName,
+    address,
+    cvDefaults,
+    copeDefaults,
+    nextStepsDefaults,
+    designBuildDefaults,
+  };
+
+  // Project shape for the default-deck spec. hasAddition is added in T4 —
+  // read it off the project if present, otherwise default to false.
+  const projectSpec: ProjectForDeckSpec = {
+    rooms: roomsWithMedia.map((r) => ({ id: r.id })),
+    hasAddition: false,
+  };
+
   // Seed defaults for a brand-new deck.
   if (existing.length === 0) {
-    await seedDefaultSlides(deck.id, projectTitle, clientName, address, cvDefaults, copeDefaults, nextStepsDefaults, designBuildDefaults);
+    await seedDefaultSlides(deck.id, projectSpec, seedCtx);
     existing = await prisma.deckSlide.findMany({
       where: { deckId: deck.id },
       orderBy: { order: "asc" },
@@ -1064,7 +915,7 @@ export async function getDeckForProject({
   }
 
   // Backfill any default slides added after this deck was initially seeded.
-  await backfillMissingDefaults(deck.id, existing, cvDefaults, copeDefaults, nextStepsDefaults, designBuildDefaults);
+  await backfillMissingDefaults(deck.id, existing, projectSpec, seedCtx);
 
   // Auto-sync auto-generated slide types.
   await syncBeforeAfterSlides(deck.id, existing, roomsWithMedia);
