@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
-import { updateProjectOverviewAction, updateProjectTranscriptAction, type OverviewFieldErrors } from "./actions";
+import { updateProjectOverviewAction, updateProjectTranscriptAction, updateProjectHasAdditionAction, type OverviewFieldErrors } from "./actions";
 import { generateOverviewFromTranscriptAction } from "./generate-overview-action";
 import { AddressAutocomplete } from "./address-autocomplete";
 
@@ -104,6 +104,7 @@ type Props = {
     bullets: string[];
     scopeOverview: string | null;
     coverHeroImageId: string | null;
+    hasAddition: boolean;
   };
 };
 
@@ -143,6 +144,8 @@ export function OverviewTab({ projectId, project }: Props) {
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [saveFieldErrors, setSaveFieldErrors] = useState<OverviewFieldErrors | null>(null);
   const [appliedToast, setAppliedToast] = useState(false);
+  const [hasAddition, setHasAddition] = useState<boolean>(project.hasAddition);
+  const [hasAdditionSaving, setHasAdditionSaving] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const DEBOUNCE_MS = 800;
@@ -995,6 +998,36 @@ export function OverviewTab({ projectId, project }: Props) {
               Not yet generated — click Generate Overview to create from your room scopes.
             </p>
           )}
+        </div>
+
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={hasAddition}
+              disabled={hasAdditionSaving}
+              onChange={async (e) => {
+                const next = e.target.checked;
+                setHasAddition(next);
+                setHasAdditionSaving(true);
+                const result = await updateProjectHasAdditionAction(projectId, next);
+                setHasAdditionSaving(false);
+                if (result.error) {
+                  setHasAddition(!next);
+                }
+              }}
+              className="mt-0.5 rounded border-zinc-300 dark:border-zinc-600"
+            />
+            <span>
+              <span className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                This project includes an addition
+              </span>
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                Controls whether the Addition Overview slide appears in default decks.
+                {hasAdditionSaving && <span className="ml-2 text-zinc-400">Saving…</span>}
+              </span>
+            </span>
+          </label>
         </div>
 
         <button

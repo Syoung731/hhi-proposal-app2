@@ -108,6 +108,7 @@ export function ProjectTabs({
               bullets: project.bullets,
               scopeOverview: project.scopeOverview,
               coverHeroImageId: project.coverHeroImageId,
+              hasAddition: project.hasAddition,
             }}
           />
         )}

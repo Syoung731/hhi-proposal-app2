@@ -88,6 +88,9 @@ model Project {
   retainerRoundTo  Int     @default(1000)
   retainerOverride Int?
 
+  // Scope flag: when true, the default deck includes an Addition Overview slide.
+  hasAddition Boolean @default(false)
+
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])

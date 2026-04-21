@@ -70,6 +70,7 @@ export async function generateDefaultDeckAction(
         state: true,
         zip: true,
         coverHeroImageId: true,
+        hasAddition: true,
         media: { select: { id: true, url: true, kind: true }, orderBy: { sortOrder: "asc" } },
       },
     });
@@ -160,7 +161,7 @@ export async function generateDefaultDeckAction(
       clientName,
       address,
       roomsWithMedia,
-      hasAddition: false, // T4 will wire this up from project.hasAddition
+      hasAddition: project.hasAddition,
       mode,
     });
 
@@ -249,6 +250,7 @@ export async function refreshDeckAction(
         state: true,
         zip: true,
         coverHeroImageId: true,
+        hasAddition: true,
         media: { select: { id: true, url: true, kind: true }, orderBy: { sortOrder: "asc" } },
       },
     });
@@ -348,6 +350,7 @@ export async function refreshDeckAction(
       clientName,
       address,
       roomsWithMedia,
+      hasAddition: project.hasAddition,
     });
 
     // 6. Inject live coverHeroUrl into cover slides.

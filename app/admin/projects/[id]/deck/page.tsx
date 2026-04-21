@@ -52,6 +52,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       state: true,
       zip: true,
       coverHeroImageId: true,
+      hasAddition: true,
       media: {
         select: { id: true, url: true, kind: true },
         orderBy: { sortOrder: "asc" },
@@ -308,6 +309,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
     clientName,
     address,
     roomsWithMedia: projectRoomsWithMedia,
+    hasAddition: project.hasAddition,
   });
 
   // Inject the live cover hero URL into every cover slide.

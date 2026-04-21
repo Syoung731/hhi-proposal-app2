@@ -102,6 +102,28 @@ export async function updateProjectOverviewAction(
   return {};
 }
 
+/**
+ * Toggle `project.hasAddition`. Drives whether the Addition Overview slide
+ * is included in the default deck spec. Saved immediately (no form submit).
+ */
+export async function updateProjectHasAdditionAction(
+  projectId: string,
+  value: boolean,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  try {
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { hasAddition: value },
+    });
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/deck`);
+    return {};
+  } catch (err) {
+    return { error: String(err) };
+  }
+}
+
 export async function updateProjectStylePresetAction(
   projectId: string,
   stylePresetId: string | null
