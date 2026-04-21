@@ -22,8 +22,8 @@ export async function GET(
     }
     const headers = new Headers();
     headers.set("Content-Type", upstream.headers.get("Content-Type") || "application/pdf");
-    const disposition = upstream.headers.get("Content-Disposition");
-    if (disposition) headers.set("Content-Disposition", disposition);
+    // Force inline display (Rendr sends "attachment" which triggers download)
+    headers.set("Content-Disposition", "inline");
     headers.set("Cache-Control", "private, max-age=3600");
 
     return new NextResponse(upstream.body, { status: 200, headers });
