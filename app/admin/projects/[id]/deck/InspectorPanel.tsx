@@ -5996,8 +5996,32 @@ function VisualInspirationInspector({
     photos.length > guidance.max ? `Maximum ${guidance.max} photos recommended (have ${photos.length})` :
     null;
 
+  // Phase 8A T7: when false, Regenerate Default Deck (replace-all) skips
+  // this slide. Addable manually via + Add Slide regardless.
+  const showByDefault = content.showByDefault ?? true;
+
   return (
     <>
+      {/* ── INCLUDE IN DEFAULT DECK (T7) ───────────────── */}
+      <SectionLabel>Default deck inclusion</SectionLabel>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", marginBottom: 14 }}>
+        <input
+          type="checkbox"
+          checked={showByDefault}
+          onChange={(e) => updateContent({ showByDefault: e.target.checked })}
+          style={{ marginTop: 3 }}
+        />
+        <span style={{ fontSize: 11, lineHeight: 1.45, color: "#374151" }}>
+          Include in Generate Default Deck
+          <span style={{ display: "block", fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>
+            Uncheck to keep this slide out of regenerated default decks.
+            Manual + Add Slide still works.
+          </span>
+        </span>
+      </label>
+
+      {PF_GROUP_DIVIDER}
+
       {/* ── HEADLINE — Layouts A and C ────────────────── */}
       {(layoutKey === "hero-plus-stacked" || layoutKey === "side-by-side-bleed") && (
         <>

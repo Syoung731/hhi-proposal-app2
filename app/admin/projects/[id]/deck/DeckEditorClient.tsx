@@ -51,23 +51,44 @@ function generateId() {
   return `slide-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-const ADD_SLIDE_OPTIONS: { type: SlideType; label: string }[] = [
-  { type: "cover",            label: "+ Cover"           },
-  { type: "objective",        label: "+ Objective"       },
-  { type: "investment",       label: "+ Investment"      },
-  { type: "why-us",           label: "+ Why Us"          },
-  { type: "scope-overview",   label: "+ Scope Overview"  },
-  { type: "before-after",     label: "+ Before / After"  },
-  { type: "scope-breakdown",  label: "+ Scope Breakdown" },
-  { type: "risk-brief",      label: "+ Risk Brief"      },
-  { type: "process",         label: "+ Our Process"     },
-  { type: "design-retainer", label: "+ Design Retainer" },
-  { type: "next-steps",      label: "+ Next Steps"      },
-  { type: "closing-slide",   label: "+ Closing"          },
-  { type: "visual-inspiration", label: "+ Inspiration"   },
-  { type: "client-testimonials", label: "+ Testimonials" },
-  { type: "design-build-advantage", label: "+ Design-Build" },
-  { type: "addition-overview", label: "+ Addition Overview" },
+type AddSlideGroup = {
+  heading: string;
+  options: { type: SlideType; label: string }[];
+};
+
+// Grouped per Phase 8A T7 — "Default" set matches buildDefaultDeckSpec
+// composition; "Optional" set is everything else that's reclassified out of
+// the default deck but still reachable via + Add Slide.
+const ADD_SLIDE_GROUPS: AddSlideGroup[] = [
+  {
+    heading: "Default",
+    options: [
+      { type: "cover",              label: "+ Cover" },
+      { type: "objective",          label: "+ Objective" },
+      { type: "scope-overview",     label: "+ Scope Overview" },
+      { type: "scope-breakdown",    label: "+ Scope Breakdown" },
+      { type: "before-after",       label: "+ Before / After" },
+      { type: "cope-page",          label: "+ COPE" },
+      { type: "visual-inspiration", label: "+ Inspiration" },
+      { type: "why-us",             label: "+ Why Us" },
+      { type: "project-timeline",   label: "+ Project Timeline" },
+      { type: "investment",         label: "+ Investment" },
+      { type: "design-retainer",    label: "+ Design Retainer" },
+      { type: "next-steps",         label: "+ Next Steps" },
+      { type: "addition-overview",  label: "+ Addition Overview" },
+      { type: "closing-slide",      label: "+ Closing" },
+    ],
+  },
+  {
+    heading: "Optional",
+    options: [
+      { type: "risk-brief",              label: "+ Risk Brief" },
+      { type: "process",                 label: "+ Our Process" },
+      { type: "core-values",             label: "+ Core Values" },
+      { type: "design-build-advantage",  label: "+ Design-Build Advantage" },
+      { type: "client-testimonials",     label: "+ Testimonials" },
+    ],
+  },
 ];
 
 // ─── Add-slide dropdown ───────────────────────────────────────────────────────
@@ -124,41 +145,59 @@ function AddSlideMenu({
             borderRadius: 6,
             overflow: "hidden",
             zIndex: 200,
-            minWidth: 168,
+            minWidth: 210,
             boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
           }}
         >
-          {ADD_SLIDE_OPTIONS.map((opt, i) => (
-            <button
-              key={opt.type}
-              onClick={() => {
-                onAdd(opt.type);
-                setOpen(false);
-              }}
-              className="w-full text-left"
-              style={{
-                display: "block",
-                width: "100%",
-                padding: "8px 14px",
-                background: "transparent",
-                color: "#CBD5E1",
-                border: "none",
-                borderTop: i === 0 ? "none" : "1px solid #253040",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 500,
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "#2D3F50";
-                (e.currentTarget as HTMLButtonElement).style.color = "#E2E8F0";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                (e.currentTarget as HTMLButtonElement).style.color = "#CBD5E1";
-              }}
-            >
-              {opt.label}
-            </button>
+          {ADD_SLIDE_GROUPS.map((group, gi) => (
+            <div key={group.heading}>
+              <div
+                style={{
+                  padding: "7px 14px 5px",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "#64748B",
+                  background: "#17222D",
+                  borderTop: gi === 0 ? "none" : "1px solid #253040",
+                }}
+              >
+                {group.heading}
+              </div>
+              {group.options.map((opt) => (
+                <button
+                  key={opt.type}
+                  onClick={() => {
+                    onAdd(opt.type);
+                    setOpen(false);
+                  }}
+                  className="w-full text-left"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "8px 14px",
+                    background: "transparent",
+                    color: "#CBD5E1",
+                    border: "none",
+                    borderTop: "1px solid #253040",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 500,
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = "#2D3F50";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#E2E8F0";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#CBD5E1";
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}

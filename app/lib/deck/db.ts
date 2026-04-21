@@ -990,9 +990,26 @@ export async function regenerateDefaultDeck({
   };
 
   if (mode === "replace-all") {
+    // Capture per-slide user overrides that should survive the nuke.
+    // Visual Inspiration has a `showByDefault` flag (Phase 8A T7): when the
+    // user set it to false on a prior slide, we honor it by removing the
+    // seeded slide post-seed.
+    const priorViz = await prisma.deckSlide.findFirst({
+      where: { deckId: deck.id, type: "visual-inspiration" },
+      select: { content: true },
+    });
+    const vizShowByDefault =
+      (priorViz?.content as { showByDefault?: boolean } | null)?.showByDefault;
+
     // Nuke everything and re-seed from scratch.
     await prisma.deckSlide.deleteMany({ where: { deckId: deck.id } });
     await seedDefaultSlides(deck.id, projectSpec, seedCtx);
+
+    if (vizShowByDefault === false) {
+      await prisma.deckSlide.deleteMany({
+        where: { deckId: deck.id, type: "visual-inspiration" },
+      });
+    }
   } else {
     // keep-manual: drop auto-sync slides (they'll be re-created) but
     // preserve every manual/edited slide.

@@ -1286,6 +1286,12 @@ export interface VisualInspirationContent extends SharedSlideFields {
   heroPhoto?: string | null;
   /** Photo URLs selected from the photo library. */
   photos?: string[];
+  /**
+   * When false, the Visual Inspiration slide is skipped when regenerating
+   * the default deck (Phase 8A T7). The slide can still be added manually
+   * from the + Add Slide dropdown. Default when absent = true.
+   */
+  showByDefault?: boolean;
 
   // ── Per-field: Headline ──────────────────────────────────────────────────
   headlineSize?: number | null;
