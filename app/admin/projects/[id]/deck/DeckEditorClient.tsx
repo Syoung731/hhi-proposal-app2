@@ -13,7 +13,7 @@ import type {
   ScopeBreakdownRoom,
   TextZoneSetting,
 } from "@/app/lib/deck/types";
-import { saveDeckSlidesAction, refreshDeckAction } from "./actions";
+import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction } from "./actions";
 import { SlideRail } from "./SlideRail";
 import { SlideCanvas } from "./SlideCanvas";
 import { InspectorPanel } from "./InspectorPanel";
@@ -40,6 +40,11 @@ interface Props {
   brandBackgrounds?: BrandBackgroundForUI[];
   /** Whether Rendr integration is configured — controls tab nav visibility. */
   rendrConfigured?: boolean;
+  /**
+   * Precondition status for the "Generate Default Deck" button. When `ok`
+   * is false, the button is disabled and `missing` populates the tooltip.
+   */
+  canGenerateDefaultDeck?: { ok: boolean; missing: string[] };
 }
 
 function generateId() {
@@ -272,6 +277,139 @@ function AutoBeforeAfterMenu({
   );
 }
 
+// ─── Generate Default Deck button + confirm modal ────────────────────────────
+
+function GenerateDeckButton({
+  disabled,
+  disabledReason,
+  onClick,
+  busy,
+}: {
+  disabled: boolean;
+  disabledReason: string;
+  onClick: () => void;
+  busy: boolean;
+}) {
+  return (
+    <button
+      onClick={() => !disabled && !busy && onClick()}
+      className="rounded"
+      title={disabled ? disabledReason : "Populate this deck with the default slide set"}
+      style={{
+        fontSize: 11,
+        fontWeight: 500,
+        padding: "4px 10px",
+        background: disabled ? "#1E2D3A" : "#2D3F50",
+        color: disabled ? "#475569" : "#94A3B8",
+        border: `1px solid ${disabled ? "#1E2D3A" : "#334155"}`,
+        cursor: disabled ? "not-allowed" : busy ? "wait" : "pointer",
+        opacity: busy ? 0.7 : 1,
+        userSelect: "none",
+      }}
+    >
+      {busy ? "Generating…" : "Generate Default Deck"}
+    </button>
+  );
+}
+
+function ConfirmRegenerateModal({
+  onClose,
+  onKeepManual,
+  onReplaceAll,
+}: {
+  onClose: () => void;
+  onKeepManual: () => void;
+  onReplaceAll: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#1E2D3A",
+          border: "1px solid #334155",
+          borderRadius: 8,
+          padding: 24,
+          maxWidth: 460,
+          boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
+        }}
+      >
+        <h2 style={{ color: "#E2E8F0", fontSize: 16, fontWeight: 600, marginBottom: 10 }}>
+          Regenerate default deck?
+        </h2>
+        <p style={{ color: "#94A3B8", fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>
+          This deck already has slides. Choose how to regenerate:
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button
+            onClick={onKeepManual}
+            style={{
+              padding: "10px 14px",
+              background: "#2D3F50",
+              color: "#E2E8F0",
+              border: "1px solid #475569",
+              borderRadius: 6,
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: 13,
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>Keep manual, regenerate auto</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>
+              Preserves every slide you have and adds any missing defaults.
+            </div>
+          </button>
+          <button
+            onClick={onReplaceAll}
+            style={{
+              padding: "10px 14px",
+              background: "#3A1F1F",
+              color: "#FECACA",
+              border: "1px solid #7F1D1D",
+              borderRadius: 6,
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: 13,
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>Replace everything</div>
+            <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>
+              Deletes all slides and re-seeds from the default spec. User edits are lost.
+            </div>
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "9px 14px",
+              background: "transparent",
+              color: "#94A3B8",
+              border: "1px solid #334155",
+              borderRadius: 6,
+              cursor: "pointer",
+              textAlign: "center",
+              fontSize: 13,
+              marginTop: 4,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DeckEditorClient({
   initialSlides,
   branding,
@@ -283,6 +421,7 @@ export function DeckEditorClient({
   projectLevelMedia = [],
   brandBackgrounds = [],
   rendrConfigured = false,
+  canGenerateDefaultDeck,
 }: Props) {
   const [slides, setSlides] = useState<ProposalSlide[]>(
     [...initialSlides].sort((a, b) => a.order - b.order)
@@ -295,9 +434,54 @@ export function DeckEditorClient({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Generate Default Deck state ───────────────────────────────────────────
+  const [generating, setGenerating] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [generateStatus, setGenerateStatus] = useState<string | null>(null);
+
+  const runGeneration = useCallback(
+    async (mode: "keep-manual" | "replace-all") => {
+      setConfirmOpen(false);
+      setGenerating(true);
+      setGenerateStatus(null);
+      const result = await generateDefaultDeckAction(projectId, mode);
+      setGenerating(false);
+      if (result.error) {
+        setGenerateStatus(`Error: ${result.error}`);
+        setTimeout(() => setGenerateStatus(null), 5000);
+        return;
+      }
+      const sorted = result.slides.sort((a, b) => a.order - b.order);
+      setSlides(sorted);
+      if (sorted[0]) setActiveSlideId(sorted[0].id);
+      setGenerateStatus(
+        slides.length === 0 ? "Default deck generated" : "Default deck regenerated"
+      );
+      setTimeout(() => setGenerateStatus(null), 3000);
+    },
+    [projectId, slides.length]
+  );
+
+  const handleGenerateClick = useCallback(() => {
+    // Empty deck: silent generate. Any slides at all: ask.
+    if (slides.length === 0) {
+      void runGeneration("replace-all");
+      return;
+    }
+    setConfirmOpen(true);
+  }, [slides.length, runGeneration]);
+
+  const preconditions = canGenerateDefaultDeck ?? { ok: true, missing: [] };
+  const generateDisabled = !preconditions.ok;
+  const generateDisabledReason = preconditions.ok
+    ? ""
+    : `Cannot generate: missing ${preconditions.missing.join(", ")}.`;
+
   // Auto-save: debounced 2 s after any slide state change.
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    // Skip auto-save on an empty deck — there's nothing to persist.
+    if (slides.length === 0) return;
     saveTimerRef.current = setTimeout(async () => {
       setSaveStatus("saving");
       const result = await saveDeckSlidesAction(projectId, slides);
@@ -820,6 +1004,24 @@ export function DeckEditorClient({
         onAutoGenScope={autoGenScopeBreakdown}
         accentColor={branding.accentColor}
       />
+      <GenerateDeckButton
+        disabled={generateDisabled}
+        disabledReason={generateDisabledReason}
+        onClick={handleGenerateClick}
+        busy={generating}
+      />
+      {generateStatus && (
+        <span
+          style={{
+            fontSize: 11,
+            color: generateStatus.startsWith("Error") ? "#FCA5A5" : "#86EFAC",
+            alignSelf: "center",
+            marginLeft: 4,
+          }}
+        >
+          {generateStatus}
+        </span>
+      )}
       <button
         onClick={async () => {
           if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -868,43 +1070,118 @@ export function DeckEditorClient({
         stickyTop={112}
       />
 
-      {/* ── Three-column editor layout ───────────────────────────────────── */}
-      <div
-        className="flex overflow-hidden"
-        style={{ background: "#F4F3F0", height: "calc(100vh - 160px)" }}
-      >
-        {/* Left — slide rail */}
-        <SlideRail
-          slides={slides}
-          activeSlideId={activeSlideId}
-          branding={branding}
-          onSelect={setActiveSlideId}
-          onReorder={reorderSlides}
-          onToggleEnabled={toggleEnabled}
-          brandBackgrounds={brandBackgrounds}
-        />
+      {/* ── Three-column editor layout or empty state ──────────────────── */}
+      {slides.length === 0 ? (
+        <div
+          className="flex items-center justify-center"
+          style={{ background: "#F4F3F0", height: "calc(100vh - 160px)" }}
+        >
+          <div
+            style={{
+              maxWidth: 460,
+              textAlign: "center",
+              padding: 32,
+              background: "#FFFFFF",
+              border: "1px solid #E5E4DE",
+              borderRadius: 10,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.04)",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 20,
+                fontWeight: 600,
+                color: "#1A2332",
+                marginBottom: 10,
+                fontFamily: "Cormorant Garamond, serif",
+              }}
+            >
+              No slides yet
+            </h2>
+            <p style={{ fontSize: 14, color: "#5A5A5A", lineHeight: 1.5, marginBottom: 22 }}>
+              Generate a default deck for this project, or add slides individually
+              from the toolbar.
+            </p>
+            <button
+              onClick={handleGenerateClick}
+              disabled={generateDisabled || generating}
+              title={generateDisabled ? generateDisabledReason : ""}
+              style={{
+                padding: "10px 22px",
+                background: generateDisabled ? "#D4D4D4" : branding.accentColor,
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: 6,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: generateDisabled
+                  ? "not-allowed"
+                  : generating
+                  ? "wait"
+                  : "pointer",
+                opacity: generating ? 0.75 : 1,
+              }}
+            >
+              {generating ? "Generating…" : "Generate Default Deck"}
+            </button>
+            {generateDisabled && (
+              <p style={{ fontSize: 12, color: "#9A9A9A", marginTop: 14, lineHeight: 1.5 }}>
+                Missing: {preconditions.missing.join(", ")}.
+              </p>
+            )}
+            {generateStatus && generateStatus.startsWith("Error") && (
+              <p style={{ fontSize: 12, color: "#DC2626", marginTop: 14 }}>
+                {generateStatus}
+              </p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div
+          className="flex overflow-hidden"
+          style={{ background: "#F4F3F0", height: "calc(100vh - 160px)" }}
+        >
+          {/* Left — slide rail */}
+          <SlideRail
+            slides={slides}
+            activeSlideId={activeSlideId}
+            branding={branding}
+            onSelect={setActiveSlideId}
+            onReorder={reorderSlides}
+            onToggleEnabled={toggleEnabled}
+            brandBackgrounds={brandBackgrounds}
+          />
 
-        {/* Center — canvas */}
-        <SlideCanvas slide={activeSlide} branding={branding} brandBackgrounds={brandBackgrounds} />
+          {/* Center — canvas */}
+          <SlideCanvas slide={activeSlide} branding={branding} brandBackgrounds={brandBackgrounds} />
 
-        {/* Right — inspector */}
-        <InspectorPanel
-          slide={activeSlide}
-          branding={branding}
-          projectId={projectId}
-          onUpdate={updateSlide}
-          onDuplicate={duplicateSlide}
-          onRemove={removeSlide}
-          onToggleEnabled={toggleEnabled}
-          projectRoomsWithMedia={projectRoomsWithMedia}
-          projectLevelMedia={projectLevelMedia}
-          brandBackgrounds={brandBackgrounds}
-          onBackgroundChange={handleBackgroundChange}
-          onTextZoneChange={handleTextZoneChange}
-          onAiBackgroundChange={handleAiBackgroundChange}
-          onResyncInvestment={handleResyncInvestment}
+          {/* Right — inspector */}
+          <InspectorPanel
+            slide={activeSlide}
+            branding={branding}
+            projectId={projectId}
+            onUpdate={updateSlide}
+            onDuplicate={duplicateSlide}
+            onRemove={removeSlide}
+            onToggleEnabled={toggleEnabled}
+            projectRoomsWithMedia={projectRoomsWithMedia}
+            projectLevelMedia={projectLevelMedia}
+            brandBackgrounds={brandBackgrounds}
+            onBackgroundChange={handleBackgroundChange}
+            onTextZoneChange={handleTextZoneChange}
+            onAiBackgroundChange={handleAiBackgroundChange}
+            onResyncInvestment={handleResyncInvestment}
+          />
+        </div>
+      )}
+
+      {confirmOpen && (
+        <ConfirmRegenerateModal
+          onClose={() => setConfirmOpen(false)}
+          onKeepManual={() => void runGeneration("keep-manual")}
+          onReplaceAll={() => void runGeneration("replace-all")}
         />
-      </div>
+      )}
     </div>
   );
 }

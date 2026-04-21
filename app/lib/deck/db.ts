@@ -845,11 +845,15 @@ async function backfillMissingDefaults(
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Main entry point.
+ * Main entry point. Reads the deck for a project — does NOT generate a
+ * default deck automatically.
  *
  * 1. Upserts the ProposalDeck record for this project.
- * 2. Seeds 5 default slides if the deck is brand-new.
- * 3. Auto-syncs Before/After and Scope Breakdown slides from room data.
+ * 2. If the deck is empty, returns an empty slide list. The user must click
+ *    "Generate Default Deck" on the editor to populate it.
+ * 3. If the deck has slides, runs backfill (add missing default types) and
+ *    auto-sync (before-after, scope-breakdown, investment, timeline,
+ *    retainer) so the deck stays current with project state.
  * 4. Returns all visible slides sorted by order.
  *
  * The caller (page.tsx) is responsible for injecting live data that changes
@@ -862,12 +866,14 @@ export async function getDeckForProject({
   clientName,
   address,
   roomsWithMedia,
+  hasAddition,
 }: {
   projectId: string;
   projectTitle: string;
   clientName: string | null;
   address: string | null;
   roomsWithMedia: RoomWithMedia[];
+  hasAddition?: boolean;
 }): Promise<ProposalSlide[]> {
   // Upsert deck record.
   const deck = await prisma.proposalDeck.upsert({
@@ -877,12 +883,18 @@ export async function getDeckForProject({
   });
 
   // Fetch all slides for this deck.
-  let existing = await prisma.deckSlide.findMany({
+  const existing = await prisma.deckSlide.findMany({
     where: { deckId: deck.id },
     orderBy: { order: "asc" },
   });
 
-  // Load global defaults once for seeding/backfill.
+  // Empty deck: return an empty list. The user will populate it by clicking
+  // "Generate Default Deck" on the editor.
+  if (existing.length === 0) {
+    return [];
+  }
+
+  // Load global defaults once for backfill.
   const cvDefaults = await getCoreValuesDefaults();
   const copeDefaults = await getCopeDefaults();
   const nextStepsDefaults = await getNextStepsDefaults();
@@ -898,21 +910,10 @@ export async function getDeckForProject({
     designBuildDefaults,
   };
 
-  // Project shape for the default-deck spec. hasAddition is added in T4 —
-  // read it off the project if present, otherwise default to false.
   const projectSpec: ProjectForDeckSpec = {
     rooms: roomsWithMedia.map((r) => ({ id: r.id })),
-    hasAddition: false,
+    hasAddition: hasAddition ?? false,
   };
-
-  // Seed defaults for a brand-new deck.
-  if (existing.length === 0) {
-    await seedDefaultSlides(deck.id, projectSpec, seedCtx);
-    existing = await prisma.deckSlide.findMany({
-      where: { deckId: deck.id },
-      orderBy: { order: "asc" },
-    });
-  }
 
   // Backfill any default slides added after this deck was initially seeded.
   await backfillMissingDefaults(deck.id, existing, projectSpec, seedCtx);
@@ -930,6 +931,96 @@ export async function getDeckForProject({
     orderBy: { order: "asc" },
   });
 
+  return final.map(dbToSlide);
+}
+
+/**
+ * Manually generate (or regenerate) the default deck for a project.
+ *
+ * Two modes:
+ *  - 'replace-all': delete every slide and re-seed from buildDefaultDeckSpec.
+ *    User edits and manually-added slides are lost.
+ *  - 'keep-manual': preserve all slides with isUserModified=true or
+ *    source='manual'. Delete only auto-synced slides (they'll be re-created
+ *    by sync). Add any default-spec slides that are missing.
+ *
+ * Auto-sync runs at the end in both modes.
+ */
+export async function regenerateDefaultDeck({
+  projectId,
+  projectTitle,
+  clientName,
+  address,
+  roomsWithMedia,
+  hasAddition,
+  mode,
+}: {
+  projectId: string;
+  projectTitle: string;
+  clientName: string | null;
+  address: string | null;
+  roomsWithMedia: RoomWithMedia[];
+  hasAddition?: boolean;
+  mode: "keep-manual" | "replace-all";
+}): Promise<ProposalSlide[]> {
+  const deck = await prisma.proposalDeck.upsert({
+    where: { projectId },
+    create: { projectId },
+    update: {},
+  });
+
+  const cvDefaults = await getCoreValuesDefaults();
+  const copeDefaults = await getCopeDefaults();
+  const nextStepsDefaults = await getNextStepsDefaults();
+  const designBuildDefaults = await getDesignBuildDefaults();
+
+  const seedCtx: SeedContext = {
+    projectTitle,
+    clientName,
+    address,
+    cvDefaults,
+    copeDefaults,
+    nextStepsDefaults,
+    designBuildDefaults,
+  };
+
+  const projectSpec: ProjectForDeckSpec = {
+    rooms: roomsWithMedia.map((r) => ({ id: r.id })),
+    hasAddition: hasAddition ?? false,
+  };
+
+  if (mode === "replace-all") {
+    // Nuke everything and re-seed from scratch.
+    await prisma.deckSlide.deleteMany({ where: { deckId: deck.id } });
+    await seedDefaultSlides(deck.id, projectSpec, seedCtx);
+  } else {
+    // keep-manual: drop auto-sync slides (they'll be re-created) but
+    // preserve every manual/edited slide.
+    await prisma.deckSlide.deleteMany({
+      where: { deckId: deck.id, source: "auto" },
+    });
+    const remaining = await prisma.deckSlide.findMany({
+      where: { deckId: deck.id },
+      orderBy: { order: "asc" },
+    });
+    await backfillMissingDefaults(deck.id, remaining, projectSpec, seedCtx);
+  }
+
+  // Re-read after seeding/backfill so sync sees the current state.
+  const afterSeed = await prisma.deckSlide.findMany({
+    where: { deckId: deck.id },
+    orderBy: { order: "asc" },
+  });
+  await syncBeforeAfterSlides(deck.id, afterSeed, roomsWithMedia);
+  await syncScopeBreakdownSlide(deck.id, afterSeed, roomsWithMedia);
+  await syncInvestmentSlide(deck.id, projectId, afterSeed);
+  await syncProjectTimelineSlide(deck.id, projectId, afterSeed);
+  await syncRetainerFromProject(deck.id, projectId, afterSeed);
+
+  const final = await prisma.deckSlide.findMany({
+    where: { deckId: deck.id, isUserHidden: false },
+    orderBy: { order: "asc" },
+  });
   return final.map(dbToSlide);
 }
 

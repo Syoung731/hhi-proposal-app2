@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/app/lib/prisma";
-import { getDeckForProject, saveAllSlides } from "@/app/lib/deck/db";
+import { getDeckForProject, regenerateDefaultDeck, saveAllSlides } from "@/app/lib/deck/db";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import type { ProposalSlide, WhyUsPillarItem, WhyUsContent, AdditionBullet } from "@/app/lib/deck/types";
@@ -39,6 +39,180 @@ export async function saveDeckSlidesAction(
   } catch (err) {
     console.error("[saveDeckSlidesAction]", err);
     return { ok: false, error: String(err) };
+  }
+}
+
+// ─── generateDefaultDeckAction ────────────────────────────────────────────────
+
+/**
+ * Server-side entry point for the "Generate Default Deck" button.
+ *
+ * Validates preconditions (≥1 Room, project has a title + client name),
+ * then calls regenerateDefaultDeck() in the chosen mode. Re-injects live
+ * coverHeroUrl and valuePillars into the returned slides so the editor
+ * immediately renders the current state.
+ */
+export async function generateDefaultDeckAction(
+  projectId: string,
+  mode: "keep-manual" | "replace-all"
+): Promise<{ slides: ProposalSlide[]; error?: string }> {
+  try {
+    // Fetch project + preconditions data.
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        id: true,
+        title: true,
+        client1First: true,
+        client1Last: true,
+        addressLine1: true,
+        city: true,
+        state: true,
+        zip: true,
+        coverHeroImageId: true,
+        media: { select: { id: true, url: true, kind: true }, orderBy: { sortOrder: "asc" } },
+      },
+    });
+
+    if (!project) return { slides: [], error: "Project not found" };
+
+    // Precondition checks.
+    const missing: string[] = [];
+    if (!project.title?.trim()) missing.push("project title");
+    if (!project.client1First?.trim() || !project.client1Last?.trim()) {
+      missing.push("primary client name");
+    }
+
+    const roomCount = await prisma.room.count({ where: { projectId } });
+    if (roomCount < 1) missing.push("at least one room");
+
+    if (missing.length > 0) {
+      return {
+        slides: [],
+        error: `Missing required project data: ${missing.join(", ")}.`,
+      };
+    }
+
+    const clientName =
+      [project.client1First, project.client1Last].filter(Boolean).join(" ") || null;
+    const addressParts = [
+      project.addressLine1,
+      project.city,
+      [project.state, project.zip].filter(Boolean).join(" "),
+    ].filter(Boolean);
+    const address = addressParts.length ? addressParts.join(", ") : null;
+    const coverHeroUrl =
+      project.media.find((m) => m.id === project.coverHeroImageId)?.url ??
+      project.media.find((m) => m.kind === "COVER")?.url ??
+      project.media[0]?.url ??
+      null;
+
+    // Fetch rooms with media for the regenerate call.
+    const rawRooms = await prisma.room.findMany({
+      where: { projectId },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        name: true,
+        sortOrder: true,
+        selectedRenderMediaId: true,
+        scopeNarrative: true,
+        isProjectOverhead: true,
+        media: {
+          where: {
+            OR: [{ type: "EXISTING" }, { type: "RENDERING", renderStatus: "DONE" }],
+          },
+          select: { id: true, url: true, kind: true, type: true, renderStatus: true, caption: true, parentMediaId: true, sourceMediaId: true },
+          orderBy: { sortOrder: "asc" },
+        },
+      },
+    });
+
+    const roomsWithMedia = rawRooms.map((room) => ({
+      id: room.id,
+      name: room.name,
+      sortOrder: room.sortOrder,
+      selectedRenderMediaId: room.selectedRenderMediaId,
+      scopeNarrative: room.scopeNarrative ?? undefined,
+      isProjectOverhead: room.isProjectOverhead,
+      beforeMedia: room.media
+        .filter((m) => m.type === "EXISTING")
+        .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption })),
+      renderMedia: (() => {
+        const doneRenders = room.media.filter((m) => m.type === "RENDERING" && m.renderStatus === "DONE");
+        const seenSources = new Set<string>();
+        return doneRenders
+          .filter((m) => {
+            if (m.parentMediaId != null) return true;
+            const key = m.sourceMediaId ?? m.id;
+            if (seenSources.has(key)) return false;
+            seenSources.add(key);
+            return true;
+          })
+          .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption }));
+      })(),
+    }));
+
+    // Regenerate.
+    const slides = await regenerateDefaultDeck({
+      projectId,
+      projectTitle: project.title,
+      clientName,
+      address,
+      roomsWithMedia,
+      hasAddition: false, // T4 will wire this up from project.hasAddition
+      mode,
+    });
+
+    // Inject live cover hero URL.
+    if (coverHeroUrl) {
+      for (const slide of slides) {
+        if (slide.type === "cover") {
+          slide.content = { ...(slide.content ?? {}), heroImageUrl: coverHeroUrl };
+        }
+      }
+    }
+
+    // Inject live value pillars.
+    let valuePillars: WhyUsPillarItem[] = [];
+    try {
+      const company = await prisma.company.findFirst({ orderBy: { createdAt: "asc" } });
+      if (company) {
+        const rawPillars = await prisma.valuePillar.findMany({
+          where: { companyId: company.id },
+          orderBy: { sortOrder: "asc" },
+          include: { brandIcon: { select: { id: true, imageUrl: true } } },
+        });
+        valuePillars = rawPillars.map((p) => ({
+          id: p.id,
+          title: p.title,
+          body: p.body,
+          iconUrl: p.brandIcon?.imageUrl ?? null,
+        }));
+      }
+    } catch {
+      // Non-fatal
+    }
+    if (valuePillars.length > 0) {
+      for (const slide of slides) {
+        if (slide.type === "why-us") {
+          const content = (slide.content ?? {}) as WhyUsContent;
+          slide.content = {
+            ...content,
+            pillars: valuePillars,
+            selectedPillarIds:
+              content.selectedPillarIds && content.selectedPillarIds.length > 0
+                ? content.selectedPillarIds
+                : valuePillars.map((p) => p.id),
+          };
+        }
+      }
+    }
+
+    return { slides };
+  } catch (err) {
+    console.error("[generateDefaultDeckAction]", err);
+    return { slides: [], error: String(err) };
   }
 }
 

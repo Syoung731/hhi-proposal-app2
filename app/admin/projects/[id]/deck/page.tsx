@@ -381,6 +381,18 @@ export default async function DeckEditorPage({ params }: PageProps) {
     };
   }
 
+  // ── Compute Generate Default Deck preconditions ──────────────────────────
+  const missingPreconditions: string[] = [];
+  if (!project.title?.trim()) missingPreconditions.push("project title");
+  if (!project.client1First?.trim() || !project.client1Last?.trim()) {
+    missingPreconditions.push("primary client name");
+  }
+  if (projectRoomsWithMedia.length < 1) missingPreconditions.push("at least one room");
+  const canGenerateDefaultDeck = {
+    ok: missingPreconditions.length === 0,
+    missing: missingPreconditions,
+  };
+
   return (
     <DeckEditorClient
       initialSlides={slides}
@@ -393,6 +405,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       projectLevelMedia={projectLevelMedia}
       brandBackgrounds={brandBackgrounds}
       rendrConfigured={rendrConfigured}
+      canGenerateDefaultDeck={canGenerateDefaultDeck}
     />
   );
 }
