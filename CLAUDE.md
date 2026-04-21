@@ -178,6 +178,57 @@ If `prisma migrate dev` fails with "migration was modified after it was applied"
   5. prints the after row
 - Commit the repair script alongside the fix so the change is auditable in `git log`.
 
+## CatalogSuggestion behavior
+
+The `CatalogSuggestion` table tracks AI-priced line items observed across
+estimates so estimators can promote frequently-occurring items into the
+catalog. Writes go through `upsertCatalogSuggestion()` in
+`app/lib/ai/generate-room-estimate.ts` as a single atomic
+`INSERT ... ON CONFLICT ("itemName") DO UPDATE` statement.
+
+- Running averages (`avgUnitPrice`, `avgUnitCost`) are atomic and race-safe.
+  Postgres holds a row lock across the `DO UPDATE` clause, so concurrent
+  workers (Phase 8B parallel estimate generation) serialize deterministically.
+  The new avg is computed in-statement from the pre-update row values:
+  `newAvg = (oldAvg * oldCount + newValue) / (oldCount + 1)`.
+- `tradeGroup` and `suggestedUnit` are overwritten on every write keyed by
+  `itemName` (last-writer-wins). Accepted behavior — the learning table
+  expects consistent values per item name, and if two rooms disagree on
+  the trade group for the same item, we want the most recent observation.
+- `id` is mixed format across rows: legacy rows created via Prisma's
+  `upsert` have cuid IDs; new rows created through the atomic raw INSERT
+  use `crypto.randomUUID()`. Cosmetic, no action needed — the column is
+  just `String @id` with no format constraint.
+
+## Manual smoke tests
+
+Located at `scripts/smoke/`. These are NOT part of any automated suite; run
+them manually when you want to validate the estimate service or
+`CatalogSuggestion` upsert against the live dev DB / Anthropic API.
+
+- **`scripts/smoke/single-room.ts`** — calls `generateRoomEstimate()` against a
+  real room (`Primary Bedroom` on the Oyster Reef project, Standard Room
+  template). Verifies end-to-end: service extraction, prompt caching wire
+  format, AIEstimate persistence, line-item shape, token usage,
+  stale-reason clearing. Useful after any change to the estimate pipeline,
+  prompt builder, or parser. Expect ~90–120s and ~40 line items.
+- **`scripts/smoke/catalog-suggestion-upsert.ts`** — exercises the atomic
+  `INSERT ... ON CONFLICT DO UPDATE` in `upsertCatalogSuggestion()`. Runs
+  three phases: (1) fresh insert, (2) single-write running-avg math,
+  (3) 10-way parallel upsert race check. Creates and cleans up a synthetic
+  `__smoke_<uuid>` row so it's safe to run against real data. Useful after
+  any change to the upsert SQL, id-generation strategy, or schema for
+  `CatalogSuggestion`.
+
+Run either with:
+
+```bash
+npx dotenv -e .env.local -- node node_modules/tsx/dist/cli.mjs scripts/smoke/<name>.ts
+```
+
+Both scripts print expected-vs-actual comparisons and exit non-zero on math
+drift or lost writes, so they can be wired into a CI gate later if desired.
+
 ## Code Quality Rules
 - Run tsc --noEmit after every set of changes — zero errors required
 - Do not break existing auto-save or hydration pipelines

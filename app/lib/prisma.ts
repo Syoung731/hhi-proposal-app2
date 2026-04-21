@@ -52,7 +52,11 @@ function getPrisma(): PrismaClient {
     "priceCorrection" in cached &&
     cached.priceCorrection !== undefined &&
     "catalogSuggestion" in cached &&
-    cached.catalogSuggestion !== undefined
+    cached.catalogSuggestion !== undefined &&
+    "estimateJob" in cached &&
+    cached.estimateJob !== undefined &&
+    "jobItem" in cached &&
+    cached.jobItem !== undefined
   ) {
     return cached;
   }

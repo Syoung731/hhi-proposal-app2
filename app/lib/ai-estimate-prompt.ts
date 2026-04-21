@@ -301,7 +301,25 @@ export interface ScopeQAData {
   questions?: ScopeQAQuestion[];
 }
 
-export function buildUserPrompt(
+/**
+ * Pieces of the user prompt split along the static/dynamic boundary.
+ *
+ * `dynamicBlock` — varies per room (company/project context, room details,
+ *   scope, clarifications, correction history). Must be sent fresh each call.
+ * `staticBlock`  — stable across calls that share the same roomTemplate
+ *   (template structure + catalog + required JSON output format). Safe to
+ *   mark with `cache_control: { type: "ephemeral" }` so prompt caching hits
+ *   on the second and subsequent rooms of a batch.
+ *
+ * Concatenating `dynamicBlock + "\n\n" + staticBlock` reproduces the legacy
+ * single-string prompt byte-for-byte — see `buildUserPrompt` below.
+ */
+export interface UserPromptParts {
+  dynamicBlock: string;
+  staticBlock: string;
+}
+
+export function buildUserPromptParts(
   roomTemplate: RoomTemplateWithDetails,
   companyContext: CompanyContext,
   scopeNarrative: string,
@@ -313,7 +331,7 @@ export function buildUserPrompt(
   scopeQA?: ScopeQAData | null,
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
-): string {
+): UserPromptParts {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
     items: g.items.filter((item) => item.isActive !== false),
@@ -349,7 +367,7 @@ export function buildUserPrompt(
     ? `\n## Estimation Assumptions\n${companyContext.estimationAssumptions}\n`
     : "";
 
-  return `Generate a detailed line-item budget for this room.
+  const dynamicBlock = `Generate a detailed line-item budget for this room.
 
 ## Company Context
 - Market: ${companyContext.market}
@@ -389,9 +407,9 @@ PRE-CALCULATED VALUES — USE THESE EXACT NUMBERS:
 ${buildKitchenBathSpecsSection(roomDetail, roomDetailType)}
 ${buildClarificationsSection(scopeQA)}
 ## Scope of Work
-${scopeNarrative}
-${correctionHistory ? `\n${correctionHistory}\n` : ""}
-## Room Template Structure
+${scopeNarrative}${correctionHistory ? `\n\n${correctionHistory}` : ""}`;
+
+  const staticBlock = `## Room Template Structure
 This room uses the "${roomTemplate.displayName ?? roomTemplate.name}" template with these trade groups and available catalog items. Items with unitPrice of $0 are ALLOWANCE items — estimate appropriate prices for the finish tier.
 
 ${catalogSection}
@@ -433,6 +451,46 @@ Return ONLY this JSON structure:
     }
   ]
 }`;
+
+  return { dynamicBlock, staticBlock };
+}
+
+/**
+ * Legacy single-string builder — preserved so callers that still send the
+ * prompt as one string (e.g. `/api/ai-estimate/[id]/regenerate`) behave
+ * identically. New call sites should prefer `buildUserPromptParts` so the
+ * static trailing block can be wrapped in a `cache_control` breakpoint.
+ *
+ * The concatenation order (dynamic first, static second) and the `\n\n`
+ * join are chosen to reproduce the pre-split prompt byte-for-byte.
+ */
+export function buildUserPrompt(
+  roomTemplate: RoomTemplateWithDetails,
+  companyContext: CompanyContext,
+  scopeNarrative: string,
+  squareFootage?: number,
+  projectContext?: ProjectContext,
+  roomDimensions?: RoomDimensions,
+  correctionHistory?: string | null,
+  roomMetrics?: EffectiveRoomMetrics | null,
+  scopeQA?: ScopeQAData | null,
+  roomDetail?: Record<string, unknown> | null,
+  roomDetailType?: "kitchen" | "bathroom" | null,
+): string {
+  const { dynamicBlock, staticBlock } = buildUserPromptParts(
+    roomTemplate,
+    companyContext,
+    scopeNarrative,
+    squareFootage,
+    projectContext,
+    roomDimensions,
+    correctionHistory,
+    roomMetrics,
+    scopeQA,
+    roomDetail,
+    roomDetailType,
+  );
+  return `${dynamicBlock}\n\n${staticBlock}`;
 }
 
 // ---------- Scope QA clarifications helper ----------
