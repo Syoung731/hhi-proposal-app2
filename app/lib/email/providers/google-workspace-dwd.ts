@@ -37,6 +37,7 @@ import type {
   SendEmailResult,
   VerifyResult,
 } from "../provider";
+import { extractBareEmail } from "../address-format";
 
 const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 
@@ -98,13 +99,19 @@ export class GoogleWorkspaceDWDProvider implements EmailProvider {
 
   async sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
     const from = params.from.trim();
-    if (!emailEndsWithDomain(from, this.authorizedDomain)) {
+    // `from` may be plain (user@domain) or RFC 5322 with a display name
+    // (Display Name <user@domain>). The authorized-domain guard and the
+    // JWT impersonation subject both require the BARE email — extract it
+    // once and reuse. The full formatted string still flows into the MIME
+    // From: header so recipients see the display name.
+    const bareFrom = extractBareEmail(from);
+    if (!emailEndsWithDomain(bareFrom, this.authorizedDomain)) {
       throw new Error(
-        `Refusing to send: "${from}" is not in authorized domain "${this.authorizedDomain}".`,
+        `Refusing to send: "${bareFrom}" is not in authorized domain "${this.authorizedDomain}".`,
       );
     }
 
-    const client = this.getGmailClient(from);
+    const client = this.getGmailClient(bareFrom);
     const rawMime = buildMimeMessage({ ...params, from });
     // Gmail requires base64URL (not plain base64). Standard base64 breaks on
     // characters used in encoded headers and attachments.

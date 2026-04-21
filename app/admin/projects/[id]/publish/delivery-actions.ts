@@ -34,6 +34,7 @@ import {
   DailyEmailQuotaExceededError,
 } from "@/app/lib/email";
 import { buildEmployeeSignature } from "@/app/lib/email/signature-builder";
+import { formatEmailAddress } from "@/app/lib/email/address-format";
 import {
   renderSnapshotPdf,
   SnapshotNotFoundForPdfError,
@@ -391,17 +392,27 @@ export async function sendProposalByEmail(
     });
   }
 
+  // Format From / Reply-To as "Steve Young <syoung@hhi-builders.com>" so
+  // inbox display names read as a person, not a bare address. The Google
+  // Workspace DWD provider extracts the bare email internally for the JWT
+  // subject + authorized-domain guard.
+  const formattedFrom = formatEmailAddress({
+    firstName: employee.firstName,
+    lastName: employee.lastName,
+    email: employee.email,
+  });
+
   let result;
   try {
     result = await sendProposalEmail({
-      from: employee.email,
+      from: formattedFrom,
       to: cleanRecipient,
       cc: cleanCc.length > 0 ? cleanCc : undefined,
       subject: subject.trim(),
       html,
       text,
       attachments: attachments.length > 0 ? attachments : undefined,
-      replyTo: employee.email,
+      replyTo: formattedFrom,
       metadata: {
         snapshotId: snapshot.id,
         projectId: snapshot.projectId,
