@@ -36,7 +36,23 @@ function gridColumns(count: number): string {
 }
 
 function resolveTitle(content: ScopeBreakdownContent, slide: ProposalSlide): string {
-  return content.title || slide.headline || "Additional Areas Included";
+  // Guard against COPE-style titles leaking into the "Additional Areas"
+  // header — older decks stored "Cost of Project Execution" in slide.headline.
+  const fallback = slide.headline?.trim();
+  const isCopeTitle = fallback ? /cost of project execution|\bcope\b/i.test(fallback) : false;
+  return content.title || (fallback && !isCopeTitle ? fallback : "Additional Areas Included");
+}
+
+/** Rooms the slide should render: included + not a COPE entry. */
+function visibleRoomsOf(content: ScopeBreakdownContent): ScopeBreakdownRoom[] {
+  return (content.rooms ?? []).filter((r) => {
+    if (r.isIncluded === false) return false;
+    const name = (r.name ?? "").trim();
+    // Legacy data: COPE was previously synced into content.rooms before the
+    // isProjectOverhead filter was added in db.ts. Defensively drop it here.
+    if (/cost of project execution|\bcope\b/i.test(name)) return false;
+    return true;
+  });
 }
 
 function resolveAccent(content: ScopeBreakdownContent): string {
@@ -152,7 +168,7 @@ function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
-  const visibleRooms = (content.rooms ?? []).filter((r) => r.isIncluded);
+  const visibleRooms = visibleRoomsOf(content);
   const photos = (content.photos ?? []).slice(0, 4);
   const hasPhotos = photos.length > 0;
 
@@ -217,7 +233,7 @@ function DarkTableLayout({ slide, branding, hasAiBackground }: Props) {
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
-  const visibleRooms = (content.rooms ?? []).filter((r) => r.isIncluded);
+  const visibleRooms = visibleRoomsOf(content);
 
   return (
     <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : NAVY, overflow: "hidden" }}>
@@ -301,7 +317,7 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
-  const visibleRooms = (content.rooms ?? []).filter((r) => r.isIncluded);
+  const visibleRooms = visibleRoomsOf(content);
 
   // Columns: max 5
   const displayRooms = visibleRooms.slice(0, 5);
@@ -364,7 +380,7 @@ function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
-  const visibleRooms = (content.rooms ?? []).filter((r) => r.isIncluded);
+  const visibleRooms = visibleRoomsOf(content);
 
   // Max 3 cards in the right panel
   const displayRooms = visibleRooms.slice(0, 3);
@@ -444,7 +460,7 @@ function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
-  const visibleRooms = (content.rooms ?? []).filter((r) => r.isIncluded);
+  const visibleRooms = visibleRoomsOf(content);
   const photos = content.photos ?? [];
 
   // Max 4 rooms in a 2x2 grid
@@ -530,7 +546,7 @@ function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
-  const visibleRooms = (content.rooms ?? []).filter((r) => r.isIncluded);
+  const visibleRooms = visibleRoomsOf(content);
 
   // Show 3 pillars
   const displayRooms = visibleRooms.slice(0, 3);

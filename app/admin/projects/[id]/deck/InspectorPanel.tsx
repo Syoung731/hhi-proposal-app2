@@ -6619,7 +6619,10 @@ function DesignBuildAdvantageInspector({
     updateContent({ pillars: u });
   }
   function addPillar() {
-    updateContent({ pillars: [...pillars, { id: `p-${Date.now()}`, icon: "Shield", title: "New Pillar", description: "" }] });
+    // Empty title + description so an unedited pillar won't render on the
+    // slide (the DesignBuildAdvantageSlide filters pillars where both are
+    // blank). Prevents the "New Pillar" orphan from leaking into published decks.
+    updateContent({ pillars: [...pillars, { id: `p-${Date.now()}`, icon: "Shield", title: "", description: "" }] });
   }
   function removePillar(idx: number) {
     updateContent({ pillars: pillars.filter((_, i) => i !== idx) });

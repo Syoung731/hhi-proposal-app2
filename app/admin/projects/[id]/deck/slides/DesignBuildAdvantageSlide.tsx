@@ -234,7 +234,17 @@ function IconCardsLayout({
         )}
 
         <div style={{ flex: 1, display: "flex", gap: "1.2em", alignItems: "flex-start", width: "100%" }}>
-          {pillars.map((p) => {
+          {pillars
+            .filter((p) => {
+              const title = (p.title ?? "").trim();
+              const description = (p.description ?? "").trim();
+              // Hide pillars with no content or only the legacy "New Pillar"
+              // placeholder — keeps older decks clean without a data migration.
+              if (!title && !description) return false;
+              if (title === "New Pillar" && !description) return false;
+              return true;
+            })
+            .map((p) => {
             const tFont = p.titleFont ?? fallbackBodyFont;
             const tSize = p.titleSize ?? 1.0;
             const tColor = p.titleColor ?? textColor;

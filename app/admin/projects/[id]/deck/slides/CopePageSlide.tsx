@@ -517,13 +517,10 @@ function AnnotatedDiagramLayout({
           {heroImageUrl ? (
             <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${heroImageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }} />
           ) : (
-            <div style={{ position: "absolute", inset: 0, background: `linear-gradient(135deg, ${NAVY}15 0%, ${accent}10 100%)` }}>
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <p style={{ fontFamily: SLIDE_FONTS.defaults.body, fontSize: "0.6em", color: `${NAVY}30`, fontStyle: "italic" }}>
-                  Add a hero image
-                </p>
-              </div>
-            </div>
+            // No hero image set — render a neutral gradient panel. The prior
+            // "Add a hero image" hint text was visible in PDFs and published
+            // decks; it's the inspector's job to surface that, not the slide.
+            <div style={{ position: "absolute", inset: 0, background: `linear-gradient(135deg, ${NAVY}15 0%, ${accent}10 100%)` }} />
           )}
         </div>
       </div>

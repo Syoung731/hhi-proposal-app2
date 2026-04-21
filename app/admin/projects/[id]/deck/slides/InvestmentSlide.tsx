@@ -189,36 +189,43 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
             </span>
           </div>
 
-          {/* Table rows */}
-          {items.map((item, i) => (
-            <div
-              key={item.id}
-              className="flex"
-              style={{
-                padding: lineItemPadding,
-                background: i % 2 === 0 ? "#fff" : "#F9FAFB",
-                borderTop: "1px solid #E5E7EB",
-              }}
-            >
-              <span
-                className="flex-1"
-                style={{ fontFamily: bodyFont, fontSize: `${0.78 * bodyScale}em`, color: content.bodyColor ?? branding.textColor }}
-              >
-                {item.label}
-              </span>
-              <span
+          {/* Table rows — skip rows with no range at all so empty Alternates /
+              Allowances buckets don't render as "—". */}
+          {items
+            .filter((item) => {
+              const low = effectiveLow(item);
+              const high = effectiveHigh(item);
+              return (low ?? 0) > 0 || (high ?? 0) > 0;
+            })
+            .map((item, i) => (
+              <div
+                key={item.id}
+                className="flex"
                 style={{
-                  fontFamily: bodyFont,
-                  fontSize: `${0.78 * bodyScale}em`,
-                  color: content.bodyColor ?? branding.textColor,
-                  minWidth: "30%",
-                  textAlign: "right",
+                  padding: lineItemPadding,
+                  background: i % 2 === 0 ? "#fff" : "#F9FAFB",
+                  borderTop: "1px solid #E5E7EB",
                 }}
               >
-                {formatRange(effectiveLow(item), effectiveHigh(item))}
-              </span>
-            </div>
-          ))}
+                <span
+                  className="flex-1"
+                  style={{ fontFamily: bodyFont, fontSize: `${0.78 * bodyScale}em`, color: content.bodyColor ?? branding.textColor }}
+                >
+                  {item.label}
+                </span>
+                <span
+                  style={{
+                    fontFamily: bodyFont,
+                    fontSize: `${0.78 * bodyScale}em`,
+                    color: content.bodyColor ?? branding.textColor,
+                    minWidth: "30%",
+                    textAlign: "right",
+                  }}
+                >
+                  {formatRange(effectiveLow(item), effectiveHigh(item))}
+                </span>
+              </div>
+            ))}
         </div>
       )}
 
