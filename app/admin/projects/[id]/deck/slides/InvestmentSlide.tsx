@@ -190,7 +190,9 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
           </div>
 
           {/* Table rows — skip rows with no range at all so empty Alternates /
-              Allowances buckets don't render as "—". */}
+              Allowances buckets don't render as "—". Phase 8A.1: rows are
+              typically grouped (one per display-group) and may carry an
+              `includesText` descriptor shown beneath the label. */}
           {items
             .filter((item) => {
               const low = effectiveLow(item);
@@ -200,7 +202,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
             .map((item, i) => (
               <div
                 key={item.id}
-                className="flex"
+                className="flex items-start"
                 style={{
                   padding: lineItemPadding,
                   background: i % 2 === 0 ? "#fff" : "#F9FAFB",
@@ -208,10 +210,22 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
                 }}
               >
                 <span
-                  className="flex-1"
-                  style={{ fontFamily: bodyFont, fontSize: `${0.78 * bodyScale}em`, color: content.bodyColor ?? branding.textColor }}
+                  className="flex-1 flex flex-col"
+                  style={{ fontFamily: bodyFont, color: content.bodyColor ?? branding.textColor }}
                 >
-                  {item.label}
+                  <span style={{ fontSize: `${0.78 * bodyScale}em` }}>{item.label}</span>
+                  {item.includesText && (
+                    <span
+                      style={{
+                        fontSize: `${0.6 * bodyScale}em`,
+                        color: "#6B7280",
+                        marginTop: "0.15em",
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      {item.includesText}
+                    </span>
+                  )}
                 </span>
                 <span
                   style={{
