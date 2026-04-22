@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { copeShortButtonLabel, type CopeStatus } from "@/app/admin/_estimate-job/cope-button-label";
 import type { UnmatchedRoomItem } from "./actions";
 import {
   createRoomAction,
@@ -29,6 +30,7 @@ import { getRoomTypes } from "@/app/admin/settings/actions";
 import { NewRoomTypesModal } from "./new-room-types-modal";
 import { AIEstimatePanel } from "./ai-estimate-panel";
 import { BulkReviewAndEstimateModal } from "./bulk-review-and-estimate-modal";
+import { RetryFailedRoomsBar } from "./retry-failed-rooms-bar";
 import { ScopeReviewModal, type ReviewQuestion } from "./scope-review-modal";
 import { formatInchesToFeetInches, parseFeetInchesToInches } from "@/app/lib/dimensions";
 import { getEffectiveMeasurementMode, computeUnitQuantity } from "@/app/lib/section-unit-quantity";
@@ -876,6 +878,8 @@ type Props = {
   roomTypeLowPct?: number;
   /** Global High % (e.g. 10). Used to compute unit high from SectionType priceTarget when override not set. */
   roomTypeHighPct?: number;
+  /** Drives the COPE card button label (Generate / Regenerate / Generating / Retry). */
+  projectCopeStatus: CopeStatus;
 };
 
 function formatScopeUpdatedAt(value: Date | string | null | undefined): string {
@@ -1380,8 +1384,9 @@ function RoomSubAreasEditor({
   );
 }
 
-export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, defaultCeilingHeightFt: initialCeilingHeight, rooms: initialRooms, projectQA, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT }: Props) {
+export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, defaultCeilingHeightFt: initialCeilingHeight, rooms: initialRooms, projectQA, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT, projectCopeStatus }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [rooms, setRooms] = useState<Room[]>(() =>
     [...initialRooms].sort((a, b) => a.sortOrder - b.sortOrder)
@@ -1414,6 +1419,24 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [ceilingHeightSaved, setCeilingHeightSaved] = useState(false);
 
   useEffect(() => setMounted(true), []);
+
+  // "Scroll to COPE section" — triggered by the banner's "Not now" dismissed
+  // state link, which navigates to /admin/projects/{id}?tab=rooms&scrollToCope=1.
+  // We scroll once the COPE card is in the DOM, then strip the param so
+  // subsequent navigations don't re-scroll. `scrollIntoView` with `block: "start"`
+  // puts the card at the top of the scroll container with a small offset via
+  // the sticky admin header.
+  useEffect(() => {
+    if (searchParams?.get("scrollToCope") !== "1") return;
+    const el = document.querySelector('[data-cope-room-card="true"]');
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Strip the query param so a subsequent tab-switch or link-click doesn't
+    // re-fire the scroll. Using router.replace keeps history clean.
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("scrollToCope");
+    const qs = params.toString();
+    router.replace(`/admin/projects/${projectId}${qs ? `?${qs}` : ""}`);
+  }, [searchParams, router, projectId]);
   useEffect(() => {
     getRoomTypes().then((list) => {
       setActiveRoomTypes((list ?? []).filter((r) => r.active).map((r) => ({ id: r.id, name: r.name })));
@@ -1441,6 +1464,26 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   useEffect(() => {
     setProjectStylePresetId(initialProjectStylePresetId ?? null);
   }, [initialProjectStylePresetId]);
+
+  // Phase 8C Bug 2: listen for background-job terminal transitions dispatched
+  // by <EstimateJobProgressBanner />. Bumping `estimateRefreshKey` re-renders
+  // every <AIEstimatePanel> with a new `refreshKey` prop, which triggers its
+  // internal fetch of `/api/ai-estimate?…`. Without this, client-side panels
+  // stay stuck on "No AI estimate yet" until a hard-reload because
+  // `router.refresh()` only re-runs server components, not client state.
+  useEffect(() => {
+    function handleJobEvent(e: Event) {
+      const ce = e as CustomEvent<{ projectId?: string }>;
+      if (ce.detail?.projectId && ce.detail.projectId !== projectId) return;
+      setEstimateRefreshKey((k) => k + 1);
+    }
+    window.addEventListener("hhi:estimate-job-terminal", handleJobEvent);
+    window.addEventListener("hhi:cope-ready", handleJobEvent);
+    return () => {
+      window.removeEventListener("hhi:estimate-job-terminal", handleJobEvent);
+      window.removeEventListener("hhi:cope-ready", handleJobEvent);
+    };
+  }, [projectId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1640,6 +1683,11 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           submitAction={createRoomAction}
         />
       ) : (
+        <>
+        <RetryFailedRoomsBar
+          projectId={projectId}
+          onRequeued={() => setEstimateRefreshKey((k) => k + 1)}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -1730,6 +1778,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
             ))}
           </select>
         </div>
+        </>
       )}
       {showRendrModal && (
         <div
@@ -1852,6 +1901,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           onTemplateChange={(roomId, templateId) => { setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId })); updateRoomTemplateAction(projectId, roomId, templateId); }}
           estimateRefreshKey={estimateRefreshKey}
           otherRoomsHaveEstimates={rooms.some((r) => !r.isProjectOverhead && r.pricingTier === "AI_ESTIMATE")}
+          projectCopeStatus={projectCopeStatus}
           onEstimateGenerated={() => { setEstimateRefreshKey((k) => k + 1); router.refresh(); }}
         />
       ))}
@@ -1968,6 +2018,7 @@ function CopeRoomCard({
   onTemplateChange,
   estimateRefreshKey,
   otherRoomsHaveEstimates,
+  projectCopeStatus,
   onEstimateGenerated,
 }: {
   projectId: string;
@@ -1977,10 +2028,22 @@ function CopeRoomCard({
   onTemplateChange: (roomId: string, templateId: string | null) => void;
   estimateRefreshKey?: number;
   otherRoomsHaveEstimates: boolean;
+  projectCopeStatus: CopeStatus;
   onEstimateGenerated: () => void;
 }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Defensive: if the server-observed copeStatus reaches a terminal state
+  // (READY / FAILED), clear the local `generating` flag. Belt-and-suspenders
+  // for the rare case where the POST response is delayed or hangs but the
+  // backend has already finished — the button label otherwise stays stuck
+  // on "Generating…" even though the parent prop says otherwise.
+  useEffect(() => {
+    if (projectCopeStatus === "READY" || projectCopeStatus === "FAILED") {
+      setGenerating(false);
+    }
+  }, [projectCopeStatus]);
 
   async function handleGenerateCope() {
     setGenerating(true);
@@ -2005,8 +2068,22 @@ function CopeRoomCard({
 
   const copeTemplate = roomTemplates.find((t) => t.name.toLowerCase().includes("cope"));
 
+  // Contextual button state. The `generating` flag captures the local click
+  // in-flight window; once the server accepts, projectCopeStatus transitions
+  // to GENERATING on the next parent refresh and the label matches. The
+  // `!otherRoomsHaveEstimates` guard stays — COPE math aggregates over
+  // upstream estimates, so there's nothing to compute from on a fresh project.
+  const inFlight = generating || projectCopeStatus === "GENERATING";
+  const copeButtonDisabled = inFlight || !otherRoomsHaveEstimates;
+  const copeButtonTitle = !otherRoomsHaveEstimates
+    ? "Generate room estimates first"
+    : undefined;
+
   return (
-    <div className="mb-2 rounded-lg border border-slate-300 bg-slate-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
+    <div
+      data-cope-room-card="true"
+      className="mb-2 rounded-lg border border-slate-300 bg-slate-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50"
+    >
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -2032,22 +2109,22 @@ function CopeRoomCard({
               <option value={copeTemplate?.id ?? ""}>{copeTemplate?.displayName || copeTemplate?.name || "COPE"}</option>
             </select>
           </div>
-          {/* COPE Estimate Button — for re-generating COPE only */}
+          {/* COPE Estimate Button — contextual label via copeShortButtonLabel */}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleGenerateCope}
-              disabled={generating || !otherRoomsHaveEstimates}
+              disabled={copeButtonDisabled}
               className={`rounded-lg px-4 py-1.5 text-sm font-medium shadow-sm ${
-                generating
+                inFlight
                   ? "bg-amber-500 text-white cursor-wait"
                   : !otherRoomsHaveEstimates
                     ? "bg-zinc-200 text-zinc-400 cursor-not-allowed"
                     : "bg-amber-600 text-white hover:bg-amber-700"
               }`}
-              title={!otherRoomsHaveEstimates ? "Generate room estimates first" : undefined}
+              title={copeButtonTitle}
             >
-              {generating ? "Calculating project overhead..." : "Regenerate COPE Only"}
+              {copeShortButtonLabel(projectCopeStatus, generating)}
             </button>
           </div>
           {error && (

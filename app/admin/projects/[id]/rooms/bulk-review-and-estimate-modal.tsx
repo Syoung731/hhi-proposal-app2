@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { QuestionInput, type ReviewQuestion } from "./scope-review-modal";
+import { useEstimateJob } from "@/app/admin/_estimate-job/context";
 
 // ---------- Types ----------
 
@@ -22,18 +23,17 @@ type RoomTemplateOption = {
   active: boolean;
 };
 
-type Phase = "select" | "review" | "generating" | "done";
-
-type RoomGenStatus = "pending" | "generating" | "done" | "error" | "skipped";
-
-type RoomGenRow = {
-  roomId: string;
-  roomName: string;
-  templateId: string | null;
-  hasScope: boolean;
-  status: RoomGenStatus;
-  error?: string;
-};
+/**
+ * Modal phases after Phase 8B:
+ *   select   - pick rooms + templates
+ *   review   - answer AI-generated clarifying questions
+ *   starting - bulk API call in flight (brief — usually <2s)
+ *   done     - job queued; banner takes over for live progress
+ *
+ * The old `generating` phase with its per-row progress rendering is gone —
+ * that job belongs to <EstimateJobProgressBanner /> now.
+ */
+type Phase = "select" | "review" | "starting" | "done";
 
 type SelectRow = {
   roomId: string;
@@ -144,7 +144,6 @@ export function BulkReviewAndEstimateModal({
   // --- Select phase state ---
   const [selectRows, setSelectRows] = useState<SelectRow[]>([]);
   const [selectLoading, setSelectLoading] = useState(true);
-  const [includeCope, setIncludeCope] = useState(true);
 
   // --- Review phase state ---
   const [loadingQuestions, setLoadingQuestions] = useState(false);
@@ -153,11 +152,10 @@ export function BulkReviewAndEstimateModal({
   const [projectQuestions, setProjectQuestions] = useState<ReviewQuestion[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
-  // --- Generation phase state ---
-  const [genRows, setGenRows] = useState<RoomGenRow[]>([]);
-  const [genProgress, setGenProgress] = useState({ current: 0, total: 0 });
-  const [copeStatus, setCopeStatus] = useState<RoomGenStatus>("pending");
-  const [copeError, setCopeError] = useState<string | null>(null);
+  // --- Kickoff phase state (Phase 8B: short-lived; live progress is in the banner) ---
+  const [startError, setStartError] = useState<string | null>(null);
+  const [queuedTotal, setQueuedTotal] = useState(0);
+  const { startJob } = useEstimateJob();
 
   // ==================== Select Phase: Init rows ====================
 
@@ -340,148 +338,123 @@ export function BulkReviewAndEstimateModal({
 
   // ==================== Generate Phase: Save QA + Generate ====================
 
-  const handleConfirmAndGenerate = useCallback(async (useDefaults: boolean) => {
-    const finalRoomQuestions = { ...roomQuestions };
-    if (useDefaults) {
-      for (const roomId of Object.keys(finalRoomQuestions)) {
-        finalRoomQuestions[roomId] = finalRoomQuestions[roomId]!.map((q) => ({
-          ...q,
-          answer: q.answer ?? q.defaultAnswer,
-        }));
+  /**
+   * Phase 8B kickoff: save QA answers in parallel, then POST /api/ai-estimate/bulk
+   * to queue one job per eligible room. Live progress now happens in the
+   * persistent <EstimateJobProgressBanner /> mounted in AdminLayoutChrome —
+   * the modal hands off to it via `startJob()` and closes.
+   *
+   * COPE is intentionally not queued here. With room estimates now running
+   * asynchronously, synchronous COPE generation would either (a) read stale
+   * room totals, or (b) block this handler until every room finished, which
+   * defeats the purpose. COPE retains its existing per-COPE-room generator
+   * on the rooms tab, run after the banner reports COMPLETED.
+   */
+  const handleConfirmAndGenerate = useCallback(
+    async (useDefaults: boolean) => {
+      setStartError(null);
+
+      const finalRoomQuestions = { ...roomQuestions };
+      if (useDefaults) {
+        for (const roomId of Object.keys(finalRoomQuestions)) {
+          finalRoomQuestions[roomId] = finalRoomQuestions[roomId]!.map((q) => ({
+            ...q,
+            answer: q.answer ?? q.defaultAnswer,
+          }));
+        }
       }
-    }
+      const finalProjectQuestions = useDefaults
+        ? projectQuestions.map((q) => ({ ...q, answer: q.answer ?? q.defaultAnswer }))
+        : projectQuestions;
 
-    const finalProjectQuestions = useDefaults
-      ? projectQuestions.map((q) => ({ ...q, answer: q.answer ?? q.defaultAnswer }))
-      : projectQuestions;
+      setPhase("starting");
 
-    // Build generation rows from select phase selections
-    const rows: RoomGenRow[] = checkedRooms.map((sr) => ({
-      roomId: sr.roomId,
-      roomName: sr.roomName,
-      templateId: sr.templateId,
-      hasScope: sr.hasScope,
-      status: "pending" as const,
-    }));
-    setGenRows(rows);
-    setCopeStatus("pending");
-    setCopeError(null);
-    setPhase("generating");
-
-    // Save all QA answers in parallel
-    const savePromises: Promise<void>[] = [];
-
-    for (const sr of checkedRooms) {
-      const questions = finalRoomQuestions[sr.roomId];
-      if (questions && questions.length > 0) {
+      // Save QA answers in parallel; failures here shouldn't block the bulk job
+      // since the answers are already in React state (and worker reads scopeQA
+      // from the persisted Room record — we just want it persisted first).
+      const savePromises: Promise<void>[] = [];
+      for (const sr of checkedRooms) {
+        const questions = finalRoomQuestions[sr.roomId];
+        if (questions && questions.length > 0) {
+          savePromises.push(
+            fetch("/api/ai-review/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                roomId: sr.roomId,
+                projectId,
+                level: "room",
+                questions,
+              }),
+            }).then(() => undefined),
+          );
+        }
+      }
+      if (finalProjectQuestions.length > 0) {
         savePromises.push(
           fetch("/api/ai-review/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              roomId: sr.roomId,
               projectId,
-              level: "room",
-              questions,
+              level: "project",
+              questions: finalProjectQuestions,
             }),
           }).then(() => undefined),
         );
       }
-    }
+      await Promise.allSettled(savePromises);
 
-    if (finalProjectQuestions.length > 0) {
-      savePromises.push(
-        fetch("/api/ai-review/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            level: "project",
-            questions: finalProjectQuestions,
-          }),
-        }).then(() => undefined),
-      );
-    }
+      // Build the bulk payload from eligible checked rooms (has scope + template).
+      const eligibleRooms = checkedRooms.filter((r) => r.hasScope && r.templateId);
+      if (eligibleRooms.length === 0) {
+        setPhase("review");
+        setStartError("No rooms with both a scope and a template to queue.");
+        return;
+      }
 
-    await Promise.allSettled(savePromises);
-
-    // Generate estimates sequentially
-    const toProcess = rows.filter((r) => r.hasScope && r.templateId);
-    setGenProgress({ current: 0, total: toProcess.length });
-
-    for (let i = 0; i < toProcess.length; i++) {
-      const row = toProcess[i]!;
-      setGenProgress({ current: i + 1, total: toProcess.length });
-
-      setGenRows((prev) =>
-        prev.map((r) => (r.roomId === row.roomId ? { ...r, status: "generating" } : r)),
-      );
+      const bulkBody = {
+        projectId,
+        rooms: eligibleRooms.map((sr) => {
+          const room = estimateRooms.find((r) => r.id === sr.roomId);
+          return {
+            roomId: sr.roomId,
+            roomTemplateId: sr.templateId!,
+            scopeNarrative: room?.scopeNarrative ?? "",
+          };
+        }),
+        metadata: { source: "bulk-review-modal" },
+      };
 
       try {
-        const room = estimateRooms.find((r) => r.id === row.roomId);
-        const res = await fetch("/api/ai-estimate", {
+        const res = await fetch("/api/ai-estimate/bulk", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            sectionId: row.roomId,
-            roomTemplateId: row.templateId,
-            scopeNarrative: room?.scopeNarrative ?? "",
-          }),
+          body: JSON.stringify(bulkBody),
         });
-
         if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: "Request failed" }));
+          const data = (await res.json().catch(() => ({ error: "Request failed" }))) as { error?: string };
           throw new Error(data.error || `HTTP ${res.status}`);
         }
+        const result = (await res.json()) as { jobId: string; totalItems: number; publishFailures?: number };
 
-        setGenRows((prev) =>
-          prev.map((r) => (r.roomId === row.roomId ? { ...r, status: "done" } : r)),
-        );
+        // Hand off to the persistent banner — this makes it appear immediately
+        // in the corner so the user sees the transition even if the modal
+        // closes in the same tick.
+        startJob(result.jobId, projectId, result.totalItems);
+        setQueuedTotal(result.totalItems);
+        setPhase("done");
+
+        // Brief "started" confirmation, then auto-close. 1.5s is enough to
+        // register the success state without blocking the user's next action.
+        setTimeout(() => onClose(), 1500);
       } catch (err) {
-        setGenRows((prev) =>
-          prev.map((r) =>
-            r.roomId === row.roomId
-              ? { ...r, status: "error", error: err instanceof Error ? err.message : "Failed" }
-              : r,
-          ),
-        );
+        setStartError(err instanceof Error ? err.message : "Failed to start estimates");
+        setPhase("review");
       }
-    }
-
-    // Mark skipped rows
-    const processedIds = new Set(toProcess.map((r) => r.roomId));
-    setGenRows((prev) =>
-      prev.map((r) => {
-        if (processedIds.has(r.roomId) || r.status !== "pending") return r;
-        return { ...r, status: "skipped", error: !r.templateId ? "No template" : "No scope" };
-      }),
-    );
-
-    // Generate COPE if checked
-    if (includeCope) {
-      setCopeStatus("generating");
-      try {
-        const copeRes = await fetch("/api/cope-estimate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId }),
-        });
-        if (!copeRes.ok) {
-          const data = await copeRes.json().catch(() => ({ error: "Request failed" }));
-          throw new Error(data.error || `HTTP ${copeRes.status}`);
-        }
-        setCopeStatus("done");
-      } catch (err) {
-        setCopeStatus("error");
-        setCopeError(err instanceof Error ? err.message : "COPE estimate failed");
-      }
-    } else {
-      setCopeStatus("skipped");
-    }
-
-    setPhase("done");
-  }, [roomQuestions, projectQuestions, checkedRooms, estimateRooms, projectId, includeCope]);
+    },
+    [roomQuestions, projectQuestions, checkedRooms, estimateRooms, projectId, startJob, onClose],
+  );
 
   // ==================== Render ====================
 
@@ -503,9 +476,9 @@ export function BulkReviewAndEstimateModal({
                 ? "Generate AI Estimates"
                 : phase === "review"
                   ? "Review & Generate Estimates"
-                  : phase === "generating"
-                    ? "Generating Estimates"
-                    : "Estimates Complete"}
+                  : phase === "starting"
+                    ? "Starting Background Job"
+                    : "Estimates Queued"}
             </h2>
             {phase === "select" && !selectLoading && (
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -766,92 +739,37 @@ export function BulkReviewAndEstimateModal({
             </>
           )}
 
-          {/* ========== Generation Progress ========== */}
-          {(phase === "generating" || phase === "done") && (
-            <div className="space-y-2">
-              {genRows.map((row) => (
-                <div
-                  key={row.roomId}
-                  className="flex items-center justify-between rounded-lg border border-zinc-100 px-4 py-2 dark:border-zinc-800"
-                >
-                  <span className="text-sm text-zinc-800 dark:text-zinc-200">
-                    {row.roomName}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {row.status === "pending" && (
-                      <span className="text-xs text-zinc-400">&middot;</span>
-                    )}
-                    {row.status === "generating" && (
-                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2" style={{ borderColor: "var(--brand-accent-spinner-track)", borderTopColor: "var(--brand-accent)" }} />
-                    )}
-                    {row.status === "done" && (
-                      <span className="text-sm text-green-600 font-bold">&#10003;</span>
-                    )}
-                    {row.status === "error" && (
-                      <span
-                        className="text-sm text-red-500 cursor-help"
-                        title={row.error}
-                      >
-                        &#10007;
-                      </span>
-                    )}
-                    {row.status === "skipped" && (
-                      <span
-                        className="text-xs text-zinc-400 cursor-help"
-                        title={row.error}
-                      >
-                        skip
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {/* COPE row */}
-              {includeCope && (
-                <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/30 px-4 py-2 dark:border-amber-800 dark:bg-amber-900/10">
-                  <span className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                    Project Overhead (COPE)
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {copeStatus === "pending" && (
-                      <span className="text-xs text-zinc-400">&middot;</span>
-                    )}
-                    {copeStatus === "generating" && (
-                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-200 border-t-amber-600" />
-                    )}
-                    {copeStatus === "done" && (
-                      <span className="text-sm text-green-600 font-bold">&#10003;</span>
-                    )}
-                    {copeStatus === "error" && (
-                      <span
-                        className="text-sm text-red-500 cursor-help"
-                        title={copeError ?? undefined}
-                      >
-                        &#10007; {copeError}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
+          {/* ========== Kickoff + Done (Phase 8B) ========== */}
+          {phase === "starting" && (
+            <div className="flex flex-col items-center justify-center gap-3 py-10">
+              <span
+                className="inline-block h-6 w-6 animate-spin rounded-full border-2"
+                style={{ borderColor: "var(--brand-accent-spinner-track)", borderTopColor: "var(--brand-accent)" }}
+              />
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Starting background job…
+              </p>
+            </div>
+          )}
+          {phase === "done" && (
+            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-lg font-bold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                &#10003;
+              </span>
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                Estimates started
+              </p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                {queuedTotal} room{queuedTotal === 1 ? "" : "s"} processing in background — progress shown in the banner.
+              </p>
             </div>
           )}
         </div>
 
-        {/* COPE option — shown in select phase */}
-        {phase === "select" && !selectLoading && (
-          <div className="flex items-center gap-2 border-t border-zinc-200 px-5 py-2 bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800/50">
-            <input
-              type="checkbox"
-              checked={includeCope}
-              onChange={(e) => setIncludeCope(e.target.checked)}
-              className="h-3 w-3"
-              style={{ accentColor: "var(--brand-accent)" }}
-              id="cope-checkbox"
-            />
-            <label htmlFor="cope-checkbox" className="text-xs text-zinc-700 font-medium dark:text-zinc-300">
-              Also generate COPE estimate (project overhead)
-            </label>
+        {/* Inline error — kickoff failures keep the modal open so the user can correct + retry. */}
+        {startError && (
+          <div className="border-t border-red-200 bg-red-50 px-5 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            Failed to start estimates: {startError}
           </div>
         )}
 
@@ -861,19 +779,10 @@ export function BulkReviewAndEstimateModal({
             {phase === "select" && !selectLoading && (
               <span>{checkedSelectCount} of {selectRows.length} rooms selected</span>
             )}
-            {phase === "generating" && copeStatus !== "generating" && (
-              <span>Processing {genProgress.current} of {genProgress.total} rooms...</span>
-            )}
-            {phase === "generating" && copeStatus === "generating" && (
-              <span>Generating COPE estimate...</span>
-            )}
+            {phase === "starting" && <span>Queuing background job&hellip;</span>}
             {phase === "done" && (
               <span>
-                {genRows.filter((r) => r.status === "done").length} rooms generated
-                {genRows.filter((r) => r.status === "error").length > 0 && (
-                  <>, {genRows.filter((r) => r.status === "error").length} errors</>
-                )}
-                {copeStatus === "done" && <>, COPE generated</>}
+                {queuedTotal} estimates queued
               </span>
             )}
           </div>
@@ -882,7 +791,8 @@ export function BulkReviewAndEstimateModal({
             <button
               type="button"
               onClick={phase === "review" ? () => setPhase("select") : onClose}
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              disabled={phase === "starting"}
+              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               {phase === "done" ? "Close" : phase === "review" ? "Back" : "Cancel"}
             </button>

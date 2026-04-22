@@ -119,6 +119,7 @@ export function ProjectTabs({
             defaultCeilingHeightFt={project.defaultCeilingHeightFt ?? 9}
             roomTypeLowPct={roomTypeLowPct ?? -10}
             roomTypeHighPct={roomTypeHighPct ?? 10}
+            projectCopeStatus={project.copeStatus}
             rooms={project.rooms.map((r) => ({
               id: r.id,
               name: r.name,
