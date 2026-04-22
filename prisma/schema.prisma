@@ -98,9 +98,28 @@ model Project {
   // deck falls back to the legacy objective/supportingText/bullets prose.
   objectivePillars Json?
 
+  // Project Overhead (COPE) generation state (Phase 8C).
+  // Doubles as an idempotency lock — writers acquire GENERATING via a
+  // conditional updateMany() so simultaneous triggers can't race.
+  copeStatus      CopeStatus @default(IDLE)
+  copeGeneratedAt DateTime?
+  copeError       String?
+
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])
+}
+
+/**
+ * Project-level Project Overhead (COPE) generation state.
+ * One COPE AIEstimate per project at a time; this enum tracks whether a
+ * regeneration is in-flight, succeeded, or failed since the last reset.
+ */
+enum CopeStatus {
+  IDLE
+  GENERATING
+  READY
+  FAILED
 }
 
 model ExtensionPairCode {
@@ -526,6 +545,7 @@ model CompanySettings {
   roomTypeHighPct           Float? // default +10 in UI; high = target * (1 + highPct/100)
   anthropicModel            String? // selected Claude model ID (e.g. "claude-sonnet-4-6")
   aiEstimateConcurrency     Int? // how many rooms estimate in parallel via background jobs; null -> default 8
+  autoGenerateCope          Boolean  @default(true) // auto-fire project-overhead (COPE) regen when an EstimateJob lands COMPLETED
   geminiImageModel          String? // Gemini image/vision model (e.g. "gemini-2.5-flash-image")
   geminiImageGenModel       String? // Gemini text-to-image Imagen model (e.g. "imagen-4.0-fast-generate-001")
   coreValuesDefaultsJson    Json? // GlobalCoreValuesSettings: default values, layout, headline for new core-values slides
