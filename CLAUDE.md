@@ -200,6 +200,119 @@ catalog. Writes go through `upsertCatalogSuggestion()` in
   use `crypto.randomUUID()`. Cosmetic, no action needed — the column is
   just `String @id` with no format constraint.
 
+## Background Jobs — Local Dev Setup
+
+Phase 8B introduced QStash-backed bulk estimate jobs. To test the bulk
+flow end-to-end (`POST /api/ai-estimate/bulk` → worker → progress banner)
+on localhost, you need **two** things running alongside `npm run dev`:
+
+### 1. QStash dev proxy
+
+In a separate terminal, start the Upstash QStash local proxy:
+
+```bash
+npx @upstash/qstash-cli dev
+```
+
+This spins up a local QStash-compatible server (default
+`http://127.0.0.1:8080`) that accepts publishes from the Next app and
+delivers webhooks back to localhost without needing the public QStash
+cloud. The CLI prints fresh signing keys on each start — copy them into
+`.env.local` (see below).
+
+### 2. `.env.local` shape
+
+The QStash client + `verifySignatureAppRouter` both read from these
+three env vars. The estimate-job lib in
+`app/lib/ai/estimate-job.ts` strips surrounding quotes defensively, but
+prefer unquoted values for cleanliness:
+
+```dotenv
+# Dev (qstash-cli dev)
+QSTASH_URL=http://127.0.0.1:8080
+QSTASH_TOKEN=<token printed by qstash-cli dev>
+QSTASH_CURRENT_SIGNING_KEY=<from qstash-cli dev>
+QSTASH_NEXT_SIGNING_KEY=<from qstash-cli dev>
+
+# Prod (Upstash cloud) — commented out during dev
+# QSTASH_URL=https://qstash.upstash.io
+# QSTASH_TOKEN=<from Upstash console>
+# QSTASH_CURRENT_SIGNING_KEY=<from Upstash console>
+# QSTASH_NEXT_SIGNING_KEY=<from Upstash console>
+```
+
+### 3. `NEXT_PUBLIC_APP_URL`
+
+The bulk route builds the worker webhook URL from this env var. For
+local dev it must be reachable from the QStash dev proxy process
+(same machine, so localhost works):
+
+```dotenv
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+### Troubleshooting
+
+- **401 on webhook delivery** — signing keys in `.env.local` don't
+  match what `qstash-cli dev` is using. Restart the proxy, copy the new
+  keys, restart `npm run dev`.
+- **Worker returns HTML 500** — often a stale Prisma client after a
+  schema change. Restart `npm run dev` after any `prisma generate`.
+- **Bulk job starts but items stay QUEUED forever** — either the proxy
+  isn't running, or `NEXT_PUBLIC_APP_URL` doesn't match the port the
+  dev server is actually listening on. Check both.
+- **Publish fails with "Invalid URL"** — `QSTASH_URL` has surrounding
+  quotes in `.env.local`. Remove them (the dotenv loader doesn't
+  strip, though the app code does as a defense).
+
+### Production
+
+On Vercel, set `NEXT_PUBLIC_APP_URL` to the deployed origin and use
+the real Upstash credentials. No `qstash-cli dev` needed.
+
+### Project Overhead (COPE) Auto-Trigger
+
+Phase 8C adds automatic project-overhead (COPE) generation after a bulk
+estimate job lands COMPLETED. Key facts for future changes:
+
+- **COPE is one call per project, NOT per-room.** There's exactly one
+  "COPE room" per project (`isProjectOverhead: true`), and
+  `POST /api/cope-estimate` writes a single `AIEstimate` to it using
+  aggregates across every non-COPE room's latest estimate. "Generate COPE
+  for all rooms" is a labeling mistake — there's only ever one to generate.
+- **Auto-trigger fires ONLY on `EstimateJob.status === "COMPLETED"`**,
+  never on PARTIAL (stale aggregate math) or FAILED (nothing to aggregate).
+  `rollUpJobStatus()` returns the new terminal status so the estimate-room
+  worker can fire exactly once from both the happy-path and recovery-path
+  completion transitions.
+- **Two code paths reach the same service.** Auto-trigger publishes a
+  QStash message to `/api/jobs/cope-generate`; the manual banner/COPE-card
+  buttons hit `POST /api/cope-estimate` directly. Both call
+  `generateProjectOverhead()` in `app/lib/ai/generate-project-overhead.ts`,
+  which acquires the single `Project.copeStatus` lock — so concurrent or
+  duplicate triggers converge on one in-flight generation.
+- **Lock is a conditional `updateMany`** on `Project.copeStatus` from
+  `{IDLE, READY, FAILED}` to `GENERATING`. `updateMany.count === 0` on
+  the caller means either the project doesn't exist (→ `NOT_FOUND`) or
+  someone else holds the lock (→ `BUSY`). Disambiguation with a
+  follow-up `findUnique`. The `BUSY` branch returns HTTP 409 from the
+  HTTP wrapper and 200 `status: skipped_busy` from the QStash worker.
+- **Status flow:** `IDLE → GENERATING → READY` (happy) or
+  `IDLE → GENERATING → FAILED` + `copeError` (unhappy). FAILED transitions
+  back to GENERATING on any subsequent trigger (lock allows `FAILED → GENERATING`).
+- **`CompanySettings.autoGenerateCope`** (default `true`) gates the
+  auto-trigger only. The manual button always works regardless of this
+  setting. Read fresh each completion — no cache.
+- **No CopeJob model.** A single call per project, single lock column,
+  no fan-out. Resist the temptation to build one — `Project.copeStatus`
+  + `copeError` + `copeGeneratedAt` is the whole state machine.
+- **Polling payload carries `project.copeStatus` + `autoGenerateCope`**
+  so the `<EstimateJobProgressBanner />` can render a combined
+  job × copeStatus state machine from one endpoint.
+- **`maxDuration = 300`** on both `/api/cope-estimate` and
+  `/api/jobs/cope-generate` — COPE streams 60–120s against Anthropic,
+  which will time out on Vercel Pro's 60s default.
+
 ## Manual smoke tests
 
 Located at `scripts/smoke/`. These are NOT part of any automated suite; run
@@ -219,6 +332,19 @@ them manually when you want to validate the estimate service or
   `__smoke_<uuid>` row so it's safe to run against real data. Useful after
   any change to the upsert SQL, id-generation strategy, or schema for
   `CatalogSuggestion`.
+- **`scripts/smoke/cope-auto-trigger.ts`** — Phase 8C regression. Six
+  scenarios: happy-path auto-trigger (estimates COMPLETED → `copeStatus`
+  READY), `autoGenerateCope=false` skip + manual override, PARTIAL skip,
+  409 BUSY on concurrent trigger, extended polling payload shape, FAILED →
+  READY recovery. ~10–15 min wall-clock (two full bulk estimate + COPE
+  cycles plus cheap cases). Useful after any change to the COPE service,
+  auto-trigger wiring in `estimate-job.ts`, or `rollUpJobStatus` return
+  semantics.
+- **`scripts/smoke/internal/lock-test.ts`** — direct-DB smoke for the
+  `Project.copeStatus` idempotency lock (no HTTP, no Anthropic). Verifies
+  `updateMany` conditional transition math + NOT_FOUND vs BUSY
+  disambiguation. ~1s. Runs even when the dev server is down — useful
+  during schema changes to `CopeStatus`.
 
 Run either with:
 

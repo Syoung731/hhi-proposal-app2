@@ -580,7 +580,16 @@ export async function deleteRoomAction(projectId: string, roomId: string): Promi
 /** Delete all sections for a project. */
 export async function deleteAllRoomsAction(projectId: string): Promise<{ error?: string }> {
   await requireAdmin();
-  await prisma.room.deleteMany({ where: { projectId } });
+  // Deleting rooms orphans any existing COPE AIEstimate (sectionId has no FK
+  // cascade), so reset the project's COPE lock atomically to avoid a stale
+  // `copeStatus=READY` pointing at a deleted room. See PHASE_9_AIESTIMATE_FK_CLEANUP.md.
+  await prisma.$transaction([
+    prisma.room.deleteMany({ where: { projectId } }),
+    prisma.project.update({
+      where: { id: projectId },
+      data: { copeStatus: "IDLE", copeGeneratedAt: null, copeError: null },
+    }),
+  ]);
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -1894,6 +1903,15 @@ export async function mergeRoomsWithAiAction(
       if (remainingIds.length) {
         await tx.room.deleteMany({
           where: { id: { in: remainingIds } },
+        });
+        // Merging destroys rooms; any existing COPE AIEstimate could be tied
+        // to one of the now-deleted rooms (sectionId has no FK cascade). Reset
+        // the COPE lock inside the same transaction so the user never sees
+        // "project overhead ready" pointing at a deleted section. See
+        // PHASE_9_AIESTIMATE_FK_CLEANUP.md for the broader fix.
+        await tx.project.update({
+          where: { id: projectId },
+          data: { copeStatus: "IDLE", copeGeneratedAt: null, copeError: null },
         });
       }
     });
