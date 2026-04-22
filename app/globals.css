@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "./admin/_estimate-job/**/*.{tsx,ts}";
 
 :root {
   --background: #ffffff;
