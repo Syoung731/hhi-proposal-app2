@@ -1,314 +1,388 @@
 "use client";
 
 /**
- * Investment tab — parent/child display-group tree.
+ * Investment tab — parent/child display-group tree with drag-to-reparent.
  *
- * T4: render-only. T5 adds drag-and-drop + server actions.
+ * Drag behaviors:
+ *   - Child → parent header: reparents into that group (displayGroupId swap).
+ *   - Child → another child: inserts at target position; adopts target's
+ *     parent slug if crossing groups.
+ *   - Parent → parent: reorders group render order.
  *
- * Renders rooms grouped by `Room.displayGroupId`. Group order respects the
- * project's saved `Project.displayGroupOrder`, with `DEFAULT_GROUP_ORDER` as
- * the fallback. COPE is always forced last.
- *
- * Single-room groups render as a root-level row (no parent wrapper).
- * Multi-room groups render as a collapsible parent with summed range +
- * "Includes: X, Y, Z" descriptor.
- *
- * Null-pricing rooms (both totalLow and totalHigh null) are hidden entirely.
+ * COPE is locked (no drag). Single-room "groups" render flat. Null-pricing
+ * rooms are hidden. Pure-logic helpers live in investment-group-tree-logic.ts.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
-  DEFAULT_GROUP_ORDER,
-  resolveGroup,
-  isKnownDisplayGroupSlug,
-  type FixedGroupSlug,
-  type DisplayGroupSlug,
-} from "@/app/lib/investment/display-group-classifier";
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  updateRoomDisplayGroup,
+  updateProjectDisplayGroupOrder,
+} from "./actions";
+import {
+  BUCKET_LABELS,
+  buildGroupNodes,
+  buildIncludesText,
+  formatRange,
+  groupSortableId,
+  hasPricing,
+  moveGroup,
+  reparentRoom,
+  type AnyDragData,
+  type GroupDragData,
+  type GroupNode,
+  type RoomDragData,
+  type SectionRow,
+} from "./investment-group-tree-logic";
 
-// ─── Public types ───────────────────────────────────────────────────────────
-
-const BUCKET_LABELS: Record<string, string> = {
-  BASE: "Base",
-  ALTERNATE: "Alternates",
-  ALLOWANCE: "Allowances",
-};
-
-export type SectionRow = {
-  id: string;
-  name: string;
-  bucket: string;
-  sectionTypeName: string;
-  totalLow: number | null;
-  totalTarget: number | null;
-  totalHigh: number | null;
-  displayGroupId: string | null;
-  displayGroupOrder: number;
-  isProjectOverhead: boolean;
-};
+export type { SectionRow } from "./investment-group-tree-logic";
 
 type Props = {
+  projectId: string;
   sections: SectionRow[];
   /** The project's saved group order (array of slugs). Empty = use default. */
   groupOrder: string[];
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Main component ─────────────────────────────────────────────────────────
 
-function formatMoney(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return `$${Math.round(n).toLocaleString()}`;
-}
+export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
 
-function formatRange(lo: number | null, hi: number | null): string {
-  if (lo == null && hi == null) return "TBD";
-  if (lo != null && hi != null && lo !== hi) {
-    return `${formatMoney(lo)} – ${formatMoney(hi)}`;
-  }
-  return formatMoney(lo ?? hi);
-}
+  const [localSections, setLocalSections] = useState<SectionRow[]>(sections);
+  const [localGroupOrder, setLocalGroupOrder] = useState<string[]>(groupOrder);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [activeDrag, setActiveDrag] = useState<AnyDragData | null>(null);
 
-/** Filter out rooms with no pricing anywhere. */
-function hasPricing(s: SectionRow): boolean {
-  return s.totalLow != null || s.totalHigh != null;
-}
+  useSyncProps(sections, setLocalSections);
+  useSyncProps(groupOrder, setLocalGroupOrder);
 
-type GroupNode = {
-  slug: string;
-  label: string;
-  isIndividualized: boolean;
-  members: SectionRow[];
-  bucket: string;         // use the first member's bucket for the badge
-  sumLow: number;
-  sumTarget: number;
-  sumHigh: number;
-};
-
-function buildGroupNodes(
-  sections: SectionRow[],
-  savedOrder: string[]
-): GroupNode[] {
-  // Bucket sections by displayGroupId (null → "ungrouped").
-  const buckets = new Map<string, SectionRow[]>();
-  for (const s of sections) {
-    const slug = s.displayGroupId ?? "ungrouped";
-    const arr = buckets.get(slug) ?? [];
-    arr.push(s);
-    buckets.set(slug, arr);
-  }
-
-  // Sort members within each group by displayGroupOrder, then name.
-  for (const arr of buckets.values()) {
-    arr.sort((a, b) => {
-      if (a.displayGroupOrder !== b.displayGroupOrder) {
-        return a.displayGroupOrder - b.displayGroupOrder;
-      }
-      return a.name.localeCompare(b.name);
-    });
-  }
-
-  // Compute nodes.
-  const nodes: GroupNode[] = [];
-  for (const [slug, members] of buckets) {
-    const resolved = isKnownDisplayGroupSlug(slug)
-      ? resolveGroup(slug as DisplayGroupSlug)
-      : { label: "(Unknown)", individualized: false };
-    // For individualized groups (bedroom-<id>, bathroom-<id>, carolina-<id>),
-    // use the first member's name as the group label.
-    const label = resolved.individualized && members[0]
-      ? members[0].name
-      : resolved.label;
-
-    let sumLow = 0;
-    let sumHigh = 0;
-    let sumTarget = 0;
-    for (const m of members) {
-      sumLow += m.totalLow ?? 0;
-      sumHigh += m.totalHigh ?? 0;
-      sumTarget += m.totalTarget ?? 0;
-    }
-
-    nodes.push({
-      slug,
-      label,
-      isIndividualized: resolved.individualized,
-      members,
-      bucket: members[0]?.bucket ?? "BASE",
-      sumLow,
-      sumHigh,
-      sumTarget,
-    });
-  }
-
-  // Sort by user-saved order first, then default order, then alphabetical fallback.
-  const userSlugSet = new Set(savedOrder);
-  const userIndex = new Map(savedOrder.map((s, i) => [s, i]));
-  const defaultIndex = new Map<string, number>();
-  for (let i = 0; i < DEFAULT_GROUP_ORDER.length; i++) {
-    defaultIndex.set(DEFAULT_GROUP_ORDER[i], i);
-  }
-
-  nodes.sort((a, b) => {
-    // COPE always last, regardless of any saved order.
-    if (a.slug === "cope" && b.slug !== "cope") return 1;
-    if (b.slug === "cope" && a.slug !== "cope") return -1;
-
-    const aUser = userIndex.get(a.slug);
-    const bUser = userIndex.get(b.slug);
-    if (aUser !== undefined && bUser !== undefined) return aUser - bUser;
-    if (aUser !== undefined) return -1;
-    if (bUser !== undefined) return 1;
-
-    // Neither in user order — use default priority. Individualized groups
-    // (bedroom-<id> etc.) inherit their render category's position.
-    const aCat = categoryIndex(a);
-    const bCat = categoryIndex(b);
-    if (aCat !== bCat) return aCat - bCat;
-
-    // Within same category, sort alphabetically by label.
-    return a.label.localeCompare(b.label);
-  });
-
-  return nodes;
-}
-
-function categoryIndex(node: GroupNode): number {
-  // Returns the index of the node's render category within DEFAULT_GROUP_ORDER.
-  // Individualized categories (bedroom, bathroom, carolina-room) slot into
-  // synthetic positions between living-spaces and utility.
-  if (isKnownDisplayGroupSlug(node.slug)) {
-    const res = resolveGroup(node.slug as DisplayGroupSlug);
-    switch (res.renderCategory) {
-      case "primary-suite": return 0;
-      case "kitchen-dining": return 1;
-      case "living-spaces": return 2;
-      case "bedroom": return 3;
-      case "bathroom": return 4;
-      case "carolina-room": return 5;
-      case "utility": return 6;
-      case "outdoor": return 7;
-      case "storage": return 8;
-      case "ungrouped": return 9;
-      case "cope": return 99;
-    }
-  }
-  return 9; // unknown → treat as ungrouped
-}
-
-function buildIncludesText(members: SectionRow[]): string | null {
-  if (members.length <= 1) return null;
-  const names = members.map((m) => m.name);
-  if (names.length <= 3) {
-    return `Includes: ${names.join(", ")}`;
-  }
-  return `Includes: ${names.slice(0, 3).join(", ")}, … and ${names.length - 3} more`;
-}
-
-// ─── Tree component ─────────────────────────────────────────────────────────
-
-export function InvestmentGroupTree({ sections, groupOrder }: Props) {
   const nodes = useMemo(
-    () => buildGroupNodes(sections.filter(hasPricing), groupOrder),
-    [sections, groupOrder]
+    () => buildGroupNodes(localSections.filter(hasPricing), localGroupOrder),
+    [localSections, localGroupOrder],
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const toggleExpanded = useCallback((slug: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }, []);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const data = event.active.data.current as AnyDragData | undefined;
+    if (data) setActiveDrag(data);
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveDrag(null);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const activeData = active.data.current as AnyDragData | undefined;
+      const overData = over.data.current as AnyDragData | undefined;
+      if (!activeData) return;
+
+      // Parent-header drag: reorder groups.
+      if (activeData.type === "group" && overData?.type === "group") {
+        if (activeData.slug === "cope" || overData.slug === "cope") return;
+        const newSlugOrder = moveGroup(nodes, activeData.slug, overData.slug);
+        setLocalGroupOrder(newSlugOrder);
+        startTransition(async () => {
+          const result = await updateProjectDisplayGroupOrder(projectId, newSlugOrder);
+          if (result.error) {
+            console.error("updateProjectDisplayGroupOrder:", result.error);
+            router.refresh();
+          }
+        });
+        return;
+      }
+
+      // Room drag: reparent or reorder within group.
+      if (activeData.type === "room") {
+        const targetGroupSlug =
+          overData?.type === "group"
+            ? overData.slug
+            : overData?.type === "room"
+            ? overData.slug
+            : null;
+        if (!targetGroupSlug) return;
+        if (targetGroupSlug === "cope") return; // locked
+
+        const moves = reparentRoom({
+          sections: localSections,
+          nodes,
+          activeRoomId: activeData.roomId,
+          activeSourceSlug: activeData.slug,
+          targetGroupSlug,
+          overRoomId: overData?.type === "room" ? overData.roomId : null,
+        });
+        if (moves.length === 0) return;
+
+        // Optimistic update.
+        setLocalSections((prev) => {
+          const map = new Map(prev.map((s) => [s.id, s]));
+          for (const m of moves) {
+            const row = map.get(m.id);
+            if (row) {
+              map.set(m.id, {
+                ...row,
+                displayGroupId: m.displayGroupId,
+                displayGroupOrder: m.displayGroupOrder,
+              });
+            }
+          }
+          return Array.from(map.values());
+        });
+        setExpanded((prev) => new Set(prev).add(targetGroupSlug));
+
+        startTransition(async () => {
+          const result = await updateRoomDisplayGroup(projectId, moves);
+          if (result.error) {
+            console.error("updateRoomDisplayGroup:", result.error);
+            router.refresh();
+          }
+        });
+      }
+    },
+    [projectId, nodes, localSections, router, startTransition],
   );
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-      {/* Column header */}
-      <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-400">
-        <span className="w-4"></span>
-        <span>Section</span>
-        <span>Bucket</span>
-        <span className="text-right">Range</span>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <div className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-400">
+          <span className="w-4"></span>
+          <span className="w-4"></span>
+          <span>Section</span>
+          <span>Bucket</span>
+          <span className="text-right">Range</span>
+        </div>
+
+        {nodes.length === 0 ? (
+          <div className="px-4 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+            No sections with pricing yet.
+          </div>
+        ) : (
+          <SortableContext
+            items={nodes.filter((n) => !n.isLocked).map((n) => groupSortableId(n.slug))}
+            strategy={verticalListSortingStrategy}
+          >
+            {nodes.map((node) => (
+              <GroupRow
+                key={node.slug}
+                node={node}
+                expanded={expanded.has(node.slug)}
+                onToggle={() => toggleExpanded(node.slug)}
+              />
+            ))}
+          </SortableContext>
+        )}
       </div>
 
-      {nodes.length === 0 ? (
-        <div className="px-4 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
-          No sections with pricing yet.
-        </div>
-      ) : (
-        nodes.map((node) => (
-          <GroupRow key={node.slug} node={node} />
-        ))
+      <DragOverlay>{activeDrag ? <DragPreview data={activeDrag} /> : null}</DragOverlay>
+    </DndContext>
+  );
+}
+
+// ─── Sortable rows ──────────────────────────────────────────────────────────
+
+function GroupRow({
+  node,
+  expanded,
+  onToggle,
+}: {
+  node: GroupNode;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const isSingleRoom = node.members.length === 1;
+
+  if (isSingleRoom) {
+    return (
+      <GroupHeaderRow node={node} expanded={false} onToggle={() => {}} flat>
+        <SingleRoomInline node={node} />
+      </GroupHeaderRow>
+    );
+  }
+
+  return (
+    <>
+      <GroupHeaderRow node={node} expanded={expanded} onToggle={onToggle}>
+        <GroupHeaderContent node={node} expanded={expanded} />
+      </GroupHeaderRow>
+
+      {expanded && (
+        <SortableContext
+          items={node.members.map((m) => m.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {node.members.map((m) => (
+            <ChildRow key={m.id} member={m} groupSlug={node.slug} />
+          ))}
+        </SortableContext>
       )}
+    </>
+  );
+}
+
+function GroupHeaderRow({
+  node,
+  expanded,
+  onToggle,
+  flat = false,
+  children,
+}: {
+  node: GroupNode;
+  expanded: boolean;
+  onToggle: () => void;
+  flat?: boolean;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: groupSortableId(node.slug),
+    data: { type: "group", slug: node.slug } as GroupDragData,
+    disabled: node.isLocked,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      className={
+        "border-t border-zinc-100 dark:border-zinc-800 " +
+        (flat ? "" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50")
+      }
+    >
+      <div className="grid w-full grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 px-4 py-2 text-sm">
+        <span
+          className={
+            "flex h-5 w-4 items-center justify-center text-xs " +
+            (node.isLocked
+              ? "text-zinc-400"
+              : "cursor-grab text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200")
+          }
+          {...(node.isLocked ? {} : attributes)}
+          {...(node.isLocked ? {} : listeners)}
+          title={node.isLocked ? "COPE is pinned at the end" : "Drag to reorder groups"}
+          aria-label={node.isLocked ? "Locked" : "Drag handle"}
+        >
+          {node.isLocked ? "🔒" : "⋮⋮"}
+        </span>
+        {flat ? (
+          <span className="w-4"></span>
+        ) : (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className="flex h-5 w-4 items-center justify-center text-zinc-400"
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
 
-// ─── Group + child row rendering ────────────────────────────────────────────
-
-function GroupRow({ node }: { node: GroupNode }) {
-  const [expanded, setExpanded] = useState(false);
-  const isCope = node.slug === "cope";
-  const isSingleRoom = node.members.length === 1;
-
-  // Single-room groups render as a root-level row — no parent wrapper, no
-  // chevron. The row shows the room's own name and range.
-  if (isSingleRoom) {
-    const m = node.members[0];
-    return (
-      <div
-        className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 border-t border-zinc-100 px-4 py-2 text-sm dark:border-zinc-800"
-        title={m.sectionTypeName}
-      >
-        <span className="w-4">
-          {isCope ? (
-            <span aria-label="Locked" title="COPE is pinned at the end">🔒</span>
-          ) : null}
-        </span>
-        <span className="truncate text-zinc-900 dark:text-zinc-100">{m.name}</span>
-        <BucketBadge bucket={m.bucket} />
-        <span className="text-right font-medium tabular-nums text-zinc-700 dark:text-zinc-300">
-          {formatRange(m.totalLow, m.totalHigh)}
-        </span>
-      </div>
-    );
-  }
-
+function GroupHeaderContent({ node, expanded }: { node: GroupNode; expanded: boolean }) {
   const includesText = buildIncludesText(node.members);
-
   return (
     <>
-      {/* Parent row */}
-      <div className="border-t border-zinc-100 dark:border-zinc-800">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="grid w-full grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-2 text-left text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-          aria-expanded={expanded}
-        >
-          <span className="w-4 text-zinc-400">{expanded ? "▾" : "▸"}</span>
-          <span className="flex flex-col">
-            <span className="text-zinc-900 dark:text-zinc-100">{node.label}</span>
-            {includesText && (
-              <span className="mt-0.5 text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
-                {includesText}
-              </span>
-            )}
+      <span className="flex flex-col">
+        <span className="font-medium text-zinc-900 dark:text-zinc-100">{node.label}</span>
+        {includesText && !expanded && (
+          <span className="mt-0.5 text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+            {includesText}
           </span>
-          <BucketBadge bucket={node.bucket} />
-          <span className="text-right font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-            {formatRange(node.sumLow, node.sumHigh)}
-          </span>
-        </button>
-      </div>
-
-      {/* Child rows */}
-      {expanded &&
-        node.members.map((m) => (
-          <div
-            key={m.id}
-            className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 border-t border-zinc-100 bg-zinc-50/50 px-4 py-1.5 pl-10 text-[13px] dark:border-zinc-800 dark:bg-zinc-900/40"
-            title={m.sectionTypeName}
-          >
-            <span className="w-4"></span>
-            <span className="truncate text-zinc-700 dark:text-zinc-300">{m.name}</span>
-            <BucketBadge bucket={m.bucket} muted />
-            <span className="text-right tabular-nums text-zinc-600 dark:text-zinc-400">
-              {formatRange(m.totalLow, m.totalHigh)}
-            </span>
-          </div>
-        ))}
+        )}
+      </span>
+      <BucketBadge bucket={node.bucket} />
+      <span className="text-right font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+        {formatRange(node.sumLow, node.sumHigh)}
+      </span>
     </>
+  );
+}
+
+function SingleRoomInline({ node }: { node: GroupNode }) {
+  const m = node.members[0];
+  return (
+    <>
+      <span className="truncate text-zinc-900 dark:text-zinc-100" title={m.sectionTypeName}>
+        {m.name}
+      </span>
+      <BucketBadge bucket={m.bucket} />
+      <span className="text-right font-medium tabular-nums text-zinc-700 dark:text-zinc-300">
+        {formatRange(m.totalLow, m.totalHigh)}
+      </span>
+    </>
+  );
+}
+
+function ChildRow({ member, groupSlug }: { member: SectionRow; groupSlug: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: member.id,
+    data: { type: "room", slug: groupSlug, roomId: member.id } as RoomDragData,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 border-t border-zinc-100 bg-zinc-50/50 px-4 py-1.5 text-[13px] dark:border-zinc-800 dark:bg-zinc-900/40"
+      title={member.sectionTypeName}
+    >
+      <span
+        className="flex h-5 w-4 cursor-grab items-center justify-center text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag handle"
+      >
+        ⋮⋮
+      </span>
+      <span className="w-4 text-zinc-400">↳</span>
+      <span className="truncate text-zinc-700 dark:text-zinc-300">{member.name}</span>
+      <BucketBadge bucket={member.bucket} muted />
+      <span className="text-right tabular-nums text-zinc-600 dark:text-zinc-400">
+        {formatRange(member.totalLow, member.totalHigh)}
+      </span>
+    </div>
   );
 }
 
@@ -326,4 +400,25 @@ function BucketBadge({ bucket, muted }: { bucket: string; muted?: boolean }) {
       {label}
     </span>
   );
+}
+
+function DragPreview({ data }: { data: AnyDragData }) {
+  const text = data.type === "group" ? `Group: ${data.slug}` : `Room`;
+  return (
+    <div className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs shadow-lg dark:border-zinc-600 dark:bg-zinc-900">
+      {text}
+    </div>
+  );
+}
+
+// ─── Tiny hook: reset local state when props change ─────────────────────────
+
+function useSyncProps<T>(incoming: T, setLocal: (v: T) => void) {
+  const prevRef = useRef(incoming);
+  useEffect(() => {
+    if (prevRef.current !== incoming) {
+      prevRef.current = incoming;
+      setLocal(incoming);
+    }
+  }, [incoming, setLocal]);
 }

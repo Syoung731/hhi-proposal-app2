@@ -224,3 +224,103 @@ export async function moveInvestmentOrderAction(
   revalidatePath(`/admin/projects/${projectId}/preview`);
   return {};
 }
+
+// ─── Phase 8A.1 — Display-group moves ───────────────────────────────────────
+
+export type DisplayGroupMove = {
+  id: string;                 // Room.id
+  displayGroupId: string;     // new slug
+  displayGroupOrder: number;  // new within-group order
+};
+
+/**
+ * Batch-updates Room.displayGroupId + displayGroupOrder for a set of rooms
+ * on the same project. Validates every id belongs to `projectId` before
+ * mutating. Runs in a single Prisma transaction — partial apply is not
+ * possible.
+ *
+ * COPE rooms cannot be moved: any move targeting a COPE room (source) or
+ * moving a non-COPE room into the "cope" slug is rejected.
+ */
+export async function updateRoomDisplayGroup(
+  projectId: string,
+  moves: DisplayGroupMove[],
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (moves.length === 0) return {};
+
+  // Validate: every room belongs to this project; COPE is not being moved.
+  const roomIds = moves.map((m) => m.id);
+  const rows = await prisma.room.findMany({
+    where: { id: { in: roomIds } },
+    select: { id: true, projectId: true, isProjectOverhead: true },
+  });
+  if (rows.length !== roomIds.length) {
+    return { error: "One or more rooms not found" };
+  }
+  for (const r of rows) {
+    if (r.projectId !== projectId) {
+      return { error: `Room ${r.id} does not belong to this project` };
+    }
+    if (r.isProjectOverhead) {
+      return { error: "COPE room cannot be reparented" };
+    }
+  }
+  for (const m of moves) {
+    if (m.displayGroupId === "cope") {
+      return { error: "Cannot move a room into the COPE group" };
+    }
+  }
+
+  try {
+    await prisma.$transaction(
+      moves.map((m) =>
+        prisma.room.update({
+          where: { id: m.id },
+          data: {
+            displayGroupId: m.displayGroupId,
+            displayGroupOrder: m.displayGroupOrder,
+          },
+        }),
+      ),
+    );
+  } catch (err) {
+    return { error: String(err) };
+  }
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/**
+ * Writes Project.displayGroupOrder (the user's preferred group-render order).
+ * The array is stored as JSON. "cope" is stripped from the input — it is
+ * always forced to render last regardless of what's in the saved order.
+ */
+export async function updateProjectDisplayGroupOrder(
+  projectId: string,
+  slugOrder: string[],
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!project) return { error: "Project not found" };
+
+  const cleaned = slugOrder.filter((s) => typeof s === "string" && s !== "cope");
+
+  try {
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { displayGroupOrder: cleaned },
+    });
+  } catch (err) {
+    return { error: String(err) };
+  }
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
