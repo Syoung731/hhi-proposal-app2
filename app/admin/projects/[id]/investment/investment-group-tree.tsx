@@ -36,6 +36,8 @@ import {
   updateRoomDisplayGroup,
   updateProjectDisplayGroupOrder,
 } from "./actions";
+import { InvestmentAddGroupDropdown } from "./investment-add-group-dropdown";
+import { FIXED_GROUPS, type FixedGroupSlug } from "@/app/lib/investment/display-group-classifier";
 import {
   BUCKET_LABELS,
   buildGroupNodes,
@@ -133,6 +135,12 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
   const [localGroupOrder, setLocalGroupOrder] = useState<string[]>(groupOrder);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [activeDrag, setActiveDrag] = useState<AnyDragData | null>(null);
+  // Phase 8A.1c — transient empty groups added via "+ Add Group". Lost on
+  // refresh until at least one room is dropped in (which creates the real
+  // group on the server). Per spec.
+  const [pendingEmptySlugs, setPendingEmptySlugs] = useState<Set<FixedGroupSlug>>(
+    () => new Set(),
+  );
 
   useSyncProps(sections, setLocalSections);
   useSyncProps(groupOrder, setLocalGroupOrder);
@@ -141,6 +149,23 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
     () => buildGroupNodes(localSections.filter(hasPricing), localGroupOrder),
     [localSections, localGroupOrder],
   );
+
+  // Auto-clear pending-empty slugs once they have a real member — covers the
+  // case where a drop persists and the placeholder should retire silently.
+  useEffect(() => {
+    const realSlugs = new Set(nodes.map((n) => n.slug));
+    setPendingEmptySlugs((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const slug of prev) {
+        if (realSlugs.has(slug)) {
+          next.delete(slug);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [nodes]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -347,8 +372,20 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
+      {/* Header strip — Add Group button right-aligned. */}
+      <div className="mb-2 flex items-center justify-end">
+        <InvestmentAddGroupDropdown
+          projectId={projectId}
+          sections={localSections}
+          pendingEmptySlugs={pendingEmptySlugs}
+          onAddEmptyGroup={(slug) =>
+            setPendingEmptySlugs((prev) => new Set(prev).add(slug))
+          }
+        />
+      </div>
+
       <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-        {nodes.length === 0 ? (
+        {nodes.length === 0 && pendingEmptySlugs.size === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
             No pricing data yet. Add rooms in the Sections tab.
           </div>
@@ -357,35 +394,53 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
             const nonCope = nodes.filter((n) => !n.isLocked);
             const cope = nodes.find((n) => n.isLocked);
             const showRootZones = activeDrag?.type === "room";
+            const pendingArr = Array.from(pendingEmptySlugs);
             return (
-              <SortableContext
-                items={nonCope.map((n) => groupSortableId(n.slug))}
-                strategy={verticalListSortingStrategy}
-              >
-                {nonCope.map((node, i) => (
-                  <Fragment key={node.slug}>
-                    <DropZone
-                      id={`${PROMOTE_ZONE_PREFIX}${i}`}
-                      kind="promote"
-                      insertBeforeIndex={i}
-                      visible={showRootZones}
-                    />
-                    <GroupRow
-                      node={node}
-                      expanded={expanded.has(node.slug)}
-                      onToggle={() => toggleExpanded(node.slug)}
-                    />
-                  </Fragment>
-                ))}
-                <DropZone id={UNGROUP_ZONE_ID} kind="ungroup" visible={showRootZones} />
-                {cope && (
-                  <GroupRow
-                    node={cope}
-                    expanded={expanded.has(cope.slug)}
-                    onToggle={() => toggleExpanded(cope.slug)}
+              <>
+                {/* Empty placeholder rows — drop targets only. */}
+                {pendingArr.map((slug) => (
+                  <EmptyGroupPlaceholder
+                    key={`pending-${slug}`}
+                    slug={slug}
+                    onDismiss={() =>
+                      setPendingEmptySlugs((prev) => {
+                        const next = new Set(prev);
+                        next.delete(slug);
+                        return next;
+                      })
+                    }
                   />
-                )}
-              </SortableContext>
+                ))}
+
+                <SortableContext
+                  items={nonCope.map((n) => groupSortableId(n.slug))}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {nonCope.map((node, i) => (
+                    <Fragment key={node.slug}>
+                      <DropZone
+                        id={`${PROMOTE_ZONE_PREFIX}${i}`}
+                        kind="promote"
+                        insertBeforeIndex={i}
+                        visible={showRootZones}
+                      />
+                      <GroupRow
+                        node={node}
+                        expanded={expanded.has(node.slug)}
+                        onToggle={() => toggleExpanded(node.slug)}
+                      />
+                    </Fragment>
+                  ))}
+                  <DropZone id={UNGROUP_ZONE_ID} kind="ungroup" visible={showRootZones} />
+                  {cope && (
+                    <GroupRow
+                      node={cope}
+                      expanded={expanded.has(cope.slug)}
+                      onToggle={() => toggleExpanded(cope.slug)}
+                    />
+                  )}
+                </SortableContext>
+              </>
             );
           })()
         )}
@@ -608,6 +663,65 @@ function DragPreview({ data }: { data: AnyDragData }) {
   return (
     <div className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium shadow-lg dark:border-zinc-600 dark:bg-zinc-900">
       {text}
+    </div>
+  );
+}
+
+// ─── Empty group placeholder (Phase 8A.1c) ──────────────────────────────────
+
+/**
+ * Transient drop target rendered for slugs the user picked from "+ Add Group"
+ * that don't yet have any members. Disappears once a room is dropped onto
+ * it (the placeholder slug becomes a real group on the next render via the
+ * useEffect cleanup in InvestmentGroupTree).
+ */
+function EmptyGroupPlaceholder({
+  slug,
+  onDismiss,
+}: {
+  slug: FixedGroupSlug;
+  onDismiss: () => void;
+}) {
+  // Use the same droppable id format as a real parent header — the existing
+  // dragEnd handler treats this as `data: { type: "group", slug }`.
+  const dropData: GroupDragData = { type: "group", slug };
+  const { isOver, setNodeRef } = useDroppable({
+    id: groupSortableId(slug),
+    data: dropData,
+  });
+  const def = FIXED_GROUPS[slug];
+  const icon = groupIconFor(slug);
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={
+        "flex items-center gap-2 border-b border-orange-200 bg-orange-50 px-3 py-2 text-xs " +
+        (isOver ? "bg-orange-200" : "")
+      }
+    >
+      <span className="w-3 shrink-0"></span>
+      <span className="w-3 shrink-0"></span>
+      {icon ? (
+        <span className="shrink-0 text-sm leading-none" aria-hidden>{icon}</span>
+      ) : (
+        <span className="w-1 shrink-0"></span>
+      )}
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="truncate font-semibold text-orange-900">{def.label}</span>
+        <span className="truncate text-[10px] font-normal italic text-orange-700">
+          Drop rooms here
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 text-[12px] font-semibold text-orange-500 hover:text-orange-800"
+        title="Dismiss empty group"
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
     </div>
   );
 }
