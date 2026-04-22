@@ -159,12 +159,31 @@ export interface ProjectQAData {
   questions?: Array<{ question: string; answer: unknown; unit?: string | null }>;
 }
 
-export function buildCopeUserPrompt(
+/**
+ * Pieces of the COPE user prompt split along the static/dynamic boundary.
+ *
+ * `dynamicBlock` — varies per project (company context, aggregate totals,
+ *   room summary, trade summary, clarifications, permit fees, scope flags).
+ *   Must be sent fresh each call.
+ * `staticBlock`  — stable across calls that share the same COPE template
+ *   (template catalog + required JSON output format). Safe to mark with
+ *   `cache_control: { type: "ephemeral" }` for prompt caching on repeat
+ *   regenerations within the same project or across projects in a batch.
+ *
+ * Concatenating `dynamicBlock + "\n\n" + staticBlock` reproduces the legacy
+ * single-string prompt byte-for-byte — see `buildCopeUserPrompt` below.
+ */
+export interface CopeUserPromptParts {
+  dynamicBlock: string;
+  staticBlock: string;
+}
+
+export function buildCopeUserPromptParts(
   aggregateData: ProjectAggregateData,
   copeTemplate: RoomTemplateWithDetails,
   companyContext: CompanyContext,
   projectQA?: ProjectQAData | null,
-): string {
+): CopeUserPromptParts {
   // Room summary
   const roomSummary = aggregateData.rooms
     .map((r) => {
@@ -214,7 +233,7 @@ export function buildCopeUserPrompt(
     })
     .join("\n\n");
 
-  return `Generate a detailed COPE (Cost of Project Execution) estimate for this project based on the aggregate data below.
+  const dynamicBlock = `Generate a detailed COPE (Cost of Project Execution) estimate for this project based on the aggregate data below.
 
 ## Company Context
 - Market: ${companyContext.market}
@@ -250,15 +269,38 @@ For "[ADM] Plan Review Fee": unitCost = $${aggregateData.permitFees.planReviewFe
 - Electrical work: ${aggregateData.hasElectrical ? "Yes" : "No"}
 - Window/exterior door replacement: ${aggregateData.hasWindows ? "Yes" : "No"}
 - Total demo value: $${aggregateData.demoTotal.toLocaleString()}
-- Number of distinct trades: ${aggregateData.distinctTrades}
+- Number of distinct trades: ${aggregateData.distinctTrades}`;
 
-## COPE Template Catalog Items
+  const staticBlock = `## COPE Template Catalog Items
 Use these catalog items and prices. Items with $0 price are ALLOWANCE items — estimate based on the rules in the system prompt.
 
 ${catalogSection}
 
 ## Required JSON Output Format
 Return ONLY the JSON structure shown in the system prompt. Include ALL trade groups from the COPE template. Calculate quantities and prices for each item based on the aggregate project data and the calculation rules.`;
+
+  return { dynamicBlock, staticBlock };
+}
+
+/**
+ * Legacy single-string builder — preserved so any remaining callers that
+ * assemble the COPE prompt as one string (none in-tree today) behave
+ * identically. Byte-for-byte equal to `buildCopeUserPromptParts` joined
+ * with `\n\n`.
+ */
+export function buildCopeUserPrompt(
+  aggregateData: ProjectAggregateData,
+  copeTemplate: RoomTemplateWithDetails,
+  companyContext: CompanyContext,
+  projectQA?: ProjectQAData | null,
+): string {
+  const { dynamicBlock, staticBlock } = buildCopeUserPromptParts(
+    aggregateData,
+    copeTemplate,
+    companyContext,
+    projectQA,
+  );
+  return `${dynamicBlock}\n\n${staticBlock}`;
 }
 
 function buildProjectClarificationsSection(projectQA?: ProjectQAData | null): string {

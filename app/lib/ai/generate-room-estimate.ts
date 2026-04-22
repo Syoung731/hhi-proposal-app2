@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { AIEstimate, EstimateLineItem } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
@@ -15,6 +14,7 @@ import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
 import { classifyRoomForDetail } from "@/app/lib/room-classification";
+import { upsertCatalogSuggestion } from "@/app/lib/ai/catalog-suggestion-upsert";
 
 /**
  * Single-room AI estimate generation — the core pipeline shared between
@@ -324,47 +324,3 @@ export async function generateRoomEstimate(
   };
 }
 
-/**
- * Atomic CatalogSuggestion upsert — combines insert / increment / running-avg
- * recompute into one SQL statement so concurrent workers (Phase 8B parallel
- * room processing) can't race on the average computation.
- *
- * Why a single statement instead of `prisma.catalogSuggestion.upsert` + a
- * second UPDATE: under parallel writers, the two-statement version can let
- * writer A's UPDATE read the row state AFTER writer B's increment has landed,
- * yielding incorrect averages. PostgreSQL holds a row lock across the
- * INSERT...ON CONFLICT DO UPDATE clause, so writers serialize deterministically.
- *
- * The `"CatalogSuggestion"."occurrenceCount"` ref reads the EXISTING row's
- * pre-update value; `EXCLUDED.*` refs read the attempted-INSERT values. The
- * new average = (oldAvg * oldCount + newValue) / (oldCount + 1).
- */
-async function upsertCatalogSuggestion(params: {
-  itemName: string;
-  tradeGroup: string;
-  suggestedUnit: string;
-  unitPrice: number;
-  unitCost: number;
-}): Promise<void> {
-  const { itemName, tradeGroup, suggestedUnit, unitPrice, unitCost } = params;
-  const newId = randomUUID();
-
-  await prisma.$executeRaw`
-    INSERT INTO "CatalogSuggestion" (
-      "id", "itemName", "tradeGroup", "suggestedUnit",
-      "avgUnitPrice", "avgUnitCost", "occurrenceCount",
-      "status", "createdAt", "updatedAt"
-    ) VALUES (
-      ${newId}, ${itemName}, ${tradeGroup}, ${suggestedUnit},
-      ${unitPrice}, ${unitCost}, 1,
-      'pending', NOW(), NOW()
-    )
-    ON CONFLICT ("itemName") DO UPDATE SET
-      "avgUnitPrice"    = (COALESCE("CatalogSuggestion"."avgUnitPrice", 0) * "CatalogSuggestion"."occurrenceCount" + EXCLUDED."avgUnitPrice") / ("CatalogSuggestion"."occurrenceCount" + 1),
-      "avgUnitCost"     = (COALESCE("CatalogSuggestion"."avgUnitCost",  0) * "CatalogSuggestion"."occurrenceCount" + EXCLUDED."avgUnitCost")  / ("CatalogSuggestion"."occurrenceCount" + 1),
-      "occurrenceCount" = "CatalogSuggestion"."occurrenceCount" + 1,
-      "tradeGroup"      = EXCLUDED."tradeGroup",
-      "suggestedUnit"   = EXCLUDED."suggestedUnit",
-      "updatedAt"       = NOW()
-  `;
-}

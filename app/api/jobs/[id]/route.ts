@@ -17,17 +17,35 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const job = await prisma.estimateJob.findUnique({
-      where: { id },
-      include: {
-        project: { select: { id: true, title: true } },
-        items: {
-          include: { room: { select: { id: true, name: true } } },
-          // Deterministic order for stable UI rendering.
-          orderBy: { room: { name: "asc" } },
+    // Running these in parallel saves one roundtrip on the banner's 3s poll
+    // cadence. `autoGenerateCope` is read from the CompanySettings singleton
+    // so the banner can distinguish "IDLE because auto-trigger is off" from
+    // "IDLE because the QStash worker hasn't acquired the lock yet".
+    const [job, settings] = await Promise.all([
+      prisma.estimateJob.findUnique({
+        where: { id },
+        include: {
+          // Phase 8C: project.cope* fields surface COPE auto-trigger state
+          // so the banner can render its combined EstimateJob+COPE state
+          // machine without a second poll.
+          project: {
+            select: {
+              id: true,
+              title: true,
+              copeStatus: true,
+              copeGeneratedAt: true,
+              copeError: true,
+            },
+          },
+          items: {
+            include: { room: { select: { id: true, name: true } } },
+            // Deterministic order for stable UI rendering.
+            orderBy: { room: { name: "asc" } },
+          },
         },
-      },
-    });
+      }),
+      prisma.companySettings.findFirst({ select: { autoGenerateCope: true } }),
+    ]);
     if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
@@ -36,6 +54,15 @@ export async function GET(
       id: job.id,
       projectId: job.projectId,
       projectTitle: job.project.title,
+      project: {
+        id: job.project.id,
+        title: job.project.title,
+        copeStatus: job.project.copeStatus,
+        copeGeneratedAt: job.project.copeGeneratedAt,
+        copeError: job.project.copeError,
+      },
+      // Default to `true` to match the schema default when no CompanySettings row exists yet.
+      autoGenerateCope: settings?.autoGenerateCope ?? true,
       status: job.status,
       totalItems: job.totalItems,
       completedItems: job.completedItems,

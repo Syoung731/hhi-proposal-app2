@@ -7,6 +7,7 @@ import {
 } from "@/app/lib/ai/generate-room-estimate";
 import {
   MAX_JOB_ITEM_ATTEMPTS,
+  maybeAutoTriggerCope,
   rollUpJobStatus,
   type EstimateWorkerPayload,
   type JobItemPayload,
@@ -86,6 +87,7 @@ async function handler(request: Request): Promise<Response> {
       select: { id: true },
     });
     if (orphan) {
+      let rolledUpTo: "COMPLETED" | "PARTIAL" | "FAILED" | null = null;
       await prisma.$transaction(async (tx) => {
         await tx.jobItem.update({
           where: { id: jobItemId },
@@ -100,8 +102,14 @@ async function handler(request: Request): Promise<Response> {
           where: { id: item.estimateJobId },
           data: { completedItems: { increment: 1 } },
         });
-        await rollUpJobStatus(tx, item.estimateJobId);
+        rolledUpTo = await rollUpJobStatus(tx, item.estimateJobId);
       });
+      // Phase 8C: recovery-path completions can finalise the whole job just
+      // like the happy path. Fire the auto-trigger AFTER the tx commits so
+      // we never hold a DB connection during the QStash publish.
+      if (rolledUpTo === "COMPLETED") {
+        await maybeAutoTriggerCope(item.estimateJob.projectId, item.estimateJobId);
+      }
       return NextResponse.json({ status: "recovered", estimateId: orphan.id });
     }
     // No orphan — the previous attempt failed before creating an estimate.
@@ -160,6 +168,7 @@ async function handler(request: Request): Promise<Response> {
     });
 
     // ---------- (6) Finalise ----------
+    let rolledUpTo: "COMPLETED" | "PARTIAL" | "FAILED" | null = null;
     await prisma.$transaction(async (tx) => {
       await tx.jobItem.update({
         where: { id: jobItemId },
@@ -174,13 +183,24 @@ async function handler(request: Request): Promise<Response> {
         where: { id: item.estimateJobId },
         data: { completedItems: { increment: 1 } },
       });
-      await rollUpJobStatus(tx, item.estimateJobId);
+      rolledUpTo = await rollUpJobStatus(tx, item.estimateJobId);
     });
+
+    // Phase 8C: if this worker just finalised the whole job as clean
+    // COMPLETED, fire the COPE auto-trigger. PARTIAL and FAILED rollups
+    // never fire the trigger (PARTIAL would use stale aggregates; FAILED
+    // has nothing to aggregate). `maybeAutoTriggerCope` is best-effort —
+    // it respects `CompanySettings.autoGenerateCope` and swallows publish
+    // errors so a QStash outage won't crash the worker response.
+    if (rolledUpTo === "COMPLETED") {
+      await maybeAutoTriggerCope(item.estimateJob.projectId, item.estimateJobId);
+    }
 
     return NextResponse.json({
       status: "completed",
       estimateId: result.estimate.id,
       warnings: result.warnings,
+      copeAutoTriggered: rolledUpTo === "COMPLETED",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

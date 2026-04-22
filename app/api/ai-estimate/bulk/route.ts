@@ -121,3 +121,53 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+/**
+ * GET /api/ai-estimate/bulk?projectId=...
+ *
+ * Returns the most recent bulk estimate job for a project, or `null` if the
+ * project has never had one. Used by the rooms tab's "failed-room retry" bar
+ * to decide whether to surface the retry CTA and to enumerate failed items.
+ *
+ * Intentionally lean — no line-item details, no full items payload. Callers
+ * that need per-item drill-down should hit `GET /api/jobs/[id]`.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const projectId = new URL(request.url).searchParams.get("projectId");
+    if (!projectId) {
+      return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
+    }
+    const job = await prisma.estimateJob.findFirst({
+      where: { projectId },
+      orderBy: { createdAt: "desc" },
+      include: {
+        items: {
+          where: { status: "FAILED" },
+          select: { id: true, roomId: true, error: true },
+        },
+      },
+    });
+    if (!job) return NextResponse.json({ job: null });
+    return NextResponse.json({
+      job: {
+        id: job.id,
+        status: job.status,
+        totalItems: job.totalItems,
+        completedItems: job.completedItems,
+        failedItems: job.failedItems,
+        createdAt: job.createdAt,
+        completedAt: job.completedAt,
+        failedJobItems: job.items.map((i) => ({
+          id: i.id,
+          roomId: i.roomId,
+          error: i.error,
+        })),
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[ai-estimate/bulk] GET error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
