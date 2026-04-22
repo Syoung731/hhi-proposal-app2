@@ -352,6 +352,12 @@ export interface InvestmentLineItem {
   sortOrder?: number;
   /** @deprecated Not rendered — kept for backward compatibility. */
   isCope?: boolean;
+  /**
+   * Phase 8A.1 — descriptor shown beneath the label for grouped line items
+   * (e.g., "Includes: Primary Bedroom, Primary Bath, … and 2 more"). Null
+   * / absent on single-room groups and legacy (pre-refactor) snapshots.
+   */
+  includesText?: string | null;
 }
 
 export interface InvestmentContent extends SharedSlideFields {

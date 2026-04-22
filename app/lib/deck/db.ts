@@ -617,17 +617,24 @@ async function syncScopeBreakdownSlide(
   }
 }
 
-// ─── Auto-sync: Investment slide ─────────────────────────────────────────────
+// ─── Auto-sync: Investment slide (Phase 8A.1) ────────────────────────────────
 
 /**
- * Keeps the investment slide content in sync with the project's
- * InvestmentLineItem records.
+ * Keeps the investment slide content in sync with the project's Rooms,
+ * grouped by Room.displayGroupId. Replaces the prior path that read from
+ * `InvestmentLineItem` aggregate rollups.
  *
- * Mirrors the before/after sync pattern:
- * - Runs on every page load.
- * - Skipped when isUserModified = true (user has taken ownership of the content).
- * - Always overwrites lineItems so additions, deletions, and edits in the
- *   Investment tab are immediately reflected.
+ * Pipeline:
+ *   1. Fetch rooms with pricing + display-group metadata.
+ *   2. Fetch Project.displayGroupOrder (user's saved group sequence).
+ *   3. Filter out rooms with no pricing (both totalLow + totalHigh null).
+ *   4. Group by displayGroupId. Sort within each group by displayGroupOrder.
+ *   5. Sort groups: user-saved order → default priority → alphabetical.
+ *      COPE always last.
+ *   6. Emit one line item per group (summed range + "Includes:" descriptor).
+ *
+ * User-edited slides (isUserModified=true) remain immune — short-circuit.
+ * InvestmentLineItem rows stay live (still consumed by the publish snapshot).
  */
 async function syncInvestmentSlide(
   _deckId: string,
@@ -638,38 +645,107 @@ async function syncInvestmentSlide(
   const investmentRow = existing.find((r) => r.type === "investment");
   if (!investmentRow || investmentRow.isUserModified) return;
 
-  // Fetch all line items included in totals, in presentation order.
-  const items = await prisma.investmentLineItem.findMany({
-    where: { projectId, includeInTotals: true },
-    orderBy: { sortOrder: "asc" },
+  // 1. Rooms with pricing + grouping metadata.
+  const rooms = await prisma.room.findMany({
+    where: { projectId },
+    select: {
+      id: true,
+      name: true,
+      bucket: true,
+      totalLow: true,
+      totalTarget: true,
+      totalHigh: true,
+      displayGroupId: true,
+      displayGroupOrder: true,
+      isProjectOverhead: true,
+    },
   });
 
-  // Check if the project has a COPE room with pricing data
-  const copeRoom = await prisma.room.findFirst({
-    where: { projectId, isProjectOverhead: true },
-    select: { totalLow: true, totalTarget: true, totalHigh: true },
+  // 2. Project's saved group order.
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { displayGroupOrder: true },
   });
-  const hasCopePricing = copeRoom && (copeRoom.totalLow != null || copeRoom.totalTarget != null || copeRoom.totalHigh != null);
+  const savedOrder: string[] = Array.isArray(project?.displayGroupOrder)
+    ? (project!.displayGroupOrder as string[])
+    : [];
 
-  // Preserve retainerLabel / retainerAmount / address the user may have set
-  // in the inspector — only replace lineItems.
+  // 3. Filter rooms: drop any where both totalLow and totalHigh are null.
+  const priced = rooms.filter((r) => r.totalLow != null || r.totalHigh != null);
+
+  // 4. Group by displayGroupId.
+  type GroupBucket = typeof priced[number][];
+  const groups = new Map<string, GroupBucket>();
+  for (const r of priced) {
+    const slug = r.displayGroupId ?? "ungrouped";
+    const arr = groups.get(slug) ?? [];
+    arr.push(r);
+    groups.set(slug, arr);
+  }
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => {
+      if (a.displayGroupOrder !== b.displayGroupOrder) {
+        return a.displayGroupOrder - b.displayGroupOrder;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  // 5. Sort group slugs: user-saved first, then default priority, COPE last.
+  const userIndex = new Map(savedOrder.map((s, i) => [s, i]));
+  const allSlugs = Array.from(groups.keys());
+  allSlugs.sort((a, b) => {
+    if (a === "cope" && b !== "cope") return 1;
+    if (b === "cope" && a !== "cope") return -1;
+    const aUser = userIndex.get(a);
+    const bUser = userIndex.get(b);
+    if (aUser !== undefined && bUser !== undefined) return aUser - bUser;
+    if (aUser !== undefined) return -1;
+    if (bUser !== undefined) return 1;
+    const aPri = defaultSlugPriority(a);
+    const bPri = defaultSlugPriority(b);
+    if (aPri !== bPri) return aPri - bPri;
+    return a.localeCompare(b);
+  });
+
+  // 6. Build grouped line items.
+  const lineItems = allSlugs.flatMap((slug) => {
+    const members = groups.get(slug);
+    if (!members || members.length === 0) return [];
+
+    let sumLow = 0;
+    let sumHigh = 0;
+    let sumTarget = 0;
+    for (const m of members) {
+      sumLow += m.totalLow ?? 0;
+      sumHigh += m.totalHigh ?? 0;
+      sumTarget += m.totalTarget ?? 0;
+    }
+    // Skip groups whose summed range is zero (they'd render "—").
+    if (sumLow === 0 && sumHigh === 0) return [];
+
+    const label = groupLabelFor(slug, members);
+    const includesText = buildGroupIncludesText(members);
+    const bucket = String(members[0].bucket ?? "BASE");
+
+    return [{
+      id: slug,
+      label,
+      bucket,
+      rangeLow: sumLow,
+      rangeTarget: sumTarget,
+      rangeHigh: sumHigh,
+      overrideLow: null,
+      overrideTarget: null,
+      overrideHigh: null,
+      isOverride: false,
+      includeInTotals: true,
+      sortOrder: allSlugs.indexOf(slug),
+      includesText: includesText ?? undefined,
+    }];
+  });
+
   const currentContent = (investmentRow.content ?? {}) as InvestmentContent;
-  const lineItems = items.map((item) => ({
-    id: item.id,
-    label: item.label,
-    bucket: String(item.bucket ?? ""),
-    rangeLow: item.rangeLow ?? null,
-    rangeTarget: item.rangeTarget ?? null,
-    rangeHigh: item.rangeHigh ?? null,
-    overrideLow: item.overrideLow ?? null,
-    overrideTarget: item.overrideTarget ?? null,
-    overrideHigh: item.overrideHigh ?? null,
-    isOverride: item.isOverride,
-    includeInTotals: item.includeInTotals,
-    sortOrder: item.sortOrder,
-    // Mark the BASE line item as containing COPE data when a COPE room has pricing
-    isCope: item.bucket === "BASE" && hasCopePricing ? true : undefined,
-  }));
   const updatedContent: InvestmentContent = {
     ...currentContent,
     lineItems,
@@ -680,6 +756,62 @@ async function syncInvestmentSlide(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data: { content: updatedContent as any },
   });
+}
+
+/**
+ * Default priority index for a display-group slug (used when neither the
+ * saved order nor a specific rule applies).
+ */
+function defaultSlugPriority(slug: string): number {
+  if (slug === "primary-suite") return 0;
+  if (slug === "kitchen-dining") return 1;
+  if (slug === "living-spaces") return 2;
+  if (slug.startsWith("bedroom-")) return 3;
+  if (slug.startsWith("bathroom-")) return 4;
+  if (slug.startsWith("carolina-room-")) return 5;
+  if (slug === "utility") return 6;
+  if (slug === "outdoor") return 7;
+  if (slug === "storage") return 8;
+  if (slug === "ungrouped") return 9;
+  if (slug === "cope") return 99;
+  return 9; // unknown — treat as ungrouped
+}
+
+/**
+ * Group label: for individualized slugs (bedroom-xxx, bathroom-xxx,
+ * carolina-room-xxx) use the first member's name. Otherwise use a fixed
+ * human label.
+ */
+function groupLabelFor(slug: string, members: { name: string }[]): string {
+  if (
+    slug.startsWith("bedroom-") ||
+    slug.startsWith("bathroom-") ||
+    slug.startsWith("carolina-room-")
+  ) {
+    return members[0]?.name ?? "(Unnamed)";
+  }
+  switch (slug) {
+    case "primary-suite": return "Primary Suite";
+    case "kitchen-dining": return "Kitchen & Dining";
+    case "living-spaces": return "Living Spaces";
+    case "utility": return "Utility Rooms";
+    case "outdoor": return "Outdoor";
+    case "storage": return "Storage";
+    case "ungrouped": return members[0]?.name ?? "Additional";
+    case "cope": return "Cost of Project Execution";
+    default: return members[0]?.name ?? slug;
+  }
+}
+
+/**
+ * "Includes: X, Y, Z" descriptor. Null for single-member groups. Truncated
+ * to 3 names + "… and N more" when there are 4+ members.
+ */
+function buildGroupIncludesText(members: { name: string }[]): string | null {
+  if (members.length <= 1) return null;
+  const names = members.map((m) => m.name);
+  if (names.length <= 3) return `Includes: ${names.join(", ")}`;
+  return `Includes: ${names.slice(0, 3).join(", ")}, … and ${names.length - 3} more`;
 }
 
 /**
