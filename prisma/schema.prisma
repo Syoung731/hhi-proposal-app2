@@ -98,6 +98,13 @@ model Project {
   // deck falls back to the legacy objective/supportingText/bullets prose.
   objectivePillars Json?
 
+  // Phase 8A.1 — Investment tab display-group order.
+  // Array of slug strings representing the user-preferred render order for
+  // display groups (primary-suite, kitchen-dining, bedroom-<id>, ...).
+  // Empty array = use the default priority constant. "cope" is always forced
+  // last server-side regardless of what's stored here.
+  displayGroupOrder Json @default("[]")
+
   // Project Overhead (COPE) generation state (Phase 8C).
   // Doubles as an idempotency lock — writers acquire GENERATING via a
   // conditional updateMany() so simultaneous triggers can't race.
@@ -226,6 +233,19 @@ model Room {
   scopeQA                    Json?
   estimateStaleReason        String?
   bucket                     SectionBucket    @default(BASE)
+
+  // Phase 8A.1 — Investment tab display-group assignment.
+  // Slug naming:
+  //   - Fixed groups: "primary-suite" | "kitchen-dining" | "living-spaces"
+  //                   | "utility" | "outdoor" | "storage" | "ungrouped" | "cope"
+  //   - Per-room groups: "bedroom-<roomId>" | "bathroom-<roomId>" | "carolina-room-<roomId>"
+  // Set automatically at Room creation via the classifier. Nullable only for
+  // legacy rows before the backfill migration runs.
+  displayGroupId    String?
+  // Sort order within displayGroupId (and at root level when the slug is
+  // "ungrouped"). Written by user drag operations.
+  displayGroupOrder Int              @default(0)
+
   // Structured measurement fields (from Rendr LiDAR or manual entry)
   wallsSF                    Float?
   ceilingSF                  Float?
@@ -254,6 +274,7 @@ model Room {
   @@index([projectId, bucket])
   @@index([projectId, sortOrder])
   @@index([projectId, isProjectOverhead])
+  @@index([projectId, displayGroupId, displayGroupOrder])
   @@index([roomTypeId])
   @@index([stylePresetId])
   @@index([sectionTypeId])
