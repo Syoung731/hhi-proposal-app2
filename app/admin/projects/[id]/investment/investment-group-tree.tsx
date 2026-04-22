@@ -3,8 +3,12 @@
 /**
  * Investment tab — parent/child display-group tree with drag-to-reparent.
  *
+ * Phase 8A.1b — visual redesign to match the AI estimate pattern
+ * (`ai-estimate-panel.tsx`): tinted peach parent rows, compact row heights,
+ * inline metadata, emoji group icons. All drag logic + data flow unchanged.
+ *
  * Drag behaviors:
- *   - Child → parent header: reparents into that group (displayGroupId swap).
+ *   - Child → parent header: reparents into that group.
  *   - Child → another child: inserts at target position; adopts target's
  *     parent slug if crossing groups.
  *   - Parent → parent: reorders group render order.
@@ -55,6 +59,33 @@ type Props = {
   /** The project's saved group order (array of slugs). Empty = use default. */
   groupOrder: string[];
 };
+
+// ─── Visual constants ───────────────────────────────────────────────────────
+
+/**
+ * Group icons per slug / category. Emoji renders reliably across platforms and
+ * matches the AI estimate panel's lightweight aesthetic.
+ */
+function groupIconFor(slug: string): string {
+  if (slug === "primary-suite") return "🏠";
+  if (slug === "kitchen-dining") return "🍳";
+  if (slug === "living-spaces") return "🛋️";
+  if (slug.startsWith("bedroom-")) return "🛏️";
+  if (slug.startsWith("bathroom-")) return "🚿";
+  if (slug.startsWith("carolina-room-")) return "☀️";
+  if (slug === "utility") return "🧺";
+  if (slug === "outdoor") return "🌳";
+  if (slug === "storage") return "📦";
+  if (slug === "cope") return "💼";
+  return "📄"; // ungrouped
+}
+
+/** Shortened bucket label for the compact pill. */
+function shortBucketLabel(bucket: string): string {
+  if (bucket === "ALTERNATE") return "ALT";
+  if (bucket === "ALLOWANCE") return "ALLOW";
+  return BUCKET_LABELS[bucket] ?? bucket; // "Base"
+}
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
@@ -176,17 +207,9 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       onDragEnd={handleDragEnd}
     >
       <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <div className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-400">
-          <span className="w-4"></span>
-          <span className="w-4"></span>
-          <span>Section</span>
-          <span>Bucket</span>
-          <span className="text-right">Range</span>
-        </div>
-
         {nodes.length === 0 ? (
-          <div className="px-4 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            No sections with pricing yet.
+          <div className="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
+            No pricing data yet. Add rooms in the Sections tab.
           </div>
         ) : (
           <SortableContext
@@ -223,27 +246,24 @@ function GroupRow({
 }) {
   const isSingleRoom = node.members.length === 1;
 
+  // Single-room groups render as a tinted parent row with the room's details
+  // inline (no chevron, no children to expand). Matches the AI estimate's
+  // flat "Final Construction Cleaning" row.
   if (isSingleRoom) {
-    return (
-      <GroupHeaderRow node={node} expanded={false} onToggle={() => {}} flat>
-        <SingleRoomInline node={node} />
-      </GroupHeaderRow>
-    );
+    return <GroupHeaderRow node={node} expanded={false} onToggle={() => {}} flat />;
   }
 
   return (
     <>
-      <GroupHeaderRow node={node} expanded={expanded} onToggle={onToggle}>
-        <GroupHeaderContent node={node} expanded={expanded} />
-      </GroupHeaderRow>
+      <GroupHeaderRow node={node} expanded={expanded} onToggle={onToggle} />
 
       {expanded && (
         <SortableContext
           items={node.members.map((m) => m.id)}
           strategy={verticalListSortingStrategy}
         >
-          {node.members.map((m) => (
-            <ChildRow key={m.id} member={m} groupSlug={node.slug} />
+          {node.members.map((m, i) => (
+            <ChildRow key={m.id} member={m} groupSlug={node.slug} zebraIndex={i} />
           ))}
         </SortableContext>
       )}
@@ -256,13 +276,11 @@ function GroupHeaderRow({
   expanded,
   onToggle,
   flat = false,
-  children,
 }: {
   node: GroupNode;
   expanded: boolean;
   onToggle: () => void;
   flat?: boolean;
-  children: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: groupSortableId(node.slug),
@@ -270,6 +288,13 @@ function GroupHeaderRow({
     disabled: node.isLocked,
   });
 
+  const includesText = buildIncludesText(node.members);
+  const displayName = flat && node.members[0] ? node.members[0].name : node.label;
+  // Flat (single-room) rows show the room's own range directly; multi-room
+  // groups show the summed range.
+  const low = flat && node.members[0] ? node.members[0].totalLow : node.sumLow;
+  const high = flat && node.members[0] ? node.members[0].totalHigh : node.sumHigh;
+
   return (
     <div
       ref={setNodeRef}
@@ -279,83 +304,82 @@ function GroupHeaderRow({
         opacity: isDragging ? 0.4 : 1,
       }}
       className={
-        "border-t border-zinc-100 dark:border-zinc-800 " +
-        (flat ? "" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50")
+        "group/row flex items-center gap-2 border-b border-zinc-200 bg-orange-100 px-3 py-2 text-xs transition-colors " +
+        (node.isLocked ? "" : "hover:bg-orange-200/70") +
+        " dark:border-zinc-800"
       }
     >
-      <div className="grid w-full grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 px-4 py-2 text-sm">
-        <span
-          className={
-            "flex h-5 w-4 items-center justify-center text-xs " +
-            (node.isLocked
-              ? "text-zinc-400"
-              : "cursor-grab text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200")
-          }
-          {...(node.isLocked ? {} : attributes)}
-          {...(node.isLocked ? {} : listeners)}
-          title={node.isLocked ? "COPE is pinned at the end" : "Drag to reorder groups"}
-          aria-label={node.isLocked ? "Locked" : "Drag handle"}
-        >
-          {node.isLocked ? "🔒" : "⋮⋮"}
-        </span>
-        {flat ? (
-          <span className="w-4"></span>
-        ) : (
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            className="flex h-5 w-4 items-center justify-center text-zinc-400"
-          >
-            {expanded ? "▾" : "▸"}
-          </button>
-        )}
-        {children}
-      </div>
-    </div>
-  );
-}
+      {/* Drag handle — visible on hover only, except locked (COPE). */}
+      <span
+        className={
+          "flex h-4 w-3 shrink-0 items-center justify-center text-[11px] " +
+          (node.isLocked
+            ? "text-zinc-400"
+            : "cursor-grab text-zinc-400 opacity-0 group-hover/row:opacity-100 hover:text-zinc-700")
+        }
+        {...(node.isLocked ? {} : attributes)}
+        {...(node.isLocked ? {} : listeners)}
+        title={node.isLocked ? "COPE is pinned at the end" : "Drag to reorder groups"}
+        aria-label={node.isLocked ? "Locked" : "Drag handle"}
+      >
+        {node.isLocked ? "🔒" : "⋮⋮"}
+      </span>
 
-function GroupHeaderContent({ node, expanded }: { node: GroupNode; expanded: boolean }) {
-  const includesText = buildIncludesText(node.members);
-  return (
-    <>
-      <span className="flex flex-col">
-        <span className="font-medium text-zinc-900 dark:text-zinc-100">{node.label}</span>
-        {includesText && !expanded && (
-          <span className="mt-0.5 text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+      {/* Chevron — hidden on flat single-room and locked rows. */}
+      {flat || node.isLocked ? (
+        <span className="w-3 shrink-0"></span>
+      ) : (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          className="flex h-4 w-3 shrink-0 items-center justify-center text-[10px] text-zinc-500 hover:text-zinc-800"
+        >
+          {expanded ? "▼" : "▶"}
+        </button>
+      )}
+
+      {/* Group icon */}
+      <span className="shrink-0 text-sm leading-none" aria-hidden>
+        {groupIconFor(node.slug)}
+      </span>
+
+      {/* Label + (optional) Includes descriptor inline */}
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="truncate font-semibold text-zinc-900 dark:text-zinc-100">
+          {displayName}
+        </span>
+        {!flat && !expanded && includesText && (
+          <span className="truncate text-[10px] font-normal text-zinc-500 dark:text-zinc-400">
             {includesText}
           </span>
         )}
       </span>
-      <BucketBadge bucket={node.bucket} />
-      <span className="text-right font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-        {formatRange(node.sumLow, node.sumHigh)}
+
+      <BucketPill bucket={node.bucket} />
+
+      <span className="shrink-0 tabular-nums font-semibold text-zinc-900 dark:text-zinc-100">
+        {formatRange(low, high)}
       </span>
-    </>
+    </div>
   );
 }
 
-function SingleRoomInline({ node }: { node: GroupNode }) {
-  const m = node.members[0];
-  return (
-    <>
-      <span className="truncate text-zinc-900 dark:text-zinc-100" title={m.sectionTypeName}>
-        {m.name}
-      </span>
-      <BucketBadge bucket={m.bucket} />
-      <span className="text-right font-medium tabular-nums text-zinc-700 dark:text-zinc-300">
-        {formatRange(m.totalLow, m.totalHigh)}
-      </span>
-    </>
-  );
-}
-
-function ChildRow({ member, groupSlug }: { member: SectionRow; groupSlug: string }) {
+function ChildRow({
+  member,
+  groupSlug,
+  zebraIndex,
+}: {
+  member: SectionRow;
+  groupSlug: string;
+  zebraIndex: number;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: member.id,
     data: { type: "room", slug: groupSlug, roomId: member.id } as RoomDragData,
   });
+
+  const zebra = zebraIndex % 2 === 0 ? "bg-white" : "bg-zinc-50";
 
   return (
     <div
@@ -365,36 +389,45 @@ function ChildRow({ member, groupSlug }: { member: SectionRow; groupSlug: string
         transition,
         opacity: isDragging ? 0.4 : 1,
       }}
-      className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 border-t border-zinc-100 bg-zinc-50/50 px-4 py-1.5 text-[13px] dark:border-zinc-800 dark:bg-zinc-900/40"
+      className={
+        "group/row flex items-center gap-2 border-b border-zinc-100 pl-10 pr-3 py-1.5 text-[13px] transition-colors " +
+        zebra +
+        " hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/40"
+      }
       title={member.sectionTypeName}
     >
       <span
-        className="flex h-5 w-4 cursor-grab items-center justify-center text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        className="flex h-4 w-3 shrink-0 cursor-grab items-center justify-center text-[11px] text-zinc-400 opacity-0 group-hover/row:opacity-100 hover:text-zinc-700"
         {...attributes}
         {...listeners}
         aria-label="Drag handle"
       >
         ⋮⋮
       </span>
-      <span className="w-4 text-zinc-400">↳</span>
-      <span className="truncate text-zinc-700 dark:text-zinc-300">{member.name}</span>
-      <BucketBadge bucket={member.bucket} muted />
-      <span className="text-right tabular-nums text-zinc-600 dark:text-zinc-400">
+      <span className="min-w-0 flex-1 truncate text-zinc-800 dark:text-zinc-300">
+        {member.name}
+      </span>
+      <BucketPill bucket={member.bucket} muted />
+      <span className="shrink-0 tabular-nums text-zinc-700 dark:text-zinc-400">
         {formatRange(member.totalLow, member.totalHigh)}
       </span>
     </div>
   );
 }
 
-function BucketBadge({ bucket, muted }: { bucket: string; muted?: boolean }) {
-  const label = BUCKET_LABELS[bucket] ?? bucket;
+function BucketPill({ bucket, muted }: { bucket: string; muted?: boolean }) {
+  const label = shortBucketLabel(bucket);
+  const isBase = bucket === "BASE";
+  const cls = muted
+    ? "text-zinc-500 dark:text-zinc-500"
+    : isBase
+    ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+    : "bg-amber-50 text-amber-700 border border-amber-200";
   return (
     <span
       className={
-        "rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider " +
-        (muted
-          ? "bg-transparent text-zinc-500 dark:text-zinc-500"
-          : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300")
+        "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider " +
+        cls
       }
     >
       {label}
@@ -403,9 +436,9 @@ function BucketBadge({ bucket, muted }: { bucket: string; muted?: boolean }) {
 }
 
 function DragPreview({ data }: { data: AnyDragData }) {
-  const text = data.type === "group" ? `Group: ${data.slug}` : `Room`;
+  const text = data.type === "group" ? "Moving group…" : "Moving room…";
   return (
-    <div className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs shadow-lg dark:border-zinc-600 dark:bg-zinc-900">
+    <div className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium shadow-lg dark:border-zinc-600 dark:bg-zinc-900">
       {text}
     </div>
   );

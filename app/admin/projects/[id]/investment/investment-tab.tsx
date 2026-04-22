@@ -133,7 +133,11 @@ export function InvestmentTab({ projectId, sections, retainer, groupOrder = [] }
         </button>
         {showBreakdown && (
           <div className="mt-3">
-            <InvestmentGroupTree sections={treeSections} groupOrder={groupOrder} />
+            <InvestmentGroupTree
+              projectId={projectId}
+              sections={treeSections}
+              groupOrder={groupOrder}
+            />
           </div>
         )}
       </section>
