@@ -93,6 +93,8 @@ export type CompanySettingsForUI = {
   roomTypeLowPct: number | null;
   roomTypeHighPct: number | null;
   anthropicModel: string | null;
+  aiEstimateConcurrency: number | null;
+  autoGenerateCope: boolean;
   geminiImageModel: string | null;
   geminiImageGenModel: string | null;
 };

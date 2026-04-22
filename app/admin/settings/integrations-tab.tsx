@@ -14,6 +14,8 @@ import {
   saveAnthropicApiKeyAction,
   testAnthropicConnectionAction,
   saveAnthropicModelAction,
+  saveAiEstimateConcurrencyAction,
+  saveAutoGenerateCopeAction,
   getGeminiIntegrationAction,
   saveGeminiApiKeyAction,
   testGeminiConnectionAction,
@@ -366,6 +368,24 @@ export function IntegrationsTab({ settings }: Props) {
   const [modelSaveStatus, setModelSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
 
+  // AI Estimate Parallelism (Phase 8B — bulk-job concurrency).
+  // Empty string means "use default 8"; otherwise the value is a number in [1..20].
+  const [concurrencyDraft, setConcurrencyDraft] = useState<string>(
+    settings.aiEstimateConcurrency != null ? String(settings.aiEstimateConcurrency) : "",
+  );
+  const [concurrencySaveStatus, setConcurrencySaveStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [concurrencySaveError, setConcurrencySaveError] = useState<string | null>(null);
+
+  // Auto-generate Project Overhead (Phase 8C). Saves optimistically; on error the
+  // checkbox snaps back to the server-accepted value.
+  const [autoGenerateCope, setAutoGenerateCope] = useState<boolean>(settings.autoGenerateCope);
+  const [autoCopeSaveStatus, setAutoCopeSaveStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [autoCopeSaveError, setAutoCopeSaveError] = useState<string | null>(null);
+
   const fetchModels = useCallback(async () => {
     setModelsLoading(true);
     setModelsError(null);
@@ -391,6 +411,49 @@ export function IntegrationsTab({ settings }: Props) {
     } else {
       setModelSaveStatus("saved");
       setTimeout(() => setModelSaveStatus("idle"), 3000);
+    }
+  }
+
+  async function handleConcurrencySave() {
+    setConcurrencySaveStatus("saving");
+    setConcurrencySaveError(null);
+    const trimmed = concurrencyDraft.trim();
+    let value: number | null;
+    if (trimmed === "") {
+      value = null;
+    } else {
+      const parsed = Number(trimmed);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
+        setConcurrencySaveStatus("error");
+        setConcurrencySaveError("Enter an integer between 1 and 20, or leave blank for the default (8).");
+        return;
+      }
+      value = parsed;
+    }
+    const result = await saveAiEstimateConcurrencyAction(value);
+    if (result.error) {
+      setConcurrencySaveStatus("error");
+      setConcurrencySaveError(result.error);
+    } else {
+      setConcurrencySaveStatus("saved");
+      setTimeout(() => setConcurrencySaveStatus("idle"), 3000);
+    }
+  }
+
+  async function handleAutoCopeToggle(next: boolean) {
+    // Optimistic flip — snap back on error.
+    const prev = autoGenerateCope;
+    setAutoGenerateCope(next);
+    setAutoCopeSaveStatus("saving");
+    setAutoCopeSaveError(null);
+    const result = await saveAutoGenerateCopeAction(next);
+    if (result.error) {
+      setAutoGenerateCope(prev);
+      setAutoCopeSaveStatus("error");
+      setAutoCopeSaveError(result.error);
+    } else {
+      setAutoCopeSaveStatus("saved");
+      setTimeout(() => setAutoCopeSaveStatus("idle"), 3000);
     }
   }
 
@@ -986,6 +1049,80 @@ export function IntegrationsTab({ settings }: Props) {
                   {modelSaveStatus === "error" && modelSaveError && (
                     <span className="text-sm text-red-600 dark:text-red-400">{modelSaveError}</span>
                   )}
+                </div>
+
+                {/* AI Estimate Parallelism (Phase 8B) */}
+                <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700 space-y-3">
+                  <label htmlFor="aiEstimateConcurrency" className={labelClass}>
+                    AI Estimate Parallelism
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="aiEstimateConcurrency"
+                      type="number"
+                      min={1}
+                      max={20}
+                      step={1}
+                      placeholder="8"
+                      value={concurrencyDraft}
+                      onChange={(e) => setConcurrencyDraft(e.target.value)}
+                      className={`${inputClass} max-w-[120px]`}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleConcurrencySave}
+                      disabled={concurrencySaveStatus === "saving"}
+                      className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                    >
+                      {concurrencySaveStatus === "saving" ? "Saving…" : "Save"}
+                    </button>
+                    {concurrencySaveStatus === "saved" && (
+                      <span className="text-sm text-green-600 dark:text-green-400">Saved.</span>
+                    )}
+                    {concurrencySaveStatus === "error" && concurrencySaveError && (
+                      <span className="text-sm text-red-600 dark:text-red-400">
+                        {concurrencySaveError}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xl">
+                    How many room estimates run in parallel in the background. Higher =
+                    faster, but limited by your Anthropic API tier. Recommended: 2 (Tier 1),
+                    5 (Tier 2), 8 (Tier 3+). Default 8 if blank.
+                  </p>
+                </div>
+
+                {/* Auto-generate Project Overhead (Phase 8C) */}
+                <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700 space-y-2">
+                  <label className="flex cursor-pointer items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoGenerateCope}
+                      onChange={(e) => handleAutoCopeToggle(e.target.checked)}
+                      disabled={autoCopeSaveStatus === "saving"}
+                      className="mt-0.5 h-4 w-4"
+                      style={{ accentColor: "var(--brand-accent)" }}
+                    />
+                    <span className="flex flex-col gap-1">
+                      <span className={labelClass + " mb-0"}>Auto-generate Project Overhead</span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xl">
+                        Automatically generates the project overhead (COPE) calculation when
+                        all room estimates complete successfully. You can always generate it
+                        manually from the estimates banner. Default: on.
+                      </span>
+                    </span>
+                  </label>
+                  <div className="ml-6 flex items-center gap-3 text-xs">
+                    {autoCopeSaveStatus === "saving" && (
+                      <span className="text-zinc-500 dark:text-zinc-400">Saving&hellip;</span>
+                    )}
+                    {autoCopeSaveStatus === "saved" && (
+                      <span className="text-green-600 dark:text-green-400">Saved.</span>
+                    )}
+                    {autoCopeSaveStatus === "error" && autoCopeSaveError && (
+                      <span className="text-red-600 dark:text-red-400">{autoCopeSaveError}</span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

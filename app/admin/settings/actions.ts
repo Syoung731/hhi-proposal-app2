@@ -543,6 +543,67 @@ export async function saveAnthropicModelAction(model: string): Promise<{ error?:
   }
 }
 
+/**
+ * Persist the bulk-estimate parallelism setting. `null` clears the override and
+ * falls back to the hard-coded default (8) in `getAiEstimateConcurrency()`.
+ * Bounds (1..20) match the input bounds in the admin UI — anything outside is
+ * a programming bug, not user input, so we throw rather than silently clamp.
+ */
+export async function saveAiEstimateConcurrencyAction(
+  value: number | null,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (value != null) {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1 || value > 20) {
+      return { error: "Parallelism must be an integer between 1 and 20." };
+    }
+  }
+  try {
+    const settings = await prisma.companySettings.findFirst();
+    if (settings) {
+      await prisma.companySettings.update({
+        where: { id: settings.id },
+        data: { aiEstimateConcurrency: value },
+      });
+    } else {
+      await prisma.companySettings.create({ data: { aiEstimateConcurrency: value } });
+    }
+    // The in-memory memo in `getAiEstimateConcurrency()` is TTL-bounded at 60s,
+    // so the next bulk-job fan-out picks up the change within a minute without
+    // any explicit invalidation wiring needed here.
+    revalidatePath("/admin/settings");
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to save parallelism." };
+  }
+}
+
+/**
+ * Phase 8C: toggle the auto-fire of project overhead (COPE) when a bulk
+ * estimate job lands COMPLETED. `maybeAutoTriggerCope()` in the estimate-room
+ * worker reads this fresh on every completion — no cache invalidation needed.
+ */
+export async function saveAutoGenerateCopeAction(
+  enabled: boolean,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  try {
+    const settings = await prisma.companySettings.findFirst();
+    if (settings) {
+      await prisma.companySettings.update({
+        where: { id: settings.id },
+        data: { autoGenerateCope: enabled },
+      });
+    } else {
+      await prisma.companySettings.create({ data: { autoGenerateCope: enabled } });
+    }
+    revalidatePath("/admin/settings");
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to save auto-trigger setting." };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Google Gemini integration (AI image generation)
 // ---------------------------------------------------------------------------

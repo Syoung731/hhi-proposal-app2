@@ -124,6 +124,8 @@ export default async function SettingsTabPage({
         roomTypeLowPct: settings.roomTypeLowPct,
         roomTypeHighPct: settings.roomTypeHighPct,
         anthropicModel: settings.anthropicModel,
+        aiEstimateConcurrency: settings.aiEstimateConcurrency,
+        autoGenerateCope: settings.autoGenerateCope,
         geminiImageModel: settings.geminiImageModel,
         geminiImageGenModel: settings.geminiImageGenModel,
       }}
