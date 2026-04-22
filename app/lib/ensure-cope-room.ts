@@ -1,4 +1,5 @@
 import { prisma } from "@/app/lib/prisma";
+import { assignDisplayGroupForRoom } from "@/app/lib/investment/assign-display-group";
 
 export async function ensureCopeRoom(projectId: string) {
   // Check if COPE room already exists
@@ -52,6 +53,8 @@ By including these essential services in the Cost of Project Execution, HHI Buil
       scopeSource: "TEMPLATE",
     },
   });
+
+  await assignDisplayGroupForRoom(copeRoom.id);
 
   console.log("Created COPE room for project", projectId);
   return copeRoom;

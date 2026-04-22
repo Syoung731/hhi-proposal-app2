@@ -14,6 +14,10 @@ import { computeSectionTotals } from "@/app/lib/section-totals";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 import { ensureCopeRoom } from "@/app/lib/ensure-cope-room";
 import {
+  assignDisplayGroupForRoom,
+  assignDisplayGroupsForRooms,
+} from "@/app/lib/investment/assign-display-group";
+import {
   extractRoomsFromTranscript,
   rewriteRoomScopeNarrative,
   mergeRoomScopesNarrative,
@@ -186,7 +190,7 @@ export async function createRoomAction(projectId: string, formData: FormData): P
   // doesn't reset the Pricing Profile back to Custom.
   const sectionTypeId =
     sectionTypeIdRaw && sectionTypeIdRaw !== "" ? sectionTypeIdRaw : null;
-  await prisma.room.create({
+  const created = await prisma.room.create({
     data: {
       projectId,
       name: name || "Section",
@@ -198,7 +202,9 @@ export async function createRoomAction(projectId: string, formData: FormData): P
       origin: "MANUAL",
       bucket: "BASE",
     },
+    select: { id: true },
   });
+  await assignDisplayGroupForRoom(created.id);
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -982,6 +988,7 @@ export async function generateRoomsFromTranscriptAction(
       })),
     });
     createdRooms = created.map((r) => ({ id: r.id, name: r.name, sectionTypeId: r.sectionTypeId }));
+    await assignDisplayGroupsForRooms(created.map((r) => r.id));
     const byName = new Map<string, string[]>();
     for (const room of created) {
       if (!room.sectionTypeId) {
@@ -1525,6 +1532,7 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
         measurementSource: (row.lengthIn != null || row.widthIn != null) ? "transcript" : null,
       })),
     });
+    await assignDisplayGroupsForRooms(created.map((r) => r.id));
     const byName = new Map<string, string[]>();
     for (const room of created) {
       if (!room.sectionTypeId) {

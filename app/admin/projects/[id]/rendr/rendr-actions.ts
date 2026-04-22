@@ -10,6 +10,7 @@ import { classifyRoomForDetail, type RoomDetail } from "@/app/lib/room-classific
 import { extractCeilingHeightForMappedRooms } from "@/app/lib/rendr/extractCeilingHeight";
 import { computeUnitQuantity } from "@/app/lib/section-unit-quantity";
 import { computeSectionTotals } from "@/app/lib/section-totals";
+import { assignDisplayGroupForRoom } from "@/app/lib/investment/assign-display-group";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -203,6 +204,7 @@ export async function importRendrMeasurements(
           totalHigh: totals.totalHigh,
         },
       });
+      await assignDisplayGroupForRoom(newRoom.id);
       resolvedMappings.push({
         rendrRoomIndex: m.rendrRoomIndex,
         floorSF: m.floorSF,
