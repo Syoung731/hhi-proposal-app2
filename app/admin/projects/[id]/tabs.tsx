@@ -219,6 +219,7 @@ export function ProjectTabs({
         {currentTab === "investment" && (
           <InvestmentTab
             projectId={project.id}
+            groupOrder={Array.isArray(project.displayGroupOrder) ? (project.displayGroupOrder as string[]) : []}
             sections={project.rooms.map((r) => ({
               id: r.id,
               name: r.name,
@@ -229,6 +230,9 @@ export function ProjectTabs({
               totalLow: r.totalLow ?? null,
               totalTarget: r.totalTarget ?? null,
               totalHigh: r.totalHigh ?? null,
+              displayGroupId: r.displayGroupId ?? null,
+              displayGroupOrder: r.displayGroupOrder,
+              isProjectOverhead: r.isProjectOverhead,
             }))}
             items={project.investmentLineItems.map((i) => ({
               id: i.id,

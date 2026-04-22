@@ -4,12 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateProjectRetainer, type UpdateProjectRetainerPatch } from "./actions";
 import { computeRetainer, type RetainerSettings } from "@/app/lib/retainer";
-
-const BUCKET_LABELS: Record<string, string> = {
-  BASE: "Base",
-  ALTERNATE: "Alternates",
-  ALLOWANCE: "Allowances",
-};
+import { InvestmentGroupTree, type SectionRow } from "./investment-group-tree";
 
 type Section = {
   id: string;
@@ -21,6 +16,9 @@ type Section = {
   totalLow: number | null;
   totalTarget: number | null;
   totalHigh: number | null;
+  displayGroupId: string | null;
+  displayGroupOrder: number;
+  isProjectOverhead: boolean;
 };
 
 type Item = {
@@ -52,6 +50,8 @@ type Props = {
   sections: Section[];
   items: Item[];
   retainer: Retainer;
+  /** Project.displayGroupOrder — saved slug sequence for the tree. Empty = use default. */
+  groupOrder?: string[];
 };
 
 function formatMoney(n: number | null | undefined): string {
@@ -59,18 +59,28 @@ function formatMoney(n: number | null | undefined): string {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
-function sectionRange(s: Section): string {
-  const lo = s.totalLow != null ? Math.round(s.totalLow) : null;
-  const hi = s.totalHigh != null ? Math.round(s.totalHigh) : null;
-  if (lo == null && hi == null) return "TBD";
-  if (lo != null && hi != null) return `${formatMoney(lo)} – ${formatMoney(hi)}`;
-  return formatMoney(lo ?? hi);
-}
-
-export function InvestmentTab({ projectId, sections, retainer }: Props) {
+export function InvestmentTab({ projectId, sections, retainer, groupOrder = [] }: Props) {
   const sectionsSorted = useMemo(
     () => [...sections].sort((a, b) => a.sortOrder - b.sortOrder),
     [sections]
+  );
+
+  // Build the tree's SectionRow[] — same data, renamed fields.
+  const treeSections: SectionRow[] = useMemo(
+    () =>
+      sectionsSorted.map((s) => ({
+        id: s.id,
+        name: s.name,
+        bucket: s.bucket,
+        sectionTypeName: s.sectionTypeName,
+        totalLow: s.totalLow,
+        totalTarget: s.totalTarget,
+        totalHigh: s.totalHigh,
+        displayGroupId: s.displayGroupId,
+        displayGroupOrder: s.displayGroupOrder,
+        isProjectOverhead: s.isProjectOverhead,
+      })),
+    [sectionsSorted]
   );
 
   const subtotalLow = sectionsSorted.reduce((sum, s) => sum + (s.totalLow ?? 0), 0);
@@ -122,50 +132,8 @@ export function InvestmentTab({ projectId, sections, retainer }: Props) {
           <span className="text-zinc-400">{showBreakdown ? "▾" : "▸"}</span>
         </button>
         {showBreakdown && (
-          <div className="mt-3 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-zinc-50 dark:bg-zinc-800/50">
-                <tr>
-                  <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                    Section
-                  </th>
-                  <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                    Bucket
-                  </th>
-                  <th className="px-4 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                    Pricing profile
-                  </th>
-                  <th className="px-4 py-2 text-right font-medium text-zinc-900 dark:text-zinc-100">
-                    Range
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {(["BASE", "ALTERNATE", "ALLOWANCE"] as const).flatMap((bucket) =>
-                  sectionsSorted
-                    .filter((s) => s.bucket === bucket)
-                    .map((section) => (
-                      <tr
-                        key={section.id}
-                        className="border-t border-zinc-100 dark:border-zinc-800"
-                      >
-                        <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
-                          {section.name}
-                        </td>
-                        <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                          {BUCKET_LABELS[bucket] ?? bucket}
-                        </td>
-                        <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                          {section.sectionTypeName}
-                        </td>
-                        <td className="px-4 py-2 text-right font-medium text-zinc-700 dark:text-zinc-300 tabular-nums">
-                          {sectionRange(section)}
-                        </td>
-                      </tr>
-                    ))
-                )}
-              </tbody>
-            </table>
+          <div className="mt-3">
+            <InvestmentGroupTree sections={treeSections} groupOrder={groupOrder} />
           </div>
         )}
       </section>
