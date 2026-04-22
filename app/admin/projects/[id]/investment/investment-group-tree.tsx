@@ -17,7 +17,7 @@
  * rooms are hidden. Pure-logic helpers live in investment-group-tree-logic.ts.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -26,6 +26,7 @@ import {
   DragStartEvent,
   PointerSensor,
   closestCenter,
+  useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -80,12 +81,47 @@ function groupIconFor(slug: string): string {
   return "📄"; // ungrouped
 }
 
+/**
+ * For a standalone group, derive an icon from the underlying room's name —
+ * mirrors the classifier's regex rules so a standalone "Primary Bath" still
+ * shows 🚿. Returns "" when no rule matches (the row simply renders no icon).
+ */
+function standaloneIconFromName(name: string): string {
+  const n = name.toLowerCase();
+  if (/\b(primary|master)\b/.test(n)) return "🏠";
+  if (/\b(kitchen|pantry|breakfast|dining|wet bar)\b/.test(n)) return "🍳";
+  if (/\b(living room|family|great room|entry way|foyer)\b/.test(n)) return "🛋️";
+  if (/\bcarolina\b/.test(n)) return "☀️";
+  if (/\bbedroom\b/.test(n)) return "🛏️";
+  if (/\b(bath|powder|jack)\b/.test(n)) return "🚿";
+  if (/\b(laundry|mud)\b/.test(n)) return "🧺";
+  if (/\b(exterior|outdoor|patio|deck|porch)\b/.test(n)) return "🌳";
+  if (/\b(attic|basement|garage|storage)\b/.test(n)) return "📦";
+  return "";
+}
+
+function iconForNode(node: GroupNode): string {
+  if (node.slug.startsWith("standalone-")) {
+    return standaloneIconFromName(node.members[0]?.name ?? "");
+  }
+  return groupIconFor(node.slug);
+}
+
 /** Shortened bucket label for the compact pill. */
 function shortBucketLabel(bucket: string): string {
   if (bucket === "ALTERNATE") return "ALT";
   if (bucket === "ALLOWANCE") return "ALLOW";
   return BUCKET_LABELS[bucket] ?? bucket; // "Base"
 }
+
+// ─── Synthetic drop-zone ids ────────────────────────────────────────────────
+// Phase 8A.1c: invisible drop targets between non-cope parent rows that
+// promote a child room to a standalone top-level group, plus one ungroup
+// zone above COPE.
+const PROMOTE_ZONE_PREFIX = "root-promote-";
+const UNGROUP_ZONE_ID = "root-ungroup";
+
+type RootZoneData = { type: "root-zone"; kind: "promote" | "ungroup"; insertBeforeIndex?: number };
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
@@ -131,7 +167,7 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       if (!over || active.id === over.id) return;
 
       const activeData = active.data.current as AnyDragData | undefined;
-      const overData = over.data.current as AnyDragData | undefined;
+      const overData = over.data.current as AnyDragData | RootZoneData | undefined;
       if (!activeData) return;
 
       // Parent-header drag: reorder groups.
@@ -149,8 +185,113 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
         return;
       }
 
-      // Room drag: reparent or reorder within group.
+      // Room drag: reparent, reorder within group, promote to standalone, or
+      // explicit ungroup via the synthetic root drop zones.
       if (activeData.type === "room") {
+        // ── Promote-to-standalone (Phase 8A.1c) ───────────────────────────
+        if (overData?.type === "root-zone" && overData.kind === "promote") {
+          const newSlug = `standalone-${activeData.roomId}`;
+          // Don't re-promote a room that's already standalone in place; only
+          // re-position via the saved order.
+          const isAlreadyStandalone = activeData.slug === newSlug;
+
+          // Source-group renumbering (if room is leaving a multi-member group).
+          const moves: { id: string; displayGroupId: string; displayGroupOrder: number }[] = [];
+          if (!isAlreadyStandalone) {
+            moves.push({ id: activeData.roomId, displayGroupId: newSlug, displayGroupOrder: 0 });
+            const sourceNode = nodes.find((n) => n.slug === activeData.slug);
+            if (sourceNode) {
+              const remaining = sourceNode.members.filter((m) => m.id !== activeData.roomId);
+              for (let i = 0; i < remaining.length; i++) {
+                moves.push({ id: remaining[i].id, displayGroupId: activeData.slug, displayGroupOrder: i });
+              }
+            }
+          }
+
+          // Compute new groupOrder: insert newSlug at the requested index.
+          // Use the currently rendered sequence (excluding cope) as the basis
+          // so the user's existing ordering is preserved.
+          const insertIdx = overData.insertBeforeIndex ?? 0;
+          const currentRendered = nodes.filter((n) => !n.isLocked).map((n) => n.slug);
+          const stripped = currentRendered.filter((s) => s !== newSlug);
+          const cappedIdx = Math.max(0, Math.min(insertIdx, stripped.length));
+          const newOrder = [...stripped];
+          newOrder.splice(cappedIdx, 0, newSlug);
+
+          // Optimistic state update.
+          if (moves.length > 0) {
+            setLocalSections((prev) => {
+              const map = new Map(prev.map((s) => [s.id, s]));
+              for (const m of moves) {
+                const row = map.get(m.id);
+                if (row) {
+                  map.set(m.id, {
+                    ...row,
+                    displayGroupId: m.displayGroupId,
+                    displayGroupOrder: m.displayGroupOrder,
+                  });
+                }
+              }
+              return Array.from(map.values());
+            });
+          }
+          setLocalGroupOrder(newOrder);
+
+          startTransition(async () => {
+            if (moves.length > 0) {
+              const r1 = await updateRoomDisplayGroup(projectId, moves);
+              if (r1.error) {
+                console.error("updateRoomDisplayGroup (promote):", r1.error);
+                router.refresh();
+                return;
+              }
+            }
+            const r2 = await updateProjectDisplayGroupOrder(projectId, newOrder);
+            if (r2.error) {
+              console.error("updateProjectDisplayGroupOrder (promote):", r2.error);
+              router.refresh();
+            }
+          });
+          return;
+        }
+
+        // ── Explicit ungroup zone ─────────────────────────────────────────
+        if (overData?.type === "root-zone" && overData.kind === "ungroup") {
+          const targetGroupSlug = "ungrouped";
+          const moves = reparentRoom({
+            sections: localSections,
+            nodes,
+            activeRoomId: activeData.roomId,
+            activeSourceSlug: activeData.slug,
+            targetGroupSlug,
+            overRoomId: null,
+          });
+          if (moves.length === 0) return;
+          setLocalSections((prev) => {
+            const map = new Map(prev.map((s) => [s.id, s]));
+            for (const m of moves) {
+              const row = map.get(m.id);
+              if (row) {
+                map.set(m.id, {
+                  ...row,
+                  displayGroupId: m.displayGroupId,
+                  displayGroupOrder: m.displayGroupOrder,
+                });
+              }
+            }
+            return Array.from(map.values());
+          });
+          startTransition(async () => {
+            const result = await updateRoomDisplayGroup(projectId, moves);
+            if (result.error) {
+              console.error("updateRoomDisplayGroup (ungroup):", result.error);
+              router.refresh();
+            }
+          });
+          return;
+        }
+
+        // ── Default: reparent into / reorder within an existing group ─────
         const targetGroupSlug =
           overData?.type === "group"
             ? overData.slug
@@ -212,19 +353,41 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
             No pricing data yet. Add rooms in the Sections tab.
           </div>
         ) : (
-          <SortableContext
-            items={nodes.filter((n) => !n.isLocked).map((n) => groupSortableId(n.slug))}
-            strategy={verticalListSortingStrategy}
-          >
-            {nodes.map((node) => (
-              <GroupRow
-                key={node.slug}
-                node={node}
-                expanded={expanded.has(node.slug)}
-                onToggle={() => toggleExpanded(node.slug)}
-              />
-            ))}
-          </SortableContext>
+          (() => {
+            const nonCope = nodes.filter((n) => !n.isLocked);
+            const cope = nodes.find((n) => n.isLocked);
+            const showRootZones = activeDrag?.type === "room";
+            return (
+              <SortableContext
+                items={nonCope.map((n) => groupSortableId(n.slug))}
+                strategy={verticalListSortingStrategy}
+              >
+                {nonCope.map((node, i) => (
+                  <Fragment key={node.slug}>
+                    <DropZone
+                      id={`${PROMOTE_ZONE_PREFIX}${i}`}
+                      kind="promote"
+                      insertBeforeIndex={i}
+                      visible={showRootZones}
+                    />
+                    <GroupRow
+                      node={node}
+                      expanded={expanded.has(node.slug)}
+                      onToggle={() => toggleExpanded(node.slug)}
+                    />
+                  </Fragment>
+                ))}
+                <DropZone id={UNGROUP_ZONE_ID} kind="ungroup" visible={showRootZones} />
+                {cope && (
+                  <GroupRow
+                    node={cope}
+                    expanded={expanded.has(cope.slug)}
+                    onToggle={() => toggleExpanded(cope.slug)}
+                  />
+                )}
+              </SortableContext>
+            );
+          })()
         )}
       </div>
 
@@ -339,10 +502,15 @@ function GroupHeaderRow({
         </button>
       )}
 
-      {/* Group icon */}
-      <span className="shrink-0 text-sm leading-none" aria-hidden>
-        {groupIconFor(node.slug)}
-      </span>
+      {/* Group icon — empty string for standalone rows with no name match. */}
+      {(() => {
+        const icon = iconForNode(node);
+        return icon ? (
+          <span className="shrink-0 text-sm leading-none" aria-hidden>{icon}</span>
+        ) : (
+          <span className="w-1 shrink-0"></span>
+        );
+      })()}
 
       {/* Label + (optional) Includes descriptor inline */}
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -440,6 +608,53 @@ function DragPreview({ data }: { data: AnyDragData }) {
   return (
     <div className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium shadow-lg dark:border-zinc-600 dark:bg-zinc-900">
       {text}
+    </div>
+  );
+}
+
+// ─── Root drop zones (Phase 8A.1c) ──────────────────────────────────────────
+
+function DropZone({
+  id,
+  kind,
+  insertBeforeIndex,
+  visible,
+}: {
+  id: string;
+  kind: "promote" | "ungroup";
+  insertBeforeIndex?: number;
+  visible: boolean;
+}) {
+  const data: RootZoneData = { type: "root-zone", kind, insertBeforeIndex };
+  const { isOver, setNodeRef } = useDroppable({ id, data });
+
+  // Hidden when no drag in progress — render nothing so the tree layout is
+  // unchanged in idle state.
+  if (!visible) return null;
+
+  const baseTone =
+    kind === "promote"
+      ? "bg-orange-200/60 text-orange-900"
+      : "bg-zinc-200/60 text-zinc-700";
+  const overTone =
+    kind === "promote"
+      ? "bg-orange-400 text-white"
+      : "bg-zinc-500 text-white";
+  const label =
+    kind === "promote"
+      ? "Drop here to make standalone"
+      : "Drop here to ungroup";
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={
+        "flex items-center justify-center overflow-hidden text-[10px] font-medium uppercase tracking-wider transition-all " +
+        (isOver ? `${overTone} h-7` : `${baseTone} h-2 text-transparent`)
+      }
+      aria-label={label}
+    >
+      {isOver ? label : ""}
     </div>
   );
 }

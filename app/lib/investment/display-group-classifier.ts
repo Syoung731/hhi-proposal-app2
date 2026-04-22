@@ -29,7 +29,18 @@ export type IndividualizedGroupSlug =
   | `bathroom-${string}`
   | `carolina-room-${string}`;
 
-export type DisplayGroupSlug = FixedGroupSlug | IndividualizedGroupSlug;
+/**
+ * User-promoted standalone slug — Phase 8A.1c. Created when a user drags a
+ * child out of a multi-room group and drops it at the root level. The
+ * classifier never emits this slug; it appears only via user drag actions.
+ * Suffix = Room.id of the single member.
+ */
+export type StandaloneGroupSlug = `standalone-${string}`;
+
+export type DisplayGroupSlug =
+  | FixedGroupSlug
+  | IndividualizedGroupSlug
+  | StandaloneGroupSlug;
 
 /** Default render order when Project.displayGroupOrder is empty/missing. */
 export const DEFAULT_GROUP_ORDER: FixedGroupSlug[] = [
@@ -56,6 +67,7 @@ export type DisplayGroupDefinition = {
     | "bedroom"
     | "bathroom"
     | "carolina-room"
+    | "standalone"
     | "utility"
     | "outdoor"
     | "storage"
@@ -219,6 +231,11 @@ export function resolveGroup(slug: DisplayGroupSlug): ResolvedGroup {
   if (slug.startsWith("carolina-room-")) {
     return { slug, label: "Carolina Room", individualized: true, renderCategory: "carolina-room" };
   }
+  if (slug.startsWith("standalone-")) {
+    // Standalone groups always have exactly one member; the caller looks up
+    // the actual room name by id and uses that as the label.
+    return { slug, label: "Standalone", individualized: true, renderCategory: "standalone" };
+  }
   // Unknown slug — treat as ungrouped.
   return { slug, label: "(Unknown)", individualized: false, renderCategory: "ungrouped" };
 }
@@ -229,6 +246,29 @@ export function isKnownDisplayGroupSlug(slug: string): slug is DisplayGroupSlug 
   return (
     slug.startsWith("bedroom-") ||
     slug.startsWith("bathroom-") ||
-    slug.startsWith("carolina-room-")
+    slug.startsWith("carolina-room-") ||
+    slug.startsWith("standalone-")
   );
+}
+
+/**
+ * Phase 8A.1c — helper for the "+ Add Group" dropdown to detect rooms that
+ * can have their original individualized group identity restored.
+ *
+ * Returns the original individualized slug if the room's name matches a
+ * bedroom / bathroom / carolina-room rule (and the room is not primary).
+ * Used when the user clicks "Restore 'Bedroom 2' group" — the room's
+ * displayGroupId moves from `standalone-<id>` back to its individualized
+ * slug.
+ */
+export function originalIndividualizedSlugFor(
+  room: RoomForClassification
+): IndividualizedGroupSlug | null {
+  const name = room.name.trim();
+  if (!name) return null;
+  if (RE_PRIMARY.test(name)) return null;
+  if (RE_CAROLINA_ROOM.test(name)) return `carolina-room-${room.id}`;
+  if (RE_BEDROOM.test(name)) return `bedroom-${room.id}`;
+  if (RE_BATHROOM.test(name)) return `bathroom-${room.id}`;
+  return null;
 }

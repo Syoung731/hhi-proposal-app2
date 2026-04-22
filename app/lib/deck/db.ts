@@ -769,24 +769,28 @@ function defaultSlugPriority(slug: string): number {
   if (slug.startsWith("bedroom-")) return 3;
   if (slug.startsWith("bathroom-")) return 4;
   if (slug.startsWith("carolina-room-")) return 5;
-  if (slug === "utility") return 6;
-  if (slug === "outdoor") return 7;
-  if (slug === "storage") return 8;
-  if (slug === "ungrouped") return 9;
+  // Phase 8A.1c — user-promoted standalone groups slot between
+  // individualized categories and housekeeping.
+  if (slug.startsWith("standalone-")) return 6;
+  if (slug === "utility") return 7;
+  if (slug === "outdoor") return 8;
+  if (slug === "storage") return 9;
+  if (slug === "ungrouped") return 10;
   if (slug === "cope") return 99;
-  return 9; // unknown — treat as ungrouped
+  return 10; // unknown — treat as ungrouped
 }
 
 /**
  * Group label: for individualized slugs (bedroom-xxx, bathroom-xxx,
- * carolina-room-xxx) use the first member's name. Otherwise use a fixed
- * human label.
+ * carolina-room-xxx, standalone-xxx) use the first member's name. Otherwise
+ * use a fixed human label.
  */
 function groupLabelFor(slug: string, members: { name: string }[]): string {
   if (
     slug.startsWith("bedroom-") ||
     slug.startsWith("bathroom-") ||
-    slug.startsWith("carolina-room-")
+    slug.startsWith("carolina-room-") ||
+    slug.startsWith("standalone-")
   ) {
     return members[0]?.name ?? "(Unnamed)";
   }

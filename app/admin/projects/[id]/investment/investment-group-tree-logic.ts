@@ -168,14 +168,17 @@ function categoryIndex(node: GroupNode): number {
       case "bedroom": return 3;
       case "bathroom": return 4;
       case "carolina-room": return 5;
-      case "utility": return 6;
-      case "outdoor": return 7;
-      case "storage": return 8;
-      case "ungrouped": return 9;
+      // Phase 8A.1c — standalone groups slot between individualized
+      // categories and the housekeeping groups (utility/outdoor/storage).
+      case "standalone": return 6;
+      case "utility": return 7;
+      case "outdoor": return 8;
+      case "storage": return 9;
+      case "ungrouped": return 10;
       case "cope": return 99;
     }
   }
-  return 9;
+  return 10;
 }
 
 // Silence unused-import warning — DEFAULT_GROUP_ORDER is exported for consumers.
