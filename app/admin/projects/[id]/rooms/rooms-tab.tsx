@@ -1567,9 +1567,16 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
     const ordered = rooms.filter((r) => selectedRoomIds.includes(r.id));
     if (!ordered.length) return;
     const defaultName = ordered[0]?.name ?? "Merged Section";
-    const confirmed = window.confirm(
-      "Merge selections, are you sure?"
-    );
+    const selectedNames = ordered.map((r) => r.name).join(", ");
+    const confirmMessage =
+      `Merge these ${ordered.length} sections into "${defaultName}"?\n\n` +
+      `Sections: ${selectedNames}\n\n` +
+      `This will:\n` +
+      `  • Combine their scope narratives into one\n` +
+      `  • Keep "${defaultName}" as the section name\n` +
+      `  • Delete the other sections permanently\n\n` +
+      `For proposal-only grouping, use the Investment tab instead. This action cannot be undone.`;
+    const confirmed = window.confirm(confirmMessage);
     if (!confirmed) return;
     setMerging(true);
     setStatusMessage(null);
@@ -1778,6 +1785,12 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
             ))}
           </select>
         </div>
+        {selectedRoomIds.length >= 2 && (
+          <p className="text-xs italic text-zinc-500 dark:text-zinc-400 -mt-2">
+            Merging combines sections structurally (one scope, one pricing profile).
+            {" "}For proposal-only grouping, use the <strong>Investment tab</strong> instead.
+          </p>
+        )}
         </>
       )}
       {showRendrModal && (
