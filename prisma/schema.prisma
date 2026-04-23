@@ -315,6 +315,12 @@ model Media {
   url             String
   fileKey         String
   /**
+   * Public URL of a smaller thumbnail variant (400px-wide WebP) generated
+   * server-side on upload. Null on legacy rows or when thumbnail generation
+   * failed at upload time — UI must fall back to `url` in that case.
+   */
+  thumbnailUrl    String?
+  /**
    * Original source URL (e.g. Zillow image URL) for duplicate detection.
    */
   sourceUrl       String?
