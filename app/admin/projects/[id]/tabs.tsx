@@ -189,13 +189,21 @@ export function ProjectTabs({
           <MediaTab
             projectId={project.id}
             media={project.media}
-            rooms={project.rooms.map((r) => ({
-              id: r.id,
-              name: r.name,
-              sortOrder: r.sortOrder,
-              selectedRenderMediaId: r.selectedRenderMediaId,
-              scopeNarrative: r.scopeNarrative,
-            }))}
+            // Filter out the COPE (project-overhead) room. It's a billing
+            // bucket, not a physical space, so it has no business
+            // accepting photo assignments — Media tab's section list,
+            // assignment dropdowns, and any other room picker should
+            // never show it. (Per Phase 9.2; matches the scope-breakdown
+            // filter pattern in Phase 8A.)
+            rooms={project.rooms
+              .filter((r) => !r.isProjectOverhead)
+              .map((r) => ({
+                id: r.id,
+                name: r.name,
+                sortOrder: r.sortOrder,
+                selectedRenderMediaId: r.selectedRenderMediaId,
+                scopeNarrative: r.scopeNarrative,
+              }))}
             projectStylePreset={project.stylePreset}
             coverHeroImageId={project.coverHeroImageId}
             initialRoomId={initialMediaRoomId}
