@@ -990,12 +990,23 @@ async function syncProjectTimelineSlide(
 }
 
 /**
- * Syncs the project-level retainer settings onto:
- *  - the `design-retainer` slide's `retainerAmount` (formatted string), and
- *  - the `investment` slide's `retainerAmount` (number) + `retainerLabel`.
+ * Syncs the project-level retainer settings onto the `design-retainer` slide
+ * content (amount, constructionLow/High, designHourlyRate, retainerEnabled).
  *
  * User-modified slides are skipped (same convention as other sync fns), so
  * once an admin hand-edits the slide, auto-sync backs off.
+ *
+ * Phase 8C.2 T1: this function no longer writes to the Investment slide.
+ * Before this change, it spread the STALE `existing[].content` of the
+ * investment row (captured before any sync ran) and wrote back — wiping
+ * the lineItems that syncInvestmentSlide had just written a few ms earlier.
+ * That classic read-modify-write race is gone now: only syncInvestmentSlide
+ * writes to the investment slide's content.
+ *
+ * The previously-written retainerAmount / retainerLabel fields on the
+ * Investment slide are dead data — Phase 8C T2 removed the mid-slide
+ * retainer callout that rendered them. They're removed from InvestmentContent
+ * in the next commit.
  */
 async function syncRetainerFromProject(
   _deckId: string,
@@ -1056,23 +1067,9 @@ async function syncRetainerFromProject(
     });
   }
 
-  // investment slide — numeric amount for table footer
-  const investmentRow = existing.find((r) => r.type === "investment");
-  if (investmentRow && !investmentRow.isUserModified) {
-    const c = (investmentRow.content ?? {}) as InvestmentContent;
-    const next: InvestmentContent = {
-      ...c,
-      retainerAmount: project.retainerEnabled ? amount : null,
-      retainerLabel: project.retainerEnabled
-        ? (c.retainerLabel ?? "Design / Feasibility Retainer")
-        : null,
-    };
-    await prisma.deckSlide.update({
-      where: { id: investmentRow.id },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: { content: next as any },
-    });
-  }
+  // Phase 8C.2 T1: no write to the Investment slide here. See the docblock
+  // above for the full rationale. `syncInvestmentSlide` is the sole writer
+  // to investment content.
 }
 
 // ─── Backfill: default slides added after initial seed ────────────────────────
