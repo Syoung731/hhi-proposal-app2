@@ -240,13 +240,17 @@ function buildSlideDataFromSpec(
       };
 
     case "design-retainer":
+      // Phase 8C: seed as "Your Investment" + three-band-summary layout. The
+      // retainerAmount is a placeholder until syncRetainerFromProject computes
+      // the real value on first deck load. Benefits match the locked Phase 8C
+      // copy verbatim (DEFAULT_DESIGN_RETAINER_BENEFITS).
       return {
         ...base,
         type: "design-retainer",
         layoutKey: spec.layoutKey,
-        headline: "Your Design Retainer",
+        headline: "Your Investment",
         content: {
-          sectionLabel: "DESIGN RETAINER",
+          sectionLabel: "YOUR INVESTMENT",
           tagline: "Your investment in certainty before construction begins.",
           retainerAmount: "$22,000",
           benefits: [

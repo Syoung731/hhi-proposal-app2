@@ -663,7 +663,7 @@ export function DeckEditorClient({
       type === "scope-breakdown"  ? "text-grid"      :
       type === "risk-brief"       ? "two-column"        :
       type === "process"          ? "three-stages"      :
-      type === "design-retainer"  ? "centered-hero"     :
+      type === "design-retainer"  ? "three-band-summary" :
       type === "next-steps"       ? "numbered-photo"    :
       type === "closing-slide"    ? "dark-centered"     :
       type === "visual-inspiration" ? "hero-plus-stacked" :
@@ -675,13 +675,13 @@ export function DeckEditorClient({
     const headline =
       type === "cover"            ? "New Cover"                  :
       type === "objective"        ? "Project Objective"          :
-      type === "investment"       ? "Projected Investment"       :
+      type === "investment"       ? "Investment by Space"        :
       type === "why-us"           ? "The HHI Difference"         :
       type === "scope-overview"   ? "Project Scope"              :
       type === "scope-breakdown"  ? "Additional Areas Included"  :
       type === "risk-brief"       ? "The Stress-Free Remodel: How We Eliminate Common Risks" :
       type === "process"          ? "Our Process: From Vision to Finished Home" :
-      type === "design-retainer"  ? "Your Design Retainer" :
+      type === "design-retainer"  ? "Your Investment" :
       type === "next-steps"       ? "Your Path Forward"   :
       type === "closing-slide"    ? "Let\u2019s Build Something Extraordinary" :
       type === "visual-inspiration" ? "Design Inspiration" :

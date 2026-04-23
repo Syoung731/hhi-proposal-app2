@@ -112,7 +112,7 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
     {
       type: "design-retainer",
       order: 1100,
-      layoutKey: "centered-hero",
+      layoutKey: "three-band-summary",
     },
     {
       type: "next-steps",

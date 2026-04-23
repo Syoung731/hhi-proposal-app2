@@ -7,17 +7,22 @@ export const DEFAULT_DESIGN_RETAINER_BENEFITS: string[] = [
   "Fixed-price build contract before construction begins",
 ];
 
+// Phase 8C: defaults now target the three-band-summary layout.
+// Section label + headline renamed to 'YOUR INVESTMENT' / 'Your Investment'
+// so a Reset-to-defaults click in InspectorPanel lands on the new copy.
+// The retainerAmount value is a placeholder — syncRetainerFromProject
+// computes and writes the real number on the next deck load.
 export const HHI_DESIGN_RETAINER_DEFAULTS: {
-  defaultLayout: "centered-hero";
+  defaultLayout: "three-band-summary";
   defaultSectionLabel: string;
   defaultHeadline: string;
   defaultTagline: string;
   defaultRetainerAmount: string;
   defaultBenefits: string[];
 } = {
-  defaultLayout: "centered-hero",
-  defaultSectionLabel: "DESIGN RETAINER",
-  defaultHeadline: "Your Design Retainer",
+  defaultLayout: "three-band-summary",
+  defaultSectionLabel: "YOUR INVESTMENT",
+  defaultHeadline: "Your Investment",
   defaultTagline: "Your investment in certainty before construction begins.",
   defaultRetainerAmount: "$22,000",
   defaultBenefits: DEFAULT_DESIGN_RETAINER_BENEFITS,
