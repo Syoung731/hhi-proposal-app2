@@ -3212,6 +3212,24 @@ function ZillowStagingThumbnail({
           })()}
         </div>
       </label>
+      {/* Phase 9.2: EXIF capture timestamp caption. Shown only when
+          media.sortOrder holds a plausible unix-seconds value (set by
+          Phase 9 local imports from EXIF DateTimeOriginal). Zillow /
+          Rendr / legacy uploads use sortOrder for display ordering and
+          return null from the helper — caption is omitted, not replaced
+          with a placeholder. */}
+      {(() => {
+        const d = exifTimestampFromSortOrder(media.sortOrder);
+        if (!d) return null;
+        return (
+          <div
+            className="border-t border-zinc-200 px-2 py-1 text-[10px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+            title={d.toLocaleString()}
+          >
+            {formatTimestamp(d, "photo")}
+          </div>
+        );
+      })()}
       <div className="flex justify-end border-t border-zinc-200 px-2 py-1 dark:border-zinc-700">
         <button
           type="button"
