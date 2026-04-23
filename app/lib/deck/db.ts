@@ -813,12 +813,14 @@ async function syncInvestmentSlide(
     });
   }
 
-  // 5. Sort group slugs: user-saved first, then default priority, COPE last.
+  // 5. Sort group slugs: user-saved first, then default priority.
+  // Phase 8C.2: COPE is no longer pinned to the end. The default priority
+  // for "cope" is still 99 (defaultSlugPriority below) so it lands last
+  // when the user hasn't explicitly ordered it; once the user drags it
+  // anywhere in the Investment tab tree, the saved order wins.
   const userIndex = new Map(savedOrder.map((s, i) => [s, i]));
   const allSlugs = Array.from(groups.keys());
   allSlugs.sort((a, b) => {
-    if (a === "cope" && b !== "cope") return 1;
-    if (b === "cope" && a !== "cope") return -1;
     const aUser = userIndex.get(a);
     const bUser = userIndex.get(b);
     if (aUser !== undefined && bUser !== undefined) return aUser - bUser;

@@ -196,8 +196,11 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       if (!activeData) return;
 
       // Parent-header drag: reorder groups.
+      // Phase 8C.2: COPE is now reorderable like any other group (it used
+      // to be locked at the bottom). The room-drop guard at line ~327 still
+      // prevents dropping individual rooms INTO the COPE bucket — COPE is
+      // a project-overhead accounting bucket, not a renovation space.
       if (activeData.type === "group" && overData?.type === "group") {
-        if (activeData.slug === "cope" || overData.slug === "cope") return;
         const newSlugOrder = moveGroup(nodes, activeData.slug, overData.slug);
         setLocalGroupOrder(newSlugOrder);
         startTransition(async () => {

@@ -132,7 +132,11 @@ export function buildGroupNodes(
       slug,
       label,
       isIndividualized: resolved.individualized,
-      isLocked: slug === "cope",
+      // Phase 8C.2: COPE is no longer pinned. `isLocked` is kept on the
+      // node type so the render code's conditional branches stay intact
+      // (they all degrade to the unlocked path when no node is locked).
+      // Re-enable per-node locking here in the future if needed.
+      isLocked: false,
       members,
       bucket: members[0]?.bucket ?? "BASE",
       sumLow,
@@ -140,10 +144,11 @@ export function buildGroupNodes(
     });
   }
 
+  // Phase 8C.2: COPE is no longer pinned to the end. The default
+  // categoryIndex for "cope" stays at 99 (below) so it lands last when
+  // the user hasn't ordered it; once the user drags it, savedOrder wins.
   const userIndex = new Map(savedOrder.map((s, i) => [s, i]));
   nodes.sort((a, b) => {
-    if (a.slug === "cope" && b.slug !== "cope") return 1;
-    if (b.slug === "cope" && a.slug !== "cope") return -1;
     const aUser = userIndex.get(a.slug);
     const bUser = userIndex.get(b.slug);
     if (aUser !== undefined && bUser !== undefined) return aUser - bUser;
