@@ -12,7 +12,11 @@ export const DEFAULT_DESIGN_RETAINER_BENEFITS: string[] = [
 // so a Reset-to-defaults click in InspectorPanel lands on the new copy.
 // The retainerAmount value is a placeholder — syncRetainerFromProject
 // computes and writes the real number on the next deck load.
-export const HHI_DESIGN_RETAINER_DEFAULTS: {
+//
+// Phase 8C T8: renamed from HHI_DESIGN_RETAINER_DEFAULTS → DESIGN_RETAINER_DEFAULTS
+// as part of the tenant-reference cleanup. The values here are already
+// tenant-neutral; only the constant name carried the legacy brand prefix.
+export const DESIGN_RETAINER_DEFAULTS: {
   defaultLayout: "three-band-summary";
   defaultSectionLabel: string;
   defaultHeadline: string;

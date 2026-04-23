@@ -60,7 +60,7 @@ import {
 } from "@/app/lib/deck/types";
 import { HHI_DEFAULT_CORE_VALUES } from "@/app/lib/core-values-defaults";
 import { HHI_DEFAULT_COPE_ITEMS } from "@/app/lib/cope-defaults";
-import { DEFAULT_DESIGN_RETAINER_BENEFITS, HHI_DESIGN_RETAINER_DEFAULTS } from "@/app/lib/design-retainer-defaults";
+import { DEFAULT_DESIGN_RETAINER_BENEFITS, DESIGN_RETAINER_DEFAULTS } from "@/app/lib/design-retainer-defaults";
 import { HHI_DEFAULT_NEXT_STEPS, HHI_NEXT_STEPS_DEFAULTS } from "@/app/lib/next-steps-defaults";
 import { CLOSING_SLIDE_DEFAULTS } from "@/app/lib/closing-slide-defaults";
 import { TemplateCIconPicker, type TemplateCIcon } from "@/app/admin/components/template-c-icon-picker";
@@ -5110,21 +5110,21 @@ function DesignRetainerInspector({
   function resetToDefaults() {
     updateContent({
       benefits: DEFAULT_DESIGN_RETAINER_BENEFITS,
-      sectionLabel: HHI_DESIGN_RETAINER_DEFAULTS.defaultSectionLabel,
-      tagline: HHI_DESIGN_RETAINER_DEFAULTS.defaultTagline,
-      retainerAmount: HHI_DESIGN_RETAINER_DEFAULTS.defaultRetainerAmount,
+      sectionLabel: DESIGN_RETAINER_DEFAULTS.defaultSectionLabel,
+      tagline: DESIGN_RETAINER_DEFAULTS.defaultTagline,
+      retainerAmount: DESIGN_RETAINER_DEFAULTS.defaultRetainerAmount,
       description: null,
       noteText: null,
     });
     onUpdate({
       ...slide,
-      headline: HHI_DESIGN_RETAINER_DEFAULTS.defaultHeadline,
+      headline: DESIGN_RETAINER_DEFAULTS.defaultHeadline,
       content: {
         ...content,
         benefits: DEFAULT_DESIGN_RETAINER_BENEFITS,
-        sectionLabel: HHI_DESIGN_RETAINER_DEFAULTS.defaultSectionLabel,
-        tagline: HHI_DESIGN_RETAINER_DEFAULTS.defaultTagline,
-        retainerAmount: HHI_DESIGN_RETAINER_DEFAULTS.defaultRetainerAmount,
+        sectionLabel: DESIGN_RETAINER_DEFAULTS.defaultSectionLabel,
+        tagline: DESIGN_RETAINER_DEFAULTS.defaultTagline,
+        retainerAmount: DESIGN_RETAINER_DEFAULTS.defaultRetainerAmount,
         description: null,
         noteText: null,
       },
