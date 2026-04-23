@@ -58,7 +58,7 @@ export function getMockDeck(
         layoutKey: "table-callout",
         order: 3,
         isEnabled: true,
-        headline: "Projected Investment",
+        headline: "Investment by Space",
         content: {
           lineItems: [
             {

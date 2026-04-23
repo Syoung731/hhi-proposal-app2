@@ -259,11 +259,15 @@ function buildSlideDataFromSpec(
       };
 
     case "investment":
+      // Phase 8C T2 renamed the slide to "Investment by Space". Phase 8C.1
+      // caught that T2 missed the seed path — only the component fallback
+      // was updated in T2. Setting headline explicitly here so "Generate
+      // Default Deck → Replace Everything" produces the new title.
       return {
         ...base,
         type: "investment",
         layoutKey: spec.layoutKey,
-        headline: "Projected Investment",
+        headline: "Investment by Space",
         content: {
           lineItems: [],
           retainerLabel: null,
