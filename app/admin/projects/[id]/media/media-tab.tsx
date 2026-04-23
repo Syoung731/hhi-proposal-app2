@@ -1062,10 +1062,20 @@ export function MediaTab({
       (m.tags ?? []).includes(unassignedBatchFilter)
     );
   })();
-  /** Renderings with no room (e.g. room deleted, or edge case); show in separate section. */
+  /**
+   * Renderings that lost their room (e.g. section was deleted under them).
+   * Surfaced separately so they don't silently eat R2 storage.
+   *
+   * Excludes kind === "COVER": Front Page covers are intentionally
+   * roomless (project-level asset, not section-level — see
+   * generateFrontPageCover() in actions.ts). Without this guard every
+   * Front Page cover looks "orphaned" because the filter can't tell
+   * "roomless by design" from "roomless because a section got deleted."
+   */
   const orphanedRenderings = media.filter(
     (m) =>
       isRendering(m) &&
+      m.kind !== "COVER" &&
       (m.roomId == null || !roomIds.has(m.roomId))
   );
 
