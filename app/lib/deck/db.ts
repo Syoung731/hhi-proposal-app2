@@ -43,7 +43,6 @@ import type {
   BeforeAfterContent,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
-  ScopeCategory,
   InvestmentContent,
   ProjectTimelineContent,
   ProjectPhase,
@@ -52,7 +51,10 @@ import type {
 } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
 import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
-import { classifyScopeItem } from "@/app/lib/scope/classifier";
+// Phase 8C.1: T6 scope categorization reverted — classifyScopeItem import
+// dropped. The classifier utility (app/lib/scope/classifier.ts) remains on
+// disk as a preserved utility (decision #3). Re-import here if the feature
+// ever comes back.
 import { generateBeforeAfterBullets, hashRenderChecklist } from "@/app/lib/ai/before-after-bullets";
 
 /**
@@ -656,8 +658,11 @@ async function syncScopeBreakdownSlide(
     if (existingRow.isUserModified || existingRow.isUserHidden) return;
 
     // Merge rooms: preserve existing description + isIncluded; add new rooms.
-    // Phase 8C: also preserve category + manuallyClassified on existing rows;
-    // auto-classify rows that lack a category AND aren't manually classified.
+    // Phase 8C.1: T6 categorization reverted — no auto-classification on sync.
+    // The `category` / `manuallyClassified` fields remain as optional on the
+    // ScopeBreakdownRoom type (Option A) but are no longer written here. Legacy
+    // rows in the DB that still carry those fields are harmless; nothing reads
+    // them after the render revert.
     const existingContent = (existingRow.content ?? {}) as ScopeBreakdownContent;
     const existingRoomMap = new Map<string, ScopeBreakdownRoom>(
       (existingContent.rooms ?? []).map((r) => [r.id, r])
@@ -665,31 +670,19 @@ async function syncScopeBreakdownSlide(
 
     const mergedRooms: ScopeBreakdownRoom[] = unrendered.map((room) => {
       const prev = existingRoomMap.get(room.id);
-      const description = prev
-        ? prev.description
-        : stripScopeClarifications(room.scopeNarrative ?? "");
-      const isIncluded = prev ? prev.isIncluded : true;
-      // Category resolution:
-      //   - manuallyClassified preserved → keep prev.category as-is
-      //   - missing category → run classifier against current narrative
-      //   - prev had an auto-classification → re-run so renames/rewrites
-      //     can shift the category (e.g., a room that was 'surfaces' but
-      //     gets rewritten to be primarily demo).
-      let category: ScopeCategory | null;
-      let manuallyClassified = false;
-      if (prev?.manuallyClassified) {
-        category = prev.category ?? null;
-        manuallyClassified = true;
-      } else {
-        category = classifyScopeItem(room.scopeNarrative, room.name);
+      if (prev) {
+        return {
+          id: room.id,
+          name: room.name, // name may have changed
+          description: prev.description,
+          isIncluded: prev.isIncluded,
+        };
       }
       return {
         id: room.id,
-        name: room.name, // name may have changed
-        description,
-        isIncluded,
-        category,
-        manuallyClassified,
+        name: room.name,
+        description: stripScopeClarifications(room.scopeNarrative ?? ""),
+        isIncluded: true,
       };
     });
 
@@ -709,9 +702,6 @@ async function syncScopeBreakdownSlide(
       name: room.name,
       description: stripScopeClarifications(room.scopeNarrative ?? ""),
       isIncluded: true,
-      // Phase 8C: auto-classify on initial seed.
-      category: classifyScopeItem(room.scopeNarrative, room.name),
-      manuallyClassified: false,
     }));
 
     const content: ScopeBreakdownContent = {
