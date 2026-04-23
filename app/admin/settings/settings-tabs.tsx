@@ -89,6 +89,8 @@ export type CompanySettingsForUI = {
   textColorHex: string | null;
   defaultProposalDisclaimer: string;
   defaultTimelineNote: string | null;
+  /** Shown on the "Your Investment" retainer slide. null hides the hourly-rate sentence entirely. */
+  designHourlyRate: number | null;
   integrationsJson: unknown;
   roomTypeLowPct: number | null;
   roomTypeHighPct: number | null;

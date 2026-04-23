@@ -567,6 +567,8 @@ model CompanySettings {
   textColorHex              String? // text/headline color
   defaultProposalDisclaimer String?  @default("")
   defaultTimelineNote       String?
+  designHourlyRate          Int? // shown on "Your Investment" slide — null hides the hourly-rate sentence entirely
+
   integrationsJson          Json?
   roomTypeLowPct            Float? // default -10 in UI; low = target * (1 + lowPct/100)
   roomTypeHighPct           Float? // default +10 in UI; high = target * (1 + highPct/100)

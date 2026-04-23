@@ -61,6 +61,25 @@ export function ProposalDefaultsTab({ settings }: Props) {
             className={inputClass}
           />
         </div>
+        <div>
+          <label htmlFor="designHourlyRate" className={labelClass}>
+            Design hourly rate (USD)
+          </label>
+          <input
+            id="designHourlyRate"
+            name="designHourlyRate"
+            type="number"
+            min={0}
+            max={5000}
+            step={1}
+            defaultValue={settings.designHourlyRate ?? ""}
+            placeholder="e.g. 200 — leave blank to hide from retainer slide"
+            className={inputClass}
+          />
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Displayed on the &ldquo;Your Investment&rdquo; retainer slide. Leave blank to omit the hourly-rate sentence entirely.
+          </p>
+        </div>
         <div className="flex items-center gap-3">
           <button
             type="submit"

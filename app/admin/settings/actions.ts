@@ -348,11 +348,26 @@ export async function saveProposalDefaultsAction(
     (formData.get("defaultProposalDisclaimer") as string)?.trim() ?? "";
   const defaultTimelineNote =
     (formData.get("defaultTimelineNote") as string)?.trim() || null;
+  // designHourlyRate: blank → null, otherwise parse as int. Reject negatives and
+  // absurdly large values so a typo can't set "$9999999/hour" on a client slide.
+  const rawRate = (formData.get("designHourlyRate") as string | null)?.trim() ?? "";
+  let designHourlyRate: number | null = null;
+  if (rawRate !== "") {
+    const parsed = Number(rawRate);
+    if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+      return { error: "Design hourly rate must be a whole number." };
+    }
+    if (parsed < 0 || parsed > 5000) {
+      return { error: "Design hourly rate must be between 0 and 5000." };
+    }
+    designHourlyRate = Math.round(parsed);
+  }
   await prisma.companySettings.update({
     where: { id: settings.id },
     data: {
       defaultProposalDisclaimer,
       defaultTimelineNote,
+      designHourlyRate,
     },
   });
   revalidatePath("/admin/settings");

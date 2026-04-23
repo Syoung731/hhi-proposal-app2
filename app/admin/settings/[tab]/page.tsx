@@ -120,6 +120,7 @@ export default async function SettingsTabPage({
         textColorHex: settings.textColorHex,
         defaultProposalDisclaimer: settings.defaultProposalDisclaimer ?? "",
         defaultTimelineNote: settings.defaultTimelineNote,
+        designHourlyRate: settings.designHourlyRate,
         integrationsJson: settings.integrationsJson,
         roomTypeLowPct: settings.roomTypeLowPct,
         roomTypeHighPct: settings.roomTypeHighPct,
