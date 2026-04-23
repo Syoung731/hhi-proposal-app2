@@ -249,18 +249,19 @@ export function reparentRoom(args: {
 
 /**
  * Reorder a group: move `activeSlug` to `overSlug`'s position in the current
- * sort order, excluding "cope" (always server-forced to the end).
+ * sort order. Phase 8C.2: COPE is now included in the move math (was
+ * filtered out before because the server pinned it to the end).
  */
 export function moveGroup(
   nodes: GroupNode[],
   activeSlug: string,
   overSlug: string
 ): string[] {
-  const nonCope = nodes.filter((n) => n.slug !== "cope").map((n) => n.slug);
-  const fromIdx = nonCope.indexOf(activeSlug);
-  const toIdx = nonCope.indexOf(overSlug);
-  if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return nonCope;
-  const next = [...nonCope];
+  const slugs = nodes.map((n) => n.slug);
+  const fromIdx = slugs.indexOf(activeSlug);
+  const toIdx = slugs.indexOf(overSlug);
+  if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return slugs;
+  const next = [...slugs];
   next.splice(fromIdx, 1);
   next.splice(toIdx, 0, activeSlug);
   return next;

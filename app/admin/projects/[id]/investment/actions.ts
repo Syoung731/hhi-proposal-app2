@@ -295,8 +295,12 @@ export async function updateRoomDisplayGroup(
 
 /**
  * Writes Project.displayGroupOrder (the user's preferred group-render order).
- * The array is stored as JSON. "cope" is stripped from the input — it is
- * always forced to render last regardless of what's in the saved order.
+ * The array is stored as JSON.
+ *
+ * Phase 8C.2: "cope" is no longer stripped here. It used to be — the server
+ * forced cope-last regardless of saved order. Now COPE participates in the
+ * saved order like any other slug; when absent from the order, the sync
+ * sort still defaults it to last via defaultSlugPriority(cope) = 99.
  */
 export async function updateProjectDisplayGroupOrder(
   projectId: string,
@@ -309,7 +313,7 @@ export async function updateProjectDisplayGroupOrder(
   });
   if (!project) return { error: "Project not found" };
 
-  const cleaned = slugOrder.filter((s) => typeof s === "string" && s !== "cope");
+  const cleaned = slugOrder.filter((s) => typeof s === "string");
 
   try {
     await prisma.project.update({
