@@ -22,6 +22,7 @@ import {
 } from "./actions";
 import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
+import { LocalImportModal } from "./components/LocalImportModal";
 import { MediaType } from "@/app/generated/prisma";
 import { isBadPlaceholderUrl, isAllowedHostForNextImage } from "@/app/lib/media";
 import {
@@ -41,6 +42,12 @@ type MediaItem = {
   tags: string[];
   roomId: string | null;
   url: string;
+  /**
+   * Optional 400px-wide WebP thumbnail (Phase 9 bulk local import).
+   * UI prefers this for grid views; falls back to `url` when null
+   * (legacy rows + thumbnail-generation failures).
+   */
+  thumbnailUrl?: string | null;
   sortOrder: number;
   room: { id: string; name: string } | null;
   fileKey?: string;
@@ -693,6 +700,8 @@ export function MediaTab({
   );
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadBatchResult | null>(null);
+  /** Phase 9: Bulk Local Media Import modal open state. */
+  const [localImportOpen, setLocalImportOpen] = useState(false);
   const [activeSourceMediaId, setActiveSourceMediaId] = useState<string | null>(null);
   const [activeRenderMediaId, setActiveRenderMediaId] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -1354,6 +1363,44 @@ export function MediaTab({
           {/* Placeholder for "Import Selected" status */}
         </div>
       </section>
+
+      {/* Phase 9: Bulk Local Media Import — parallel entry point to Zillow Import.
+          Imported photos land in Unassigned Photos with tags ["local-import", batchId]. */}
+      <section className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-800/30">
+        <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+          Local Photo Import
+        </h2>
+        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+          Bulk-import 30–100 photos straight from your computer (e.g. a walkthrough from your phone). They land in <strong>Unassigned Photos</strong>; assign them to sections from there.
+        </p>
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => setLocalImportOpen(true)}
+            className="w-fit rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            Import Local Photos
+          </button>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            Drag a folder, select files, or pick a folder. JPG, PNG, HEIC, WebP supported.
+          </span>
+        </div>
+      </section>
+
+      <LocalImportModal
+        projectId={projectId}
+        open={localImportOpen}
+        onClose={(didImport) => {
+          setLocalImportOpen(false);
+          if (didImport) {
+            // Reload the Media tab so newly-created Media rows appear in
+            // Unassigned Photos. router.refresh() re-runs the server
+            // component that fetches `media` — same pattern Zillow/Rendr
+            // imports use after their assign actions.
+            router.refresh();
+          }
+        }}
+      />
 
       {/* Media workspace: room list (left) + active room (right) */}
       <section className="flex gap-0 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -2922,26 +2969,40 @@ function ZillowStagingThumbnail({
           aria-label={`Select photo for assignment`}
         />
         <div className="relative aspect-[4/3] min-h-0 flex-1 overflow-hidden rounded bg-zinc-200 dark:bg-zinc-700">
-          {isBadPlaceholderUrl(media.url) ? (
-            <div className="absolute inset-0 flex items-center justify-center rounded text-xs text-zinc-500">
-              No image
-            </div>
-          ) : isLegacyBlobUrl(media.url) || !isAllowedHostForNextImage(media.url) ? (
-            <img
-              src={media.url}
-              alt=""
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <Image
-              src={media.url}
-              alt=""
-              fill
-              className="object-cover"
-              sizes="(max-width:640px) 50vw, 25vw"
-              unoptimized={media.url.startsWith("blob:") || !media.url.startsWith("http")}
-            />
-          )}
+          {(() => {
+            // Phase 9: prefer the small WebP thumbnail when present (~5-30 KB)
+            // so a 100-photo Unassigned grid loads in a fraction of the
+            // bandwidth a full-res grid would. Falls back to `url` for
+            // legacy rows + thumbnail-generation failures.
+            const displayUrl = media.thumbnailUrl ?? media.url;
+            if (isBadPlaceholderUrl(displayUrl)) {
+              return (
+                <div className="absolute inset-0 flex items-center justify-center rounded text-xs text-zinc-500">
+                  No image
+                </div>
+              );
+            }
+            if (isLegacyBlobUrl(displayUrl) || !isAllowedHostForNextImage(displayUrl)) {
+              return (
+                <img
+                  src={displayUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              );
+            }
+            return (
+              <Image
+                src={displayUrl}
+                alt=""
+                fill
+                className="object-cover"
+                sizes="(max-width:640px) 50vw, 25vw"
+                unoptimized={displayUrl.startsWith("blob:") || !displayUrl.startsWith("http")}
+              />
+            );
+          })()}
         </div>
       </label>
       <div className="flex justify-end border-t border-zinc-200 px-2 py-1 dark:border-zinc-700">
