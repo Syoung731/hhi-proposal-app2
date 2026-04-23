@@ -9,7 +9,8 @@ import {
   getCurrentConnectionStatus,
   markConnectionFailed,
 } from "@/app/lib/zillow-browser-connection";
-import { getPresignedUploadUrl, uploadBuffer } from "@/app/lib/s3";
+import { getPresignedUploadUrl, readObjectToBuffer, uploadBuffer } from "@/app/lib/s3";
+import { generateAndUploadThumbnail } from "@/app/lib/media/generate-thumbnail";
 import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
 import { callClaude } from "@/app/lib/ai/model";
@@ -1667,4 +1668,250 @@ export async function markConnectionFailedAction(
   await requireAdmin();
   await markConnectionFailed(sessionId);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9 — Bulk Local Media Import
+// ---------------------------------------------------------------------------
+
+/**
+ * Hard ceiling on a single bulk-import batch. The client may select more
+ * files in the picker, but it must request URLs in chunks. 100 keeps any
+ * single request payload + per-call latency manageable and matches the
+ * upper end of the design batch size (30-100 photos).
+ */
+const BULK_PRESIGN_MAX = 100;
+
+/**
+ * Per-call ceiling on createLocalMediaBatch. Each item triggers a full-res
+ * R2 read + sharp resize + R2 thumb write, so 20 keeps wall time per call
+ * bounded (~10-15s worst case) and the JSON payload small. Client
+ * chunks larger uploads.
+ */
+const BULK_CREATE_MAX = 20;
+
+/**
+ * Map a client-provided MIME type to a safe filename extension. Centralised
+ * so the presign + create paths derive identical extensions from identical
+ * inputs. Falls back to `bin` for anything unknown so we never write a
+ * `.undefined` key.
+ */
+function extFromContentType(contentType: string): string {
+  const ct = contentType.toLowerCase();
+  if (ct.includes("png")) return "png";
+  if (ct.includes("webp")) return "webp";
+  if (ct.includes("heic")) return "heic";
+  if (ct.includes("jpeg") || ct.includes("jpg")) return "jpg";
+  return "bin";
+}
+
+export type BulkPresignedUrl = {
+  /** PUT the file body to this URL with `Content-Type: <originalType>`. */
+  uploadUrl: string;
+  /** R2 object key (also goes back to createLocalMediaBatch). */
+  fileKey: string;
+  /** Public CDN URL — what we save to Media.url after upload completes. */
+  publicUrl: string;
+  /** Echo of the originally requested filename so client can re-pair URLs to files. */
+  originalName: string;
+};
+
+/**
+ * Mint one presigned R2 PUT URL per requested file. Returns either an
+ * array (success) or `{ error }` (auth / project / size guard failure).
+ *
+ * The client uploads each file directly to R2 with the returned uploadUrl
+ * — bytes never touch the Next.js server, sidestepping the 4.5MB
+ * serverless body limit and keeping the import fast.
+ *
+ * Decision (BULK_MEDIA_IMPORT_INVESTIGATION.md §3): no presigned-POST,
+ * just per-file PUT signatures. Default 1h expiry from getPresignedUploadUrl
+ * is plenty for a 30-100 photo batch even on slow uplinks.
+ */
+export async function requestBulkPresignedUrls(
+  projectId: string,
+  files: { fileName: string; contentType: string; size: number }[]
+): Promise<{ urls: BulkPresignedUrl[] } | { error: string }> {
+  await requireAdmin();
+  if (!files.length) return { urls: [] };
+  if (files.length > BULK_PRESIGN_MAX) {
+    return {
+      error: `Too many files in one request (${files.length}). Max is ${BULK_PRESIGN_MAX} per call — chunk on the client.`,
+    };
+  }
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!project) return { error: "Project not found" };
+
+  const urls: BulkPresignedUrl[] = [];
+  for (const file of files) {
+    const ext = extFromContentType(file.contentType);
+    const fileKey = `projects/${projectId}/local-import/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    try {
+      const signed = await getPresignedUploadUrl(fileKey, file.contentType);
+      urls.push({
+        uploadUrl: signed.uploadUrl,
+        fileKey: signed.fileKey,
+        publicUrl: signed.publicUrl,
+        originalName: file.fileName,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to sign upload URL";
+      return { error: message };
+    }
+  }
+  return { urls };
+}
+
+export type CreateLocalMediaBatchItem = {
+  /** R2 key returned from requestBulkPresignedUrls. */
+  fileKey: string;
+  /** Public URL (mirror of fileKey). Saved to Media.url. */
+  publicUrl: string;
+  /** Final MIME type of what was uploaded to R2 (post-HEIC-conversion). */
+  contentType: string;
+  /** Original filename from the user's filesystem (for caption / debug). */
+  originalName: string;
+  /** Pixel dimensions, measured client-side. */
+  width: number;
+  height: number;
+  /**
+   * EXIF DateTimeOriginal as a unix epoch (ms). Drives Media.sortOrder so
+   * walkthrough photos render newest-first. `null` → fall back to import
+   * order (preserves picker order for screenshots / EXIF-stripped files).
+   */
+  exifTimestamp: number | null;
+  /** File size in bytes (post-conversion). Informational only. */
+  size: number;
+};
+
+export type CreateLocalMediaBatchResult = {
+  success: { id: string; fileKey: string }[];
+  failed: { fileKey: string; error: string }[];
+};
+
+/**
+ * Create Media rows for a batch of files that the client has already
+ * uploaded to R2 via presigned URLs. For each item, the server:
+ *
+ *   1. Reads the original back from R2 (low-latency, intra-region)
+ *   2. Generates + uploads a 400px WebP thumbnail (best-effort; null on fail)
+ *   3. Inserts the Media row with placement=UNASSIGNED, type=EXISTING,
+ *      kind=OTHER, roomId=null, tags=["local-import", batchId]
+ *
+ * Per-item failures are isolated — a bad file pushes to `failed[]` and the
+ * loop continues. Partial-failure tolerance per decision 14 in the build
+ * spec: client renders successes immediately and offers retry on failures.
+ *
+ * sortOrder is derived from EXIF timestamp epoch when available, falling
+ * back to the existing sortOrder semantics (max + index) so import order
+ * is at least preserved for screenshots / EXIF-stripped files.
+ */
+export async function createLocalMediaBatch(
+  projectId: string,
+  batchId: string,
+  items: CreateLocalMediaBatchItem[]
+): Promise<CreateLocalMediaBatchResult | { error: string }> {
+  await requireAdmin();
+  if (!items.length) return { success: [], failed: [] };
+  if (items.length > BULK_CREATE_MAX) {
+    return {
+      error: `Too many items in one batch (${items.length}). Max is ${BULK_CREATE_MAX} per call — chunk on the client.`,
+    };
+  }
+  if (!batchId || !/^batch-[A-Za-z0-9_-]+$/.test(batchId)) {
+    return { error: "Invalid batchId — expected batch-<token>" };
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!project) return { error: "Project not found" };
+
+  // Get a single sortOrder baseline so all rows in this batch sit above
+  // existing unassigned media. Each row then offsets from this baseline,
+  // either by its EXIF timestamp (newest-first) or import index.
+  const baseline = await prisma.media
+    .aggregate({
+      where: {
+        projectId,
+        type: MediaType.EXISTING,
+        roomId: null,
+        placement: MediaPlacement.UNASSIGNED,
+      },
+      _max: { sortOrder: true },
+    })
+    .then((r) => r._max.sortOrder ?? -1);
+
+  const success: CreateLocalMediaBatchResult["success"] = [];
+  const failed: CreateLocalMediaBatchResult["failed"] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    try {
+      // Step 1: read original back from R2 for thumbnail generation.
+      // If this fails, the client uploaded to a key we can't see — fatal
+      // for THIS item, skip it.
+      let originalBuffer: Buffer;
+      try {
+        originalBuffer = await readObjectToBuffer(item.fileKey);
+      } catch (e) {
+        failed.push({
+          fileKey: item.fileKey,
+          error: `Could not read uploaded file from storage: ${e instanceof Error ? e.message : "unknown"}`,
+        });
+        continue;
+      }
+
+      // Step 2: generate thumbnail (best-effort — null is fine, UI falls back).
+      const thumbnailUrl = await generateAndUploadThumbnail({
+        projectId,
+        originalBuffer,
+        originalFileKey: item.fileKey,
+      });
+
+      // Step 3: insert Media row.
+      // sortOrder uses EXIF timestamp (in seconds — int field) when present
+      // so newer walkthrough photos sort to the top. EXIF-less files fall
+      // back to baseline + import index, preserving picker order.
+      const sortOrder =
+        item.exifTimestamp != null
+          ? Math.floor(item.exifTimestamp / 1000)
+          : baseline + 1 + i;
+
+      const media = await prisma.media.create({
+        data: {
+          projectId,
+          roomId: null,
+          kind: MediaKind.OTHER,
+          type: MediaType.EXISTING,
+          url: item.publicUrl,
+          fileKey: item.fileKey,
+          thumbnailUrl,
+          caption: item.originalName || null,
+          tags: ["local-import", batchId],
+          sortOrder,
+          placement: MediaPlacement.UNASSIGNED,
+          width: item.width || null,
+          height: item.height || null,
+        },
+        select: { id: true, fileKey: true },
+      });
+      success.push({ id: media.id, fileKey: media.fileKey });
+    } catch (e) {
+      failed.push({
+        fileKey: item.fileKey,
+        error: e instanceof Error ? e.message : "Unknown error during media create",
+      });
+    }
+  }
+
+  if (success.length > 0) {
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+  }
+  return { success, failed };
 }
