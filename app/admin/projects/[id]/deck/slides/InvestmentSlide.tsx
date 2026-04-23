@@ -49,26 +49,19 @@ function effectiveHigh(item: InvestmentLineItem): number | null {
   return item.isOverride ? (item.overrideHigh ?? null) : (item.rangeHigh ?? null);
 }
 
-function sumRange(
-  items: InvestmentLineItem[],
-  which: "low" | "high"
-): number {
-  return items.reduce((acc, item) => {
-    const v = which === "low" ? effectiveLow(item) : effectiveHigh(item);
-    return acc + (v ?? 0);
-  }, 0);
-}
+// Phase 8C.2: sumRange() removed — only consumer was the slide-bottom total
+// line that's now handled on the next slide (Your Investment, Band 3).
 
 // ─── table-callout layout ────────────────────────────────────────────────────
 // Matches the Tierra Schaffer / Oyster Bay "Projected Investment" slides:
-// White/off-white bg, serif title + orange underline, bordered table,
-// retainer callout box, large bold total line in accent color, footer.
+// White/off-white bg, serif title + orange underline, bordered table.
+// Phase 8C T2 removed the mid-slide retainer callout. Phase 8C.2 removed
+// the bottom total line (the per-space total label was misleading; the
+// real project total now renders on the next slide).
 function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as InvestmentContent;
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const items = content.lineItems ?? [];
-  const totalLow = sumRange(items, "low");
-  const totalHigh = sumRange(items, "high");
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
@@ -253,19 +246,11 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
           syncRetainerFromProject — for legacy decks and for the Investment
           layout's future needs. Just not rendered on this layout. */}
 
-      {/* Total line */}
-      {items.length > 0 && (
-        <div className="flex-shrink-0" style={{ marginBottom: "1.5%" }}>
-          <p
-            style={{ fontFamily: headlineFont, fontSize: `${1.35 * headlineScale}em`, fontWeight: 700, color: content.headlineColor ?? branding.textColor }}
-          >
-            Total Cost of Project Execution Range:{" "}
-            <span style={{ color: resolvedAccent }}>
-              {formatRange(totalLow, totalHigh)}
-            </span>
-          </p>
-        </div>
-      )}
+      {/* Phase 8C.2: total line removed. The total now lives on the next
+          slide ("Your Investment", Band 3) which sums retainer + construction
+          and labels it correctly as "TOTAL PROJECT INVESTMENT". The label
+          here ("Total Cost of Project Execution Range") was misleading — it
+          summed the per-space rows, not the actual project total. */}
 
       {/* Spacer */}
       <div className="flex-1" />
