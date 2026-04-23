@@ -1067,6 +1067,31 @@ export interface DesignRetainerContent extends SharedSlideFields {
   /** Benefit bullet points. Supports legacy string[] and new object[]. */
   benefits?: (string | DesignRetainerBenefit)[];
 
+  // ── Phase 8C: three-band-summary layout inputs ─────────────────────────
+  /** Construction subtotal low, summed from Room.totalLow at sync time. */
+  constructionLow?: number | null;
+  /** Construction subtotal high, summed from Room.totalHigh at sync time. */
+  constructionHigh?: number | null;
+  /**
+   * Hourly rate snapshotted from CompanySettings.designHourlyRate at sync
+   * time. null → hourly-rate sentence is omitted from the slide. Captured
+   * into slide content so published snapshots preserve the value even if
+   * Settings changes later.
+   */
+  designHourlyRate?: number | null;
+  /**
+   * Whether the retainer is enabled for this project. Snapshotted from
+   * Project.retainerEnabled at sync time. When false, the three-band
+   * layout hides Band 1 / Band 3 and shows Band 2 as the emotional landing.
+   */
+  retainerEnabled?: boolean | null;
+  /**
+   * Numeric retainer amount (dollars) — sibling to the formatted string.
+   * Used by three-band-summary to compute the Band 3 total. Null when
+   * retainer is disabled.
+   */
+  retainerAmountNumber?: number | null;
+
   // ── Per-field: Section label (font + color only per Section 6) ──────────
   sectionLabelFont?: string | null;
   sectionLabelColor?: string | null;

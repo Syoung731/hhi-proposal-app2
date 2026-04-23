@@ -899,10 +899,13 @@ async function syncRetainerFromProject(
   });
   if (!project) return;
 
+  // Phase 8C: pull totalLow too so the retainer slide can render the
+  // construction range in Band 2 and compute the Band 3 total.
   const rooms = await prisma.room.findMany({
     where: { projectId },
-    select: { totalHigh: true },
+    select: { totalLow: true, totalHigh: true },
   });
+  const subtotalLow = rooms.reduce((sum, r) => sum + (r.totalLow ?? 0), 0);
   const subtotalHigh = rooms.reduce((sum, r) => sum + (r.totalHigh ?? 0), 0);
 
   const amount = computeRetainer(subtotalHigh, {
@@ -912,13 +915,25 @@ async function syncRetainerFromProject(
     override: project.retainerOverride,
   });
 
-  // design-retainer slide — string amount
+  // Phase 8C: snapshot the tenant's published hourly rate into slide content
+  // so published proposals stay stable even if the Settings value changes.
+  const companySettings = await prisma.companySettings.findFirst({
+    select: { designHourlyRate: true },
+  });
+  const designHourlyRate = companySettings?.designHourlyRate ?? null;
+
+  // design-retainer slide — string amount + three-band-summary inputs
   const retainerRow = existing.find((r) => r.type === "design-retainer");
   if (retainerRow && !retainerRow.isUserModified) {
     const c = (retainerRow.content ?? {}) as DesignRetainerContent;
     const next: DesignRetainerContent = {
       ...c,
       retainerAmount: project.retainerEnabled ? formatRetainerAmount(amount) : null,
+      retainerAmountNumber: project.retainerEnabled ? amount : null,
+      retainerEnabled: project.retainerEnabled,
+      constructionLow: subtotalLow > 0 ? subtotalLow : null,
+      constructionHigh: subtotalHigh > 0 ? subtotalHigh : null,
+      designHourlyRate,
     };
     await prisma.deckSlide.update({
       where: { id: retainerRow.id },
