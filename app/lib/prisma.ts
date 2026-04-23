@@ -21,12 +21,46 @@ function createPrismaClient(): PrismaClient {
   });
 }
 
+/**
+ * Inspects the cached client's `_runtimeDataModel` to confirm fields exist.
+ * The delegate check below only catches missing *models* — recent migrations
+ * (Phase 8A.1, Phase 9) only added fields to existing models, and a stale
+ * WASM query engine silently returns undefined for unknown fields.
+ */
+function hasAllExpectedFields(
+  client: PrismaClient,
+  expected: Record<string, string[]>,
+): boolean {
+  const rdm = (client as unknown as {
+    _runtimeDataModel?: { models?: Record<string, { fields?: Array<{ name: string }> }> };
+  })._runtimeDataModel;
+  if (!rdm?.models) return false;
+  for (const [modelName, fieldNames] of Object.entries(expected)) {
+    const model = rdm.models[modelName];
+    if (!model?.fields) return false;
+    const fieldSet = new Set(model.fields.map((f) => f.name));
+    for (const fieldName of fieldNames) {
+      if (!fieldSet.has(fieldName)) return false;
+    }
+  }
+  return true;
+}
+
+/** Fields added by recent migrations. Keep in sync with the latest schema. */
+const REQUIRED_RECENT_FIELDS: Record<string, string[]> = {
+  Room: ["displayGroupId", "displayGroupOrder"], // Phase 8A.1
+  Project: ["displayGroupOrder"], // Phase 8A.1
+  Media: ["thumbnailUrl"], // Phase 9
+};
+
 function getPrisma(): PrismaClient {
   const cached = globalForPrisma.prisma;
-  // Reuse global cached instance only when it has all required model delegates.
-  // Dev server caches the PrismaClient across HMR; after schema changes the old instance
-  // can be missing new delegates or have a stale WASM query engine, causing field errors.
-  // Add each new model here so stale cached instances are automatically replaced.
+  // Reuse global cached instance only when it has all required model delegates
+  // AND all recently-added fields. Dev server caches the PrismaClient across
+  // HMR; after schema changes the old instance can be missing new delegates,
+  // new fields on existing models, or have a stale WASM query engine.
+  // Add each new model to the delegate check, each new field to
+  // REQUIRED_RECENT_FIELDS so stale cached instances are auto-replaced.
   if (
     cached != null &&
     "company" in cached &&
@@ -56,7 +90,8 @@ function getPrisma(): PrismaClient {
     "estimateJob" in cached &&
     cached.estimateJob !== undefined &&
     "jobItem" in cached &&
-    cached.jobItem !== undefined
+    cached.jobItem !== undefined &&
+    hasAllExpectedFields(cached, REQUIRED_RECENT_FIELDS)
   ) {
     return cached;
   }
