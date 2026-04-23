@@ -151,6 +151,86 @@ function isLegacyBlobUrl(url: string): boolean {
   return url.includes("blob.vercel-storage.com");
 }
 
+// ---------------------------------------------------------------------------
+// Phase 9.2 — time formatting helpers (batch labels + EXIF captions)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a Phase 9 batch id tag `batch-YYYYMMDD-HHmmss` (local time when
+ * the LocalImportModal issued it) back into a Date. Returns null if the
+ * tag doesn't match the format — defensive against hand-edited tags.
+ */
+function parseBatchIdToDate(batchId: string): Date | null {
+  const m = batchId.match(/^batch-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm, ss] = m;
+  // Construct in local time to match how LocalImportModal formatted it.
+  const dt = new Date(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(hh),
+    Number(mm),
+    Number(ss)
+  );
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+/**
+ * Human-readable relative/absolute date label. Used for both import-batch
+ * dropdown options and per-photo EXIF captions.
+ *
+ * Styles:
+ *   - "Today 2:47 PM"              (same calendar day)
+ *   - "Yesterday 9:15 AM"          (one calendar day ago)
+ *   - "Apr 20, 2:30 PM"            (earlier this year)
+ *   - "Apr 20, 2025"               (older than this year — no time; archival)
+ *
+ * `mode: "batch"` forces time to always appear (batches include year+time
+ * when older than yesterday for precision; a user might run two imports
+ * the same day so the time is the distinguishing bit).
+ */
+function formatTimestamp(d: Date, mode: "photo" | "batch" = "photo"): string {
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return `Today ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  if (sameYear) {
+    const dateStr = d.toLocaleDateString([], { month: "short", day: "numeric" });
+    return `${dateStr}, ${time}`;
+  }
+  // Older than this year.
+  const dateStr = d.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  return mode === "batch" ? `${dateStr} ${time}` : dateStr;
+}
+
+/**
+ * Treat Media.sortOrder as a unix-seconds EXIF capture timestamp when it
+ * falls in a plausible range, otherwise null. Phase 9 local imports
+ * populate sortOrder with `Math.floor(ms / 1000)`; Zillow and legacy
+ * uploads use small integers for display ordering, which we filter out.
+ *
+ * Lower bound: 10^9 (2001-09-09) — any image with EXIF "taken" before
+ * then probably isn't a real photo walkthrough. Upper bound: now + 1 day
+ * to tolerate tiny clock skew.
+ */
+function exifTimestampFromSortOrder(sortOrder: number): Date | null {
+  if (!Number.isFinite(sortOrder)) return null;
+  const MIN_EPOCH_SEC = 1_000_000_000;
+  const MAX_EPOCH_SEC = Math.floor(Date.now() / 1000) + 86_400;
+  if (sortOrder < MIN_EPOCH_SEC || sortOrder > MAX_EPOCH_SEC) return null;
+  const d = new Date(sortOrder * 1000);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 const POLL_INTERVAL_MS = 7000;
 /** Poll interval for direct connection status (Zillow extension handshake). */
 const DIRECT_CONNECTION_POLL_MS = 2000;
@@ -740,6 +820,12 @@ export function MediaTab({
   const [selectedGenericUnassignedIds, setSelectedGenericUnassignedIds] = useState<Set<string>>(new Set());
   const [genericUnassignedAssignRoomId, setGenericUnassignedAssignRoomId] = useState("");
   const [genericUnassignedAssigning, setGenericUnassignedAssigning] = useState(false);
+  /**
+   * Phase 9.2: filter the Unassigned Photos grid by import batch tag.
+   * Value is "all" (default), "untagged" (no batch tag), or a literal
+   * `batch-YYYYMMDD-HHmmss` tag from a Phase 9 local-import batch.
+   */
+  const [unassignedBatchFilter, setUnassignedBatchFilter] = useState<string>("all");
   /** Bulk selection on Imported from Zillow page. */
   const [selectedZillowIds, setSelectedZillowIds] = useState<Set<string>>(new Set());
   const [zillowAssignRoomId, setZillowAssignRoomId] = useState("");
@@ -918,10 +1004,64 @@ export function MediaTab({
   const zillowImportedUnassigned = unassigned.filter((m) =>
     (m.tags ?? []).includes(ZILLOW_IMPORT_TAG)
   );
-  /** Generic unassigned photos (not Zillow-tagged); shown on the Unassigned Photos page only. */
-  const genericUnassigned = unassigned.filter(
-    (m) => !(m.tags ?? []).includes(ZILLOW_IMPORT_TAG)
+  /**
+   * Generic unassigned photos (not Zillow-tagged); shown on the Unassigned
+   * Photos page only.
+   *
+   * Sorted by sortOrder DESC so newest walkthrough photos surface at the
+   * top. Phase 9 local imports populate sortOrder with the EXIF
+   * DateTimeOriginal as Unix seconds, so DESC == newest-first. Legacy
+   * uploads have low sortOrder (~0) and naturally fall to the bottom.
+   */
+  const genericUnassigned = unassigned
+    .filter((m) => !(m.tags ?? []).includes(ZILLOW_IMPORT_TAG))
+    .sort((a, b) => b.sortOrder - a.sortOrder);
+
+  /**
+   * Phase 9.2: build the list of available import batches for the
+   * Unassigned Photos batch-filter dropdown. One entry per distinct
+   * `batch-*` tag found in the current unassigned set, with the count
+   * of photos in that batch. Sorted newest-first by parsing the
+   * batch-id timestamp (which is itself locally-formatted YYYYMMDD-HHmmss).
+   */
+  const availableBatches = (() => {
+    const counts = new Map<string, number>();
+    for (const m of genericUnassigned) {
+      for (const t of m.tags ?? []) {
+        if (t.startsWith("batch-")) {
+          counts.set(t, (counts.get(t) ?? 0) + 1);
+        }
+      }
+    }
+    // Lexicographic sort on the batch-id string is reverse-chronological
+    // because the format is batch-YYYYMMDD-HHmmss — string compare is
+    // chronological, so descending string sort == newest-first.
+    return Array.from(counts.entries())
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([id, count]) => ({ id, count }));
+  })();
+  /** True if any unassigned photo has no batch tag (Zillow imports were
+   *  already filtered out, but Rendr / legacy / manual uploads land here). */
+  const hasUntaggedUnassigned = genericUnassigned.some(
+    (m) => !(m.tags ?? []).some((t) => t.startsWith("batch-"))
   );
+
+  /**
+   * Apply the batch filter to genericUnassigned. "all" passes everything
+   * through; "untagged" keeps only photos with no batch tag; any other
+   * value is treated as a literal batch id.
+   */
+  const filteredGenericUnassigned = (() => {
+    if (unassignedBatchFilter === "all") return genericUnassigned;
+    if (unassignedBatchFilter === "untagged") {
+      return genericUnassigned.filter(
+        (m) => !(m.tags ?? []).some((t) => t.startsWith("batch-"))
+      );
+    }
+    return genericUnassigned.filter((m) =>
+      (m.tags ?? []).includes(unassignedBatchFilter)
+    );
+  })();
   /** Renderings with no room (e.g. room deleted, or edge case); show in separate section. */
   const orphanedRenderings = media.filter(
     (m) =>
@@ -1663,13 +1803,67 @@ export function MediaTab({
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
                 These are project photos not yet assigned to a section (excluding Zillow-imported photos, which appear under Imported from Zillow). Select photos below and assign them to a section or move to Front Page Photos.
               </p>
-              {genericUnassigned.length > 0 && (
+              {/* Phase 9.2: batch filter. Shown only when at least one
+                  local-import batch tag is present — otherwise the dropdown
+                  would just have "All" + "Untagged" which is noise. */}
+              {availableBatches.length > 0 && (
+                <div className="flex items-center gap-2 text-sm">
+                  <label
+                    htmlFor="unassigned-batch-filter"
+                    className="text-zinc-600 dark:text-zinc-400"
+                  >
+                    Filter by batch:
+                  </label>
+                  <select
+                    id="unassigned-batch-filter"
+                    value={unassignedBatchFilter}
+                    onChange={(e) => {
+                      setUnassignedBatchFilter(e.target.value);
+                      // Clearing selection on filter change avoids the
+                      // confusing case where selected IDs are no longer
+                      // visible but bulk-assign still targets them.
+                      setSelectedGenericUnassignedIds(new Set());
+                    }}
+                    className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="all">
+                      All batches ({genericUnassigned.length})
+                    </option>
+                    {availableBatches.map((b) => {
+                      const parsed = parseBatchIdToDate(b.id);
+                      const label = parsed
+                        ? formatTimestamp(parsed, "batch")
+                        : b.id;
+                      return (
+                        <option key={b.id} value={b.id}>
+                          {label} ({b.count} photo{b.count === 1 ? "" : "s"})
+                        </option>
+                      );
+                    })}
+                    {hasUntaggedUnassigned && (
+                      <option value="untagged">
+                        Untagged (
+                        {
+                          genericUnassigned.filter(
+                            (m) =>
+                              !(m.tags ?? []).some((t) => t.startsWith("batch-"))
+                          ).length
+                        }
+                        )
+                      </option>
+                    )}
+                  </select>
+                </div>
+              )}
+              {filteredGenericUnassigned.length > 0 && (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() =>
-                        setSelectedGenericUnassignedIds(new Set(genericUnassigned.map((m) => m.id)))
+                        setSelectedGenericUnassignedIds(
+                          new Set(filteredGenericUnassigned.map((m) => m.id))
+                        )
                       }
                       className="rounded border border-zinc-300 px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     >
@@ -1764,7 +1958,7 @@ export function MediaTab({
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                    {genericUnassigned.map((m) => (
+                    {filteredGenericUnassigned.map((m) => (
                       <ZillowStagingThumbnail
                         key={m.id}
                         media={m}
@@ -1787,11 +1981,24 @@ export function MediaTab({
                   </div>
                 </>
               )}
-              {genericUnassigned.length === 0 && (
+              {/* Empty-state branching: distinguish "no photos at all" from
+                  "no photos match the active batch filter". */}
+              {genericUnassigned.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
                   No unassigned photos. Photos you upload or import (other than from Zillow) are assigned to the section you choose. Zillow-imported photos appear under Imported from Zillow.
                 </p>
-              )}
+              ) : filteredGenericUnassigned.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                  No photos match the selected batch filter.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setUnassignedBatchFilter("all")}
+                    className="underline hover:text-zinc-900 dark:hover:text-zinc-200"
+                  >
+                    Clear filter
+                  </button>
+                </p>
+              ) : null}
             </div>
           ) : activeRoomId === RENDR_PHOTOS_ID ? (
             <div className="space-y-4">
