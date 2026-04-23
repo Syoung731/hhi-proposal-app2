@@ -96,9 +96,12 @@ export async function updateProjectOverviewAction(
       ...(coverHeroImageId !== undefined && { coverHeroImageId }),
     },
   });
-  // Invalidate project page (Overview tab) and preview so router.refresh() fetches updated data
+  // Invalidate project page (Overview tab) and preview so router.refresh() fetches updated data.
+  // Also invalidate the deck route — the Objective slide reads project.objective,
+  // supportingText, bullets, and objectivePillars, all of which this action updates.
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
+  revalidatePath(`/admin/projects/${projectId}/deck`);
   return {};
 }
 

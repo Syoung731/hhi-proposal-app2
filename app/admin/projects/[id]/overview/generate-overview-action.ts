@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/app/lib/prisma";
 import { extractFromTranscript, type TranscriptExtraction } from "@/app/lib/ai/extract-from-transcript";
 import { generateLuxuryObjectiveParagraph, generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
@@ -178,6 +179,10 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
           objectivePillars: luxuryResult.pillars as any,
         },
       });
+      // Bust the deck route cache so the Objective slide picks up the new
+      // pillars on the next render. Without this, RSC serves the cached deck
+      // page and pillars don't appear until some other event invalidates it.
+      revalidatePath(`/admin/projects/${projectId}/deck`);
     } catch (err) {
       console.warn("[generateOverviewFromTranscript] failed to persist objectivePillars:", err);
     }
