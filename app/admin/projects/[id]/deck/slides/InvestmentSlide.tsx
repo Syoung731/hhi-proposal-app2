@@ -65,7 +65,6 @@ function sumRange(
 // retainer callout box, large bold total line in accent color, footer.
 function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as InvestmentContent;
-  const GOLD = "#B8860B";
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const items = content.lineItems ?? [];
   const totalLow = sumRange(items, "low");
@@ -75,8 +74,9 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const tableHeaderBg = content.tableHeaderBgColor ?? "#1B2A4A";
-  const lineItemPadding = content.lineItemSizePreset === "compact" ? "0.35em 0.9em" : content.lineItemSizePreset === "spacious" ? "0.65em 0.9em" : "0.5em 0.9em";
-  const retainerAccent = content.retainerAccentColor ?? GOLD;
+  // Phase 8C: tighten default row padding for higher line density (was 0.5em).
+  // compact / spacious presets unchanged.
+  const lineItemPadding = content.lineItemSizePreset === "compact" ? "0.32em 0.9em" : content.lineItemSizePreset === "spacious" ? "0.65em 0.9em" : "0.42em 0.9em";
 
   return (
     <div
@@ -114,7 +114,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
             textShadow: makeOutlineShadow(content.headlineOutline),
           }}
         >
-          {slide.headline || "Projected Investment"}
+          {slide.headline || "Investment by Space"}
         </h1>
         <TitleAccentRule accentColor={resolvedAccent} />
       </div>
@@ -205,7 +205,9 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
                 className="flex items-start"
                 style={{
                   padding: lineItemPadding,
-                  background: i % 2 === 0 ? "#fff" : "#F9FAFB",
+                  // Phase 8C: warmer linen stripe (was #F9FAFB) reads visibly at
+                  // presentation scale and matches the NotebookLM palette.
+                  background: i % 2 === 0 ? "#fff" : "#F3F0EA",
                   borderTop: "1px solid #E5E7EB",
                 }}
               >
@@ -243,57 +245,13 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
         </div>
       )}
 
-      {/* Retainer callout box */}
-      {(content.showRetainerSection ?? true) && content.retainerLabel && content.retainerAmount != null && (
-        <div
-          className="flex-shrink-0"
-          style={{
-            border: `1px solid ${retainerAccent}`,
-            borderRadius: 2,
-            padding: "0.6em 0.9em",
-            marginBottom: "2.5%",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: "0.4em", flexWrap: "wrap" }}>
-            <span style={{
-              fontFamily: content.retainerLabelFont ?? bodyFont,
-              fontSize: `${(content.retainerLabelSize ?? 0.75) * bodyScale}em`,
-              fontWeight: (content.retainerLabelBold !== false) ? 700 : 400,
-              fontStyle: content.retainerLabelItalic ? "italic" : "normal",
-              textDecoration: content.retainerLabelUnderline ? "underline" : "none",
-              color: content.retainerLabelColor ?? branding.textColor,
-              textShadow: makeOutlineShadow(content.retainerLabelOutline),
-            }}>
-              {content.retainerLabel}:
-            </span>
-            <span style={{
-              fontFamily: content.retainerAmountFont ?? SLIDE_FONTS.defaults.headline,
-              fontSize: `${(content.retainerAmountSize ?? 2.5) * bodyScale * 0.3}em`,
-              fontWeight: (content.retainerAmountBold !== false) ? 700 : 400,
-              fontStyle: content.retainerAmountItalic ? "italic" : "normal",
-              textDecoration: content.retainerAmountUnderline ? "underline" : "none",
-              color: content.retainerAmountColor ?? branding.textColor,
-              textShadow: makeOutlineShadow(content.retainerAmountOutline),
-            }}>
-              {formatRange(content.retainerAmount, null).replace("–", "")}
-            </span>
-          </div>
-          {(content.retainerDescription || content.disclaimer) && (
-            <p style={{
-              fontFamily: content.retainerDescFont ?? bodyFont,
-              fontSize: `${(content.retainerDescSize ?? 0.62) * bodyScale}em`,
-              fontWeight: content.retainerDescBold ? 700 : 400,
-              fontStyle: content.retainerDescItalic ? "italic" : "normal",
-              textDecoration: content.retainerDescUnderline ? "underline" : "none",
-              color: content.retainerDescColor ?? "#6B7280",
-              marginTop: "0.3em",
-              textShadow: makeOutlineShadow(content.retainerDescOutline),
-            }}>
-              {content.retainerDescription || content.disclaimer}
-            </p>
-          )}
-        </div>
-      )}
+      {/* Retainer callout intentionally omitted on the Investment slide.
+          Phase 8C: the retainer story lives on Slide 10 ("Your Investment"),
+          where Band 1 renders the retainer amount, hourly-rate sentence, and
+          bullets. Duplicating that here adds noise. The retainerAmount /
+          retainerLabel fields on InvestmentContent remain — still written by
+          syncRetainerFromProject — for legacy decks and for the Investment
+          layout's future needs. Just not rendered on this layout. */}
 
       {/* Total line */}
       {items.length > 0 && (
