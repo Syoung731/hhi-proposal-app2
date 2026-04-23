@@ -46,11 +46,22 @@ function hasAllExpectedFields(
   return true;
 }
 
-/** Fields added by recent migrations. Keep in sync with the latest schema. */
+/**
+ * Fields added by recent migrations. Keep in sync with the latest schema.
+ *
+ * STANDING RULE (established Phase 8C.1): every Prisma schema change that
+ * adds a field MUST include extending this map in the same commit.
+ * Otherwise a stale dev-server Prisma client predating the new field
+ * silently passes the guard, the module-cached client is never refreshed,
+ * and queries touching the new field return `undefined` without raising.
+ * This has bitten us five separate times (Phases 8A.1, 8A.2, 8C, 8C.1) —
+ * treat it as a protocol, not a suggestion.
+ */
 const REQUIRED_RECENT_FIELDS: Record<string, string[]> = {
   Room: ["displayGroupId", "displayGroupOrder"], // Phase 8A.1
   Project: ["displayGroupOrder"], // Phase 8A.1
   Media: ["thumbnailUrl"], // Phase 9
+  CompanySettings: ["designHourlyRate"], // Phase 8C T1
 };
 
 function getPrisma(): PrismaClient {
