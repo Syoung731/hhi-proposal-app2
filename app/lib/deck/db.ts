@@ -39,6 +39,7 @@ import { getDesignBuildDefaults } from "@/app/lib/design-build-defaults.server";
 import type {
   ProposalSlide,
   SlideContent,
+  SlideType,
   RoomWithMedia,
   BeforeAfterContent,
   ScopeBreakdownContent,
@@ -473,6 +474,9 @@ async function seedDefaultSlides(
 }
 
 // ─── Auto-sync: Before/After slides ──────────────────────────────────────────
+//
+// Write scope: DeckSlide type "before-after" only. Registered in
+// SYNC_WRITE_SCOPES below.
 
 async function syncBeforeAfterSlides(
   deckId: string,
@@ -636,6 +640,9 @@ async function syncBeforeAfterSlides(
 }
 
 // ─── Auto-sync: Scope Breakdown slide ────────────────────────────────────────
+//
+// Write scope: DeckSlide type "scope-breakdown" only. Registered in
+// SYNC_WRITE_SCOPES below.
 
 async function syncScopeBreakdownSlide(
   deckId: string,
@@ -747,6 +754,9 @@ async function syncScopeBreakdownSlide(
  *
  * User-edited slides (isUserModified=true) remain immune — short-circuit.
  * InvestmentLineItem rows stay live (still consumed by the publish snapshot).
+ *
+ * Write scope: DeckSlide type "investment" only. Registered in
+ * SYNC_WRITE_SCOPES below.
  */
 async function syncInvestmentSlide(
   _deckId: string,
@@ -937,6 +947,9 @@ function buildGroupIncludesText(members: { name: string }[]): string | null {
  *
  * Per-item style fields (nameFont, nameColor, etc.) on existing phases are
  * preserved — they are merged by id onto the canonical phase entries.
+ *
+ * Write scope: DeckSlide type "project-timeline" only. Registered in
+ * SYNC_WRITE_SCOPES below.
  */
 async function syncProjectTimelineSlide(
   _deckId: string,
@@ -1003,8 +1016,13 @@ async function syncProjectTimelineSlide(
  *
  * The previously-written retainerAmount / retainerLabel fields on the
  * Investment slide are dead data — Phase 8C T2 removed the mid-slide
- * retainer callout that rendered them. They're removed from InvestmentContent
- * in the next commit.
+ * retainer callout that rendered them. Phase 8C.2 T2 removed them from
+ * InvestmentContent entirely.
+ *
+ * Write scope: DeckSlide type "design-retainer" only. Registered in
+ * SYNC_WRITE_SCOPES below. The Phase 8C.2 T1 fix is what made this
+ * single-writer guarantee true — before then, this sync also wrote to
+ * the "investment" slide, which caused the race.
  */
 async function syncRetainerFromProject(
   _deckId: string,
@@ -1069,6 +1087,60 @@ async function syncRetainerFromProject(
   // above for the full rationale. `syncInvestmentSlide` is the sole writer
   // to investment content.
 }
+
+// ─── Sync write-scope registry (Phase 8C.2 T3) ──────────────────────────────
+//
+// Declarative record of which sync function owns which DeckSlide type.
+// Module-load assertion below fails loudly if two sync functions ever claim
+// the same slide type — preventing future recurrences of the cross-function
+// write race fixed in Phase 8C.2 T1 (see PHASE_8C2_PREFLIGHT.md).
+//
+// RULE OF THUMB for adding a new sync function:
+//   1. Declare it like the others in this file.
+//   2. Add an entry to SYNC_WRITE_SCOPES below.
+//   3. If another sync already claims the same slide type, pick one — two
+//      syncs writing to the same slide's `content` via read-modify-write on
+//      a shared `existing` snapshot is how the 8C.2 race happened.
+//
+// If you legitimately need two syncs to update the same slide type (rare),
+// split the target slide's content model so each owns a disjoint field set,
+// OR refresh `existing` between sync calls. Do NOT spread-and-write from a
+// stale snapshot.
+
+type SlideSyncRegistration = {
+  name: string;
+  writesToSlideTypes: readonly SlideType[];
+};
+
+const SYNC_WRITE_SCOPES: readonly SlideSyncRegistration[] = [
+  { name: "syncBeforeAfterSlides", writesToSlideTypes: ["before-after"] },
+  { name: "syncScopeBreakdownSlide", writesToSlideTypes: ["scope-breakdown"] },
+  { name: "syncInvestmentSlide", writesToSlideTypes: ["investment"] },
+  { name: "syncProjectTimelineSlide", writesToSlideTypes: ["project-timeline"] },
+  { name: "syncRetainerFromProject", writesToSlideTypes: ["design-retainer"] },
+];
+
+// Module-load assertion. Throws on duplicate ownership so the dev server
+// fails fast instead of silently racing at runtime.
+(function assertSyncWriteScopesDisjoint(): void {
+  const claimed = new Map<SlideType, string>();
+  for (const { name, writesToSlideTypes } of SYNC_WRITE_SCOPES) {
+    for (const slideType of writesToSlideTypes) {
+      const prev = claimed.get(slideType);
+      if (prev !== undefined) {
+        throw new Error(
+          `[deck/db] Sync write-scope collision: both "${prev}" and "${name}" ` +
+            `claim DeckSlide type "${slideType}". Each slide type must be ` +
+            `written by at most one sync function — see Phase 8C.2 PHASE_8C2_PREFLIGHT.md ` +
+            `for why (shared-snapshot read-modify-write race). Resolve by ` +
+            `consolidating writes into one sync or splitting the slide's ` +
+            `content model into disjoint field sets.`,
+        );
+      }
+      claimed.set(slideType, name);
+    }
+  }
+})();
 
 // ─── Backfill: default slides added after initial seed ────────────────────────
 
