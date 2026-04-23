@@ -6,6 +6,22 @@ import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, SECTION_LABEL_SIZE, ACCENT_RULE_WIDTH, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
 
+/** Compact money formatter for the three-band layout — no decimals. */
+function fmtDollars(n: number): string {
+  return "$" + Math.round(n).toLocaleString("en-US");
+}
+
+/** Range formatter for Band 2 / Band 3. Handles missing / equal-value edge cases. */
+function fmtRange(low: number | null | undefined, high: number | null | undefined): string {
+  const lo = low ?? 0;
+  const hi = high ?? 0;
+  if (lo === 0 && hi === 0) return "—";
+  if (lo === hi) return fmtDollars(lo);
+  if (lo === 0) return fmtDollars(hi);
+  if (hi === 0) return fmtDollars(lo);
+  return `${fmtDollars(lo)} – ${fmtDollars(hi)}`;
+}
+
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
@@ -97,6 +113,16 @@ export function DesignRetainerSlide({ slide, branding, hasAiBackground }: Props)
   const backgroundImage = c.backgroundImage ?? null;
 
   switch (layoutKey) {
+    case "three-band-summary":
+      return (
+        <ThreeBandSummaryLayout
+          slide={slide}
+          content={c}
+          branding={branding}
+          hasAiBackground={hasAiBackground}
+          benefits={benefits}
+        />
+      );
     case "centered-hero":
       return (
         <CenteredHeroLayout
@@ -709,6 +735,283 @@ function DarkOverlayModalLayout({
         variant={content.logoVariant ?? "dark"}
         xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.cta.x}
         yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.cta.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
+// ─── Layout D: Three-Band Summary (Phase 8C) ────────────────────────────────
+// Renders the full investment story on one slide:
+//   Band 1 — Design / Feasibility Retainer + bullets
+//   Band 2 — Projected Construction Investment (range)
+//   Band 3 — TOTAL PROJECT INVESTMENT (retainer + construction, accent color)
+//
+// When Project.retainerEnabled === false, Band 1 and Band 3 hide; Band 2
+// takes over the emotional-landing treatment (centered, large, accent color).
+
+function ThreeBandSummaryLayout({
+  slide,
+  content,
+  branding,
+  hasAiBackground,
+  benefits,
+}: {
+  slide: ProposalSlide;
+  content: DesignRetainerContent;
+  branding: DeckBranding;
+  hasAiBackground?: boolean;
+  benefits: DesignRetainerBenefit[];
+}) {
+  const accent = content.accentColor ?? branding.accentColor ?? GOLD;
+  const retainerEnabled = content.retainerEnabled !== false; // default true when field absent
+  const retainerAmountStr = content.retainerAmount ?? null;
+  const retainerAmountNum = content.retainerAmountNumber ?? null;
+  const constructionLow = content.constructionLow ?? null;
+  const constructionHigh = content.constructionHigh ?? null;
+  const hourlyRate = content.designHourlyRate ?? null;
+
+  // Total range — retainer (flat) + construction range. Null when we can't
+  // compute (missing construction or disabled retainer handled per-band).
+  const totalLow =
+    retainerEnabled && retainerAmountNum != null && constructionLow != null
+      ? retainerAmountNum + constructionLow
+      : null;
+  const totalHigh =
+    retainerEnabled && retainerAmountNum != null && constructionHigh != null
+      ? retainerAmountNum + constructionHigh
+      : null;
+
+  const headline = slide.headline ?? "Your Investment";
+
+  return (
+    <div
+      className="relative w-full h-full"
+      style={{
+        overflow: "hidden",
+        background: hasAiBackground ? "transparent" : LINEN,
+      }}
+    >
+      <ArchitecturalWatermark opacity={0.035} />
+
+      <div
+        style={{
+          position: "relative",
+          zIndex: 1,
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          padding: SLIDE_PADDING.content,
+        }}
+      >
+        {/* Slide headline */}
+        <div style={{ flexShrink: 0, marginBottom: "2%" }}>
+          <h2
+            style={{
+              fontFamily: SLIDE_FONTS.defaults.headline,
+              fontSize: "1.5em",
+              fontWeight: 700,
+              color: NAVY,
+              lineHeight: 1.15,
+              marginBottom: "0.1em",
+            }}
+          >
+            {headline}
+          </h2>
+          <TitleAccentRule accentColor={accent} width={ACCENT_RULE_WIDTH.standard} marginTop="0.25em" marginBottom="0" />
+        </div>
+
+        {/* Body: three bands vertically with small gaps */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            minHeight: 0,
+          }}
+        >
+          {/* ── Band 1: Retainer ───────────────────────────────────── */}
+          {retainerEnabled && (
+            <div
+              style={{
+                paddingTop: "1.2%",
+                paddingBottom: "1.5%",
+                borderBottom: `1px solid ${NAVY}1A`,
+              }}
+            >
+              {/* Row 1: label + amount */}
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "0.35em" }}>
+                <span
+                  style={{
+                    fontFamily: SLIDE_FONTS.defaults.headline,
+                    fontSize: "0.85em",
+                    fontWeight: 700,
+                    color: NAVY,
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  Design / Feasibility Retainer
+                </span>
+                <span
+                  style={{
+                    fontFamily: SLIDE_FONTS.defaults.headline,
+                    fontSize: "1.35em",
+                    fontWeight: 700,
+                    color: NAVY,
+                    lineHeight: 1,
+                  }}
+                >
+                  {retainerAmountStr ?? "—"}
+                </span>
+              </div>
+
+              {/* Row 2: hourly rate + third-party services sentences. The
+                  hourly-rate sentence is omitted entirely when designHourlyRate
+                  is null (tenant hasn't published one). */}
+              <p
+                style={{
+                  fontFamily: SLIDE_FONTS.defaults.body,
+                  fontSize: "0.55em",
+                  color: MUTED_NAVY,
+                  lineHeight: 1.55,
+                  marginBottom: "0.6em",
+                  maxWidth: "88%",
+                }}
+              >
+                {hourlyRate != null && (
+                  <>Design work billed at our published rate of ${hourlyRate}/hour. </>
+                )}
+                Third-party services (surveys, engineering, 3D scanning) are included.
+              </p>
+
+              {/* Row 3: bullets (2-column grid) */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.3em 1.8em" }}>
+                {benefits.map((b, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "0.5em" }}>
+                    <GoldCheck color={accent} size="0.85em" />
+                    <span
+                      style={{
+                        fontFamily: SLIDE_FONTS.defaults.body,
+                        fontSize: "0.56em",
+                        color: NAVY,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {b.text}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Band 2: Construction ──────────────────────────────────
+              When retainer is disabled, this band inherits Band 3's emotional
+              landing treatment (large, centered, accent color). */}
+          <div
+            style={{
+              paddingTop: "1.5%",
+              paddingBottom: "1.5%",
+              borderBottom: retainerEnabled ? `1px solid ${NAVY}1A` : undefined,
+              display: "flex",
+              flexDirection: retainerEnabled ? "row" : "column",
+              alignItems: retainerEnabled ? "baseline" : "center",
+              justifyContent: retainerEnabled ? "space-between" : "center",
+              textAlign: retainerEnabled ? undefined : "center",
+              flex: retainerEnabled ? undefined : 1,
+              gap: retainerEnabled ? undefined : "0.3em",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontFamily: SLIDE_FONTS.defaults.headline,
+                  fontSize: retainerEnabled ? "0.85em" : "0.95em",
+                  fontWeight: 700,
+                  color: retainerEnabled ? NAVY : accent,
+                  letterSpacing: retainerEnabled ? "0.01em" : "0.08em",
+                  textTransform: retainerEnabled ? "none" : "uppercase",
+                  marginBottom: retainerEnabled ? "0.2em" : "0.3em",
+                }}
+              >
+                {retainerEnabled ? "Projected Construction Investment" : "Total Project Investment"}
+              </div>
+              {retainerEnabled && (
+                <p
+                  style={{
+                    fontFamily: SLIDE_FONTS.defaults.body,
+                    fontSize: "0.5em",
+                    fontStyle: "italic",
+                    color: MUTED_NAVY,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  (Per the detail on the previous slide)
+                </p>
+              )}
+            </div>
+            <div
+              style={{
+                fontFamily: SLIDE_FONTS.defaults.headline,
+                fontSize: retainerEnabled ? "1.35em" : "3.2em",
+                fontWeight: 700,
+                color: retainerEnabled ? NAVY : accent,
+                lineHeight: 1,
+              }}
+            >
+              {fmtRange(constructionLow, constructionHigh)}
+            </div>
+          </div>
+
+          {/* ── Band 3: Total (only when retainer enabled) ───────────── */}
+          {retainerEnabled && (
+            <div
+              style={{
+                paddingTop: "2%",
+                paddingBottom: "1%",
+                display: "flex",
+                alignItems: "baseline",
+                justifyContent: "space-between",
+                gap: "1em",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: SLIDE_FONTS.defaults.headline,
+                  fontSize: "0.95em",
+                  fontWeight: 700,
+                  color: accent,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Total Project Investment
+              </span>
+              <span
+                style={{
+                  fontFamily: SLIDE_FONTS.defaults.headline,
+                  fontSize: "2.1em",
+                  fontWeight: 700,
+                  color: accent,
+                  lineHeight: 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {fmtRange(totalLow, totalHigh)}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
         scale={content.logoSize ?? 1.0}
         branding={branding}
       />

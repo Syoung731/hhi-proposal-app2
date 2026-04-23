@@ -62,7 +62,7 @@ export type ProcessLayoutKey = "three-stages";
 export type CoreValuesLayoutKey = "quad-grid" | "cards-row" | "labeled-list" | "icon-cards";
 export type ProjectTimelineLayoutKey = "vertical-dot" | "vertical-alternating" | "stepped-hierarchy";
 export type CopePageLayoutKey = "icon-columns" | "quad-photos" | "annotated-diagram";
-export type DesignRetainerLayoutKey = "centered-hero" | "framed-card" | "dark-overlay-modal";
+export type DesignRetainerLayoutKey = "centered-hero" | "framed-card" | "dark-overlay-modal" | "three-band-summary";
 export type NextStepsLayoutKey = "numbered-photo" | "column-grid-photos" | "two-by-two-grid" | "large-number-hero";
 export type ClosingSlideLayoutKey = "dark-centered" | "light-logo-centered" | "photo-white-card";
 export type VisualInspirationLayoutKey = "hero-plus-stacked" | "masonry-grid" | "side-by-side-bleed";
@@ -1913,6 +1913,7 @@ export const COPE_PAGE_LAYOUTS: { key: CopePageLayoutKey; label: string }[] = [
 ];
 
 export const DESIGN_RETAINER_LAYOUTS: { key: DesignRetainerLayoutKey; label: string }[] = [
+  { key: "three-band-summary", label: "Three-Band Summary" },
   { key: "centered-hero", label: "Centered Hero" },
   { key: "framed-card", label: "Framed Card" },
   { key: "dark-overlay-modal", label: "Dark Overlay" },
