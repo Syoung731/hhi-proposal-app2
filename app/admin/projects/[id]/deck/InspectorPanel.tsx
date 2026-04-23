@@ -20,6 +20,7 @@ import type {
   RoomMediaItem,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
+  ScopeCategory,
   RiskBriefContent,
   ProcessContent,
   ProcessStage,
@@ -54,6 +55,8 @@ import {
   LOGO_DEFAULTS,
   getLayoutsForType,
   ADDITION_OVERVIEW_LAYOUTS,
+  SCOPE_CATEGORIES,
+  SCOPE_CATEGORY_LABELS,
 } from "@/app/lib/deck/types";
 import { HHI_DEFAULT_CORE_VALUES } from "@/app/lib/core-values-defaults";
 import { HHI_DEFAULT_COPE_ITEMS } from "@/app/lib/cope-defaults";
@@ -3424,6 +3427,44 @@ function ScopeBreakdownInspector({
                       placeholder="Short description of this area's scope…"
                       rows={2}
                     />
+
+                    {/* Phase 8C: category picker. Manual edits flip
+                        manuallyClassified = true so the sync's keyword
+                        classifier won't overwrite the choice on re-sync. */}
+                    <p style={{ fontSize: 9, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 8, marginBottom: 4 }}>
+                      Category
+                    </p>
+                    <select
+                      value={room.category ?? "other"}
+                      onChange={(e) => {
+                        const next = e.target.value as ScopeCategory;
+                        updateRoom(room.id, { category: next, manuallyClassified: true });
+                      }}
+                      style={{
+                        width: "100%",
+                        fontSize: 11,
+                        padding: "4px 6px",
+                        borderRadius: 3,
+                        border: "1px solid #D1D5DB",
+                        background: "#fff",
+                        color: "#374151",
+                      }}
+                    >
+                      {SCOPE_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {SCOPE_CATEGORY_LABELS[cat]}
+                        </option>
+                      ))}
+                    </select>
+                    {room.manuallyClassified ? (
+                      <p style={{ fontSize: 9, color: "#9CA3AF", marginTop: 3, lineHeight: 1.3 }}>
+                        Manually set — sync won&rsquo;t change this.
+                      </p>
+                    ) : (
+                      <p style={{ fontSize: 9, color: "#9CA3AF", marginTop: 3, lineHeight: 1.3 }}>
+                        Auto-classified from scope text.
+                      </p>
+                    )}
 
                     {/* Per-item: Section title style */}
                     <p style={{ fontSize: 9, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 8, marginBottom: 4 }}>Title Style</p>

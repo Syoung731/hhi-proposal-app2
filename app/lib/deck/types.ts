@@ -612,6 +612,39 @@ export interface RoomWithMedia {
 }
 
 /**
+ * Phase 8C categorization of a scope row. Drives icon + grouping on the
+ * scope-breakdown slide. Keys match the existing SCOPE_ICONS map in
+ * ScopeBreakdownSlide.tsx that was sitting dormant pre-8C.
+ */
+export type ScopeCategory =
+  | "demolition"
+  | "systems"
+  | "cabinetry"
+  | "surfaces"
+  | "lighting"
+  | "other";
+
+/** UI labels for the six scope categories (displayed in InspectorPanel + slide). */
+export const SCOPE_CATEGORY_LABELS: Record<ScopeCategory, string> = {
+  demolition: "Demolition",
+  systems: "Systems",
+  cabinetry: "Cabinetry",
+  surfaces: "Surfaces",
+  lighting: "Lighting",
+  other: "Other",
+};
+
+/** Ordered list for picker UIs + default render order. */
+export const SCOPE_CATEGORIES: ScopeCategory[] = [
+  "demolition",
+  "systems",
+  "cabinetry",
+  "surfaces",
+  "lighting",
+  "other",
+];
+
+/**
  * A single room entry on a scope-breakdown slide.
  * Snapshotted from Room at auto-gen time; description is user-editable afterward.
  */
@@ -624,6 +657,18 @@ export interface ScopeBreakdownRoom {
   description: string;
   /** Whether this room is currently shown on the slide. */
   isIncluded: boolean;
+  /**
+   * Phase 8C: primary trade category for this scope row. Seeded by the
+   * keyword classifier at sync time; editable per-row in InspectorPanel.
+   * null/undefined on legacy rows → classifier will populate on next sync
+   * unless manuallyClassified is also true.
+   */
+  category?: ScopeCategory | null;
+  /**
+   * Phase 8C: true when a user has picked a category via InspectorPanel.
+   * The classifier never overwrites a manually-classified row on re-sync.
+   */
+  manuallyClassified?: boolean | null;
 
   // ── Per-item: title style ────────────────────────────────────────────────
   titleFont?: string;

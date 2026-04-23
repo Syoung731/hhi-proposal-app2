@@ -43,6 +43,7 @@ import type {
   BeforeAfterContent,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
+  ScopeCategory,
   InvestmentContent,
   ProjectTimelineContent,
   ProjectPhase,
@@ -50,6 +51,7 @@ import type {
 } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
 import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
+import { classifyScopeItem } from "@/app/lib/scope/classifier";
 import {
   buildDefaultDeckSpec,
   AUTO_SYNCED_SLIDE_TYPES,
@@ -553,6 +555,8 @@ async function syncScopeBreakdownSlide(
     if (existingRow.isUserModified || existingRow.isUserHidden) return;
 
     // Merge rooms: preserve existing description + isIncluded; add new rooms.
+    // Phase 8C: also preserve category + manuallyClassified on existing rows;
+    // auto-classify rows that lack a category AND aren't manually classified.
     const existingContent = (existingRow.content ?? {}) as ScopeBreakdownContent;
     const existingRoomMap = new Map<string, ScopeBreakdownRoom>(
       (existingContent.rooms ?? []).map((r) => [r.id, r])
@@ -560,19 +564,31 @@ async function syncScopeBreakdownSlide(
 
     const mergedRooms: ScopeBreakdownRoom[] = unrendered.map((room) => {
       const prev = existingRoomMap.get(room.id);
-      if (prev) {
-        return {
-          id: room.id,
-          name: room.name, // name may have changed
-          description: prev.description,
-          isIncluded: prev.isIncluded,
-        };
+      const description = prev
+        ? prev.description
+        : stripScopeClarifications(room.scopeNarrative ?? "");
+      const isIncluded = prev ? prev.isIncluded : true;
+      // Category resolution:
+      //   - manuallyClassified preserved → keep prev.category as-is
+      //   - missing category → run classifier against current narrative
+      //   - prev had an auto-classification → re-run so renames/rewrites
+      //     can shift the category (e.g., a room that was 'surfaces' but
+      //     gets rewritten to be primarily demo).
+      let category: ScopeCategory | null;
+      let manuallyClassified = false;
+      if (prev?.manuallyClassified) {
+        category = prev.category ?? null;
+        manuallyClassified = true;
+      } else {
+        category = classifyScopeItem(room.scopeNarrative, room.name);
       }
       return {
         id: room.id,
-        name: room.name,
-        description: stripScopeClarifications(room.scopeNarrative ?? ""),
-        isIncluded: true,
+        name: room.name, // name may have changed
+        description,
+        isIncluded,
+        category,
+        manuallyClassified,
       };
     });
 
@@ -592,6 +608,9 @@ async function syncScopeBreakdownSlide(
       name: room.name,
       description: stripScopeClarifications(room.scopeNarrative ?? ""),
       isIncluded: true,
+      // Phase 8C: auto-classify on initial seed.
+      category: classifyScopeItem(room.scopeNarrative, room.name),
+      manuallyClassified: false,
     }));
 
     const content: ScopeBreakdownContent = {

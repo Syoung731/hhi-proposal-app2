@@ -5,7 +5,9 @@ import type {
   DeckBranding,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
+  ScopeCategory,
 } from "@/app/lib/deck/types";
+import { SCOPE_CATEGORIES, SCOPE_CATEGORY_LABELS } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
@@ -53,6 +55,31 @@ function visibleRoomsOf(content: ScopeBreakdownContent): ScopeBreakdownRoom[] {
     if (/cost of project execution|\bcope\b/i.test(name)) return false;
     return true;
   });
+}
+
+/**
+ * Phase 8C: group visible rooms by their category. Returns an array of
+ * { category, rooms } bucket entries in SCOPE_CATEGORIES order. Categories
+ * with zero rooms are omitted. Rows with null/missing category land in
+ * "other". When NO row on the slide has a category (legacy data), returns
+ * null so the caller can fall through to the flat un-grouped render.
+ */
+function groupRoomsByCategory(
+  rooms: ScopeBreakdownRoom[],
+): Array<{ category: ScopeCategory; rooms: ScopeBreakdownRoom[] }> | null {
+  const anyClassified = rooms.some((r) => r.category != null);
+  if (!anyClassified) return null;
+  const buckets = new Map<ScopeCategory, ScopeBreakdownRoom[]>();
+  for (const r of rooms) {
+    const key = (r.category ?? "other") as ScopeCategory;
+    const arr = buckets.get(key) ?? [];
+    arr.push(r);
+    buckets.set(key, arr);
+  }
+  return SCOPE_CATEGORIES.filter((c) => buckets.has(c)).map((c) => ({
+    category: c,
+    rooms: buckets.get(c) ?? [],
+  }));
 }
 
 function resolveAccent(content: ScopeBreakdownContent): string {
@@ -203,17 +230,58 @@ function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
           )}
         </div>
 
-        {/* Room grid */}
-        {visibleRooms.length === 0 ? <NoRooms /> : (
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: gridColumns(visibleRooms.length), gap: "1.8% 3.5%", alignContent: "start", overflow: "hidden", marginBottom: hasPhotos ? "2.5%" : 0 }}>
-            {visibleRooms.map((room) => (
-              <div key={room.id} style={{ borderLeft: `3px solid ${accent}`, paddingLeft: "4%", paddingTop: "0.5%", paddingBottom: "0.5%" }}>
-                <p style={roomTitleStyle(room, content, branding)}>{room.name}</p>
-                {room.description && <p style={roomDescStyle(room, content)}>{room.description}</p>}
+        {/* Room grid — grouped by category when rows have categories, flat otherwise */}
+        {visibleRooms.length === 0 ? <NoRooms /> : (() => {
+          const grouped = groupRoomsByCategory(visibleRooms);
+          // Flat render for legacy slides where no row has a category set.
+          if (!grouped) {
+            return (
+              <div style={{ flex: 1, display: "grid", gridTemplateColumns: gridColumns(visibleRooms.length), gap: "1.8% 3.5%", alignContent: "start", overflow: "hidden", marginBottom: hasPhotos ? "2.5%" : 0 }}>
+                {visibleRooms.map((room) => (
+                  <div key={room.id} style={{ borderLeft: `3px solid ${accent}`, paddingLeft: "4%", paddingTop: "0.5%", paddingBottom: "0.5%" }}>
+                    <p style={roomTitleStyle(room, content, branding)}>{room.name}</p>
+                    {room.description && <p style={roomDescStyle(room, content)}>{room.description}</p>}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            );
+          }
+          // Grouped render — one section per category with an icon + label header.
+          return (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2.5%", overflow: "hidden", marginBottom: hasPhotos ? "2.5%" : 0 }}>
+              {grouped.map((bucket) => (
+                <div key={bucket.category}>
+                  {/* Category header */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5em", marginBottom: "0.7em" }}>
+                    <ScopeIcon name={bucket.category} color={accent} size="1em" />
+                    <span
+                      style={{
+                        fontFamily: SLIDE_FONTS.defaults.label,
+                        fontSize: "0.62em",
+                        fontWeight: 700,
+                        color: accent,
+                        letterSpacing: "0.14em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {SCOPE_CATEGORY_LABELS[bucket.category]}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: `${accent}30` }} />
+                  </div>
+                  {/* Rooms in this bucket */}
+                  <div style={{ display: "grid", gridTemplateColumns: gridColumns(bucket.rooms.length), gap: "1.2% 3.5%", alignContent: "start" }}>
+                    {bucket.rooms.map((room) => (
+                      <div key={room.id} style={{ borderLeft: `3px solid ${accent}`, paddingLeft: "4%", paddingTop: "0.5%", paddingBottom: "0.5%" }}>
+                        <p style={roomTitleStyle(room, content, branding)}>{room.name}</p>
+                        {room.description && <p style={roomDescStyle(room, content)}>{room.description}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* Optional photo strip */}
         {hasPhotos && <PhotoStrip photos={photos} />}
@@ -345,9 +413,9 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
           <div style={{ flex: 1, display: "flex", gap: "1%", minHeight: 0, alignItems: "flex-start" }}>
             {displayRooms.map((room, i) => (
               <div key={room.id} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "2%", borderLeft: i > 0 ? `1px solid ${accent}20` : undefined }}>
-                {/* Icon */}
+                {/* Icon — per-row category (Phase 8C). Falls back to default icon for legacy rows / "other". */}
                 <div style={{ marginBottom: "8%" }}>
-                  <ScopeIcon color={accent} />
+                  <ScopeIcon name={room.category ?? undefined} color={accent} />
                 </div>
                 {/* Name */}
                 <p style={{ ...roomTitleStyle(room, content, branding, NAVY), fontSize: `${0.72 * (room.titleSize ?? 1.0)}em`, textAlign: "center" }}>
@@ -425,9 +493,9 @@ function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
           ) : (
             displayRooms.map((room) => (
               <div key={room.id} style={{ flex: 1, background: "rgba(245,240,232,0.95)", borderRadius: 8, padding: "4%", display: "flex", flexDirection: "column" }}>
-                {/* Icon */}
+                {/* Icon — per-row category (Phase 8C). */}
                 <div style={{ marginBottom: "6%" }}>
-                  <ScopeIcon color={accent} size="1.8em" />
+                  <ScopeIcon name={room.category ?? undefined} color={accent} size="1.8em" />
                 </div>
                 {/* Name */}
                 <p style={{ ...roomTitleStyle(room, content, branding, NAVY), fontSize: `${0.72 * (room.titleSize ?? 1.0)}em` }}>
@@ -584,9 +652,9 @@ function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
           <div style={{ flex: 1, display: "flex", gap: "4%", alignItems: "flex-start", justifyContent: "center" }}>
             {displayRooms.map((room) => (
               <div key={room.id} style={{ flex: 1, maxWidth: "30%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                {/* Icon circle */}
+                {/* Icon circle — per-row category (Phase 8C). */}
                 <div style={{ width: "3.5em", height: "3.5em", borderRadius: "50%", border: `2px solid ${accent}`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "8%", background: "rgba(255,255,255,0.6)" }}>
-                  <ScopeIcon color={accent} size="1.6em" />
+                  <ScopeIcon name={room.category ?? undefined} color={accent} size="1.6em" />
                 </div>
                 {/* Name */}
                 <p style={{ ...roomTitleStyle(room, content, branding, NAVY), fontSize: `${0.78 * (room.titleSize ?? 1.0)}em`, textAlign: "center", marginBottom: "0.6em" }}>
