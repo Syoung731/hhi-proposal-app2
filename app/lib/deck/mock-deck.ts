@@ -87,8 +87,6 @@ export function getMockDeck(
               isCope: true,
             },
           ],
-          retainerLabel: "Design / Feasibility Retainer",
-          retainerAmount: 10000,
           disclaimer:
             "This is an initial project budget range based on the scope provided.",
           address: "34 Sussex Lane, Hilton Head, South Carolina 29926",

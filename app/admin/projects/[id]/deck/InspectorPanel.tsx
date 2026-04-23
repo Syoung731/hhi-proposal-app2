@@ -1800,15 +1800,11 @@ function InvestmentInspector({
     onUpdate({ ...slide, content: { ...content, ...patch }, isUserModified: true });
   }
 
-  // Controlled retainerAmount: display as formatted string, store as number
-  const [retainerRaw, setRetainerRaw] = useState(
-    content.retainerAmount != null ? String(content.retainerAmount) : ""
-  );
-  // Keep local retainerRaw in sync if slide content changes externally
-  useEffect(() => {
-    setRetainerRaw(content.retainerAmount != null ? String(content.retainerAmount) : "");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slide.id]);
+  // Phase 8C.2 T2: `retainerAmount` + `retainerLabel` inputs removed from
+  // the Investment inspector. Those fields no longer exist on InvestmentContent
+  // (the mid-slide retainer callout was removed in Phase 8C T2 and the
+  // write-side race was fixed in Phase 8C.2 T1). The retainer story lives
+  // entirely on Slide 10 (Your Investment) now.
 
   const [resyncing, setResyncing] = useState(false);
 
@@ -1887,81 +1883,13 @@ function InvestmentInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── RETAINER LABEL ───────────────────────────── */}
-      <SectionLabel>Retainer Label</SectionLabel>
-      <FieldGroup label="Text">
-        <TextInput
-          value={content.retainerLabel ?? ""}
-          onChange={(v) => updateContent({ retainerLabel: v || null })}
-          placeholder="Design / Feasibility Retainer"
-        />
-      </FieldGroup>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.retainerLabelFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ retainerLabelFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.retainerLabelSize ?? 0.75).toFixed(1)}×`}>
-        <PSizeSlider value={content.retainerLabelSize ?? 0.75} onChange={(v) => updateContent({ retainerLabelSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.retainerLabelBold ?? true} italic={content.retainerLabelItalic} underline={content.retainerLabelUnderline}
-          onBold={(v) => updateContent({ retainerLabelBold: v })} onItalic={(v) => updateContent({ retainerLabelItalic: v })} onUnderline={(v) => updateContent({ retainerLabelUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.retainerLabelColor} defaultVal="#1B2A4A"
-          onChange={(v) => updateContent({ retainerLabelColor: v })} onReset={() => updateContent({ retainerLabelColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.retainerLabelOutline} onChangeFn={(v) => updateContent({ retainerLabelOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      {PF_GROUP_DIVIDER}
-
-      {/* ── RETAINER AMOUNT ──────────────────────────── */}
-      <SectionLabel>Retainer Amount</SectionLabel>
-      <FieldGroup label="Amount (number)">
-        <input
-          type="text"
-          inputMode="numeric"
-          value={retainerRaw}
-          onChange={(e) => setRetainerRaw(e.target.value)}
-          onBlur={() => {
-            const stripped = retainerRaw.replace(/[^0-9.]/g, "");
-            const n = parseFloat(stripped);
-            const parsed = Number.isFinite(n) && n > 0 ? n : null;
-            updateContent({ retainerAmount: parsed });
-            setRetainerRaw(parsed != null ? String(parsed) : "");
-          }}
-          placeholder="e.g. 15000"
-          className="w-full rounded"
-          style={{
-            fontSize: 12,
-            padding: "5px 8px",
-            border: "1px solid #D1D5DB",
-            color: "#111827",
-            background: "#fff",
-            outline: "none",
-          }}
-        />
-      </FieldGroup>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.retainerAmountFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ retainerAmountFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.retainerAmountSize ?? 2.5).toFixed(1)}×`}>
-        <PSizeSlider value={content.retainerAmountSize ?? 2.5} onChange={(v) => updateContent({ retainerAmountSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.retainerAmountBold ?? true} italic={content.retainerAmountItalic} underline={content.retainerAmountUnderline}
-          onBold={(v) => updateContent({ retainerAmountBold: v })} onItalic={(v) => updateContent({ retainerAmountItalic: v })} onUnderline={(v) => updateContent({ retainerAmountUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.retainerAmountColor} defaultVal="#1B2A4A"
-          onChange={(v) => updateContent({ retainerAmountColor: v })} onReset={() => updateContent({ retainerAmountColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.retainerAmountOutline} onChangeFn={(v) => updateContent({ retainerAmountOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      {PF_GROUP_DIVIDER}
+      {/* Phase 8C.2 T2: "Retainer Label" and "Retainer Amount" editor
+          sections removed — the mid-slide retainer callout they configured
+          was removed in Phase 8C T2, and the write-side race on those
+          fields was fixed in Phase 8C.2 T1. The retainer story lives on
+          Slide 10 (Your Investment) now. The retainer-related style fields
+          on InvestmentContent (retainerLabelFont, retainerAmountBold, etc.)
+          remain as dead type exports — not worth removing in this pass. */}
 
       {/* ── RETAINER DESCRIPTION ─────────────────────── */}
       <SectionLabel>Retainer Description</SectionLabel>

@@ -362,8 +362,14 @@ export interface InvestmentLineItem {
 
 export interface InvestmentContent extends SharedSlideFields {
   lineItems?: InvestmentLineItem[];
-  retainerLabel?: string | null;
-  retainerAmount?: number | null;
+  // Phase 8C.2 T2: `retainerAmount` and `retainerLabel` were removed here.
+  // Phase 8C T2 earlier removed the mid-slide retainer callout that rendered
+  // them; Phase 8C.2 T1 stopped syncRetainerFromProject from writing them.
+  // The surrounding retainer* style fields (retainerLabelFont, retainerAmount*,
+  // retainerDesc*) stay as dead type exports — no UI renders them, but
+  // removing them is out of scope for this cleanup. Same for
+  // retainerDescription / retainerAccentColor / showRetainerSection /
+  // `disclaimer` — unused but harmless.
   /** Short description shown below the retainer label in the callout box. */
   retainerDescription?: string | null;
   /** @deprecated Use retainerDescription instead. */

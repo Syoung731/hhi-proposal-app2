@@ -272,8 +272,6 @@ function buildSlideDataFromSpec(
         headline: "Investment by Space",
         content: {
           lineItems: [],
-          retainerLabel: null,
-          retainerAmount: null,
           disclaimer: null,
           address: ctx.address,
         },
