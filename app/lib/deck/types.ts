@@ -1679,6 +1679,37 @@ export interface BeforeAfterContent extends SharedSlideFields {
   leftPanelWidth?: number | null;
   /** Before photo thumbnail scale as a percentage (30–100). Default: 100. Only used in after-emphasis layout. */
   beforePhotoScale?: number | null;
+
+  // ── Phase 8C: bullet strip ──────────────────────────────────────────────
+  /**
+   * Client-facing bullets describing key visual changes. Auto-generated at
+   * sync time from Room.scopeQA.renderChecklist via a Claude rewrite
+   * (builder-voice → client-voice). Per-bullet manuallyEdited flag protects
+   * hand-edits from being overwritten on re-sync.
+   */
+  bullets?: BeforeAfterBullet[] | null;
+  /**
+   * Hash of the scope inputs that produced the current auto-bullets.
+   * Skips the AI call on re-sync when the source hasn't changed.
+   */
+  bulletsSourceHash?: string | null;
+}
+
+/** One bullet on a before/after slide. */
+export interface BeforeAfterBullet {
+  /** Client-facing bullet text, e.g. "New freestanding soaking tub". */
+  text: string;
+  /**
+   * The builder-voice source string from renderChecklist that seeded this
+   * bullet. Enables match-on-merge so a regen doesn't duplicate or lose
+   * the hand-edited entries.
+   */
+  sourceKey?: string | null;
+  /**
+   * When true, sync will not overwrite the text field on re-sync.
+   * Set by InspectorPanel whenever the user types into the bullet.
+   */
+  manuallyEdited?: boolean;
 }
 
 // ─── Addition Overview ──────────────────────────────────────────────────────

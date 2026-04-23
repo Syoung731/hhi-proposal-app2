@@ -260,27 +260,58 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
         </div>
       </div>
 
-      {/* Caption / footer */}
-      <div
-        style={{
-          flexShrink: 0,
-          padding: "2% 5% 3%",
-        }}
-      >
-        <p
+      {/* Phase 8C: bullet strip replaces the single-line caption when present.
+          Falls back to the existing italic caption when bullets are absent. */}
+      {Array.isArray(content.bullets) && content.bullets.length > 0 ? (
+        <div
           style={{
-            fontFamily: content.captionFont ?? bodyFont,
-            fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 1.0}em`,
-            fontWeight: content.captionBold ? 700 : 400,
-            fontStyle: content.captionItalic ?? (caption ? true : false) ? "italic" : "normal",
-            textDecoration: content.captionUnderline ? "underline" : "none",
-            color: content.captionColor ?? resolvedCaptionColor,
-            textShadow: makeOutlineShadow(content.captionOutline),
+            flexShrink: 0,
+            padding: "2% 5% 3%",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.5em 2em",
+            rowGap: "0.4em",
           }}
         >
-          {caption ?? ""}
-        </p>
-      </div>
+          {content.bullets.map((b, i) => (
+            <span
+              key={i}
+              style={{
+                fontFamily: bodyFont,
+                fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 0.6}em`,
+                color: content.captionColor ?? resolvedCaptionColor,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.45em",
+              }}
+            >
+              <span style={{ color: accent, fontSize: "1.1em", lineHeight: 1 }}>•</span>
+              {b.text}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "2% 5% 3%",
+          }}
+        >
+          <p
+            style={{
+              fontFamily: content.captionFont ?? bodyFont,
+              fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 1.0}em`,
+              fontWeight: content.captionBold ? 700 : 400,
+              fontStyle: content.captionItalic ?? (caption ? true : false) ? "italic" : "normal",
+              textDecoration: content.captionUnderline ? "underline" : "none",
+              color: content.captionColor ?? resolvedCaptionColor,
+              textShadow: makeOutlineShadow(content.captionOutline),
+            }}
+          >
+            {caption ?? ""}
+          </p>
+        </div>
+      )}
 
       {/* Logo overlay */}
       <LogoOverlay
@@ -348,8 +379,31 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
           >
             {roomName}
           </h2>
-          <TitleAccentRule accentColor={accent} marginBottom={caption ? "0.8em" : "0"} />
-          {caption && (
+          <TitleAccentRule accentColor={accent} marginBottom={caption || (content.bullets?.length ?? 0) > 0 ? "0.8em" : "0"} />
+          {/* Phase 8C: vertical bullet strip replaces the caption in the left
+              panel when bullets exist. Falls back to the italic caption when
+              absent. */}
+          {Array.isArray(content.bullets) && content.bullets.length > 0 ? (
+            <ul style={{ display: "flex", flexDirection: "column", gap: "0.35em", listStyle: "none", padding: 0, margin: 0 }}>
+              {content.bullets.map((b, i) => (
+                <li
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "0.5em",
+                    fontFamily: content.captionFont ?? bodyFont,
+                    fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 0.6}em`,
+                    color: content.captionColor ?? resolvedCaptionColor,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <span style={{ color: accent, flexShrink: 0 }}>•</span>
+                  <span>{b.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : caption ? (
             <p
               style={{
                 fontFamily: content.captionFont ?? bodyFont,
@@ -364,7 +418,7 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
             >
               {caption}
             </p>
-          )}
+          ) : null}
         </div>
 
         {/* Before thumbnail — bottom of left panel */}

@@ -2933,6 +2933,85 @@ function BeforeAfterInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {/* ── BULLETS (Phase 8C) ─────────────────────────── */}
+      <SectionLabel>Bullets</SectionLabel>
+      <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.5 }}>
+        Short client-facing changes shown beneath the images. Auto-generated from the room&rsquo;s Render Controls; manual edits persist across re-syncs.
+      </p>
+      {(content.bullets ?? []).length === 0 ? (
+        <p style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", marginBottom: 8 }}>
+          No bullets yet. Will auto-populate on next sync if the room has Render Controls.
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+          {(content.bullets ?? []).map((bullet, idx) => {
+            const bullets = content.bullets ?? [];
+            return (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "#9CA3AF", width: 14, textAlign: "right" }}>{idx + 1}</span>
+                <input
+                  type="text"
+                  value={bullet.text}
+                  onChange={(e) => {
+                    const next = [...bullets];
+                    next[idx] = { ...bullet, text: e.target.value, manuallyEdited: true };
+                    updateContent({ bullets: next });
+                  }}
+                  placeholder="New vanity with stone countertop"
+                  style={{
+                    flex: 1,
+                    fontSize: 11,
+                    padding: "4px 6px",
+                    border: `1px solid ${bullet.manuallyEdited ? accent + "80" : "#D1D5DB"}`,
+                    borderRadius: 3,
+                    background: "#fff",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateContent({ bullets: bullets.filter((_, i) => i !== idx) });
+                  }}
+                  title="Remove bullet"
+                  style={{
+                    width: 20,
+                    height: 20,
+                    fontSize: 12,
+                    color: "#9CA3AF",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          const next = [...(content.bullets ?? []), { text: "", sourceKey: null, manuallyEdited: true }];
+          updateContent({ bullets: next });
+        }}
+        style={{
+          fontSize: 11,
+          padding: "4px 8px",
+          border: "1px solid #D1D5DB",
+          borderRadius: 3,
+          background: "#F9FAFB",
+          color: "#374151",
+          cursor: "pointer",
+          marginBottom: 8,
+        }}
+      >
+        + Add bullet
+      </button>
+
+      {PF_GROUP_DIVIDER}
+
       {/* ── BEFORE LABEL ─────────────────────────────── */}
       <SectionLabel>Before Label</SectionLabel>
       <FieldGroup label="Text">

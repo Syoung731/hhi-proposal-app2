@@ -48,10 +48,42 @@ import type {
   ProjectTimelineContent,
   ProjectPhase,
   DesignRetainerContent,
+  BeforeAfterBullet,
 } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
 import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
 import { classifyScopeItem } from "@/app/lib/scope/classifier";
+import { generateBeforeAfterBullets, hashRenderChecklist } from "@/app/lib/ai/before-after-bullets";
+
+/**
+ * Phase 8C: merge freshly-generated auto-bullets with the existing slide's
+ * bullets, preserving user-edited entries across a re-sync. Match strategy:
+ *   - If an existing bullet has manuallyEdited === true, keep it by finding
+ *     its sourceKey (or position when sourceKey is missing).
+ *   - All fresh (non-matched) bullets slot in order.
+ *   - Stale manually-edited bullets whose sourceKey is no longer in the
+ *     renderChecklist drop off (the underlying scope item was removed).
+ */
+function mergeBulletsPreservingManual(
+  existing: BeforeAfterBullet[],
+  fresh: string[],
+  currentChecklist: string[],
+): BeforeAfterBullet[] {
+  const manualBySource = new Map<string, BeforeAfterBullet>();
+  for (const b of existing) {
+    if (b.manuallyEdited && b.sourceKey) manualBySource.set(b.sourceKey, b);
+  }
+  const checklistSet = new Set(currentChecklist);
+  return fresh.map((text, idx) => {
+    const sourceKey = currentChecklist[idx] ?? null;
+    if (sourceKey && manualBySource.has(sourceKey) && checklistSet.has(sourceKey)) {
+      // Keep user's text; refresh sourceKey alignment.
+      const prev = manualBySource.get(sourceKey)!;
+      return { ...prev, sourceKey };
+    }
+    return { text, sourceKey, manuallyEdited: false };
+  });
+}
 import {
   buildDefaultDeckSpec,
   AUTO_SYNCED_SLIDE_TYPES,
@@ -450,6 +482,28 @@ async function syncBeforeAfterSlides(
   );
   if (eligible.length === 0) return;
 
+  // Phase 8C: fetch each eligible room's Render Controls list (scopeQA.renderChecklist)
+  // in a single batch query. Used below to auto-generate client-facing bullets.
+  // NOTE: the per-bullet "checked" state lives in browser localStorage (media-tab.tsx),
+  // not the DB — so we can't filter to only-checked items from the server. Instead
+  // we rewrite the entire checklist. See Phase 8C build notes for the deviation
+  // rationale.
+  const eligibleRoomIds = eligible.map((r) => r.id);
+  const roomQARows = await prisma.room.findMany({
+    where: { id: { in: eligibleRoomIds } },
+    select: { id: true, scopeQA: true },
+  });
+  const renderChecklistByRoom = new Map<string, string[]>();
+  for (const row of roomQARows) {
+    const qa = row.scopeQA as Record<string, unknown> | null;
+    const checklist = Array.isArray(qa?.renderChecklist)
+      ? (qa.renderChecklist as unknown[]).filter(
+          (s): s is string => typeof s === "string" && s.trim().length > 0,
+        )
+      : [];
+    renderChecklistByRoom.set(row.id, checklist);
+  }
+
   // Index existing before-after slides by roomId for O(1) lookup.
   const existingByRoom = new Map<string, DbRow>();
   const hiddenRoomIds = new Set<string>();
@@ -478,18 +532,44 @@ async function syncBeforeAfterSlides(
     const order = 500 + i * 10;
 
     const existingRow = existingByRoom.get(room.id);
+    const renderChecklist = renderChecklistByRoom.get(room.id) ?? [];
+    const checklistHash = hashRenderChecklist(renderChecklist);
 
     if (existingRow) {
       // Slide already exists — refresh render + caption unless user modified it.
       if (existingRow.isUserModified) continue;
 
       const currentContent = (existingRow.content ?? {}) as BeforeAfterContent;
+
+      // Phase 8C bullet merge:
+      //   - If the checklist hash hasn't changed AND we have bullets already,
+      //     keep the existing bullets exactly (including manual edits + order).
+      //   - Otherwise, regenerate from the checklist, then overlay any
+      //     manuallyEdited bullets from the previous state (matched by sourceKey).
+      let nextBullets: BeforeAfterBullet[] | null | undefined = currentContent.bullets;
+      let nextHash: string | null = currentContent.bulletsSourceHash ?? null;
+      if (renderChecklist.length > 0) {
+        const hashUnchanged =
+          currentContent.bulletsSourceHash === checklistHash &&
+          Array.isArray(currentContent.bullets) &&
+          currentContent.bullets.length > 0;
+        if (!hashUnchanged) {
+          const fresh = await generateBeforeAfterBullets(renderChecklist);
+          if (fresh.length > 0) {
+            nextBullets = mergeBulletsPreservingManual(currentContent.bullets ?? [], fresh, renderChecklist);
+            nextHash = checklistHash;
+          }
+        }
+      }
+
       const updatedContent: BeforeAfterContent = {
         ...currentContent,
         roomName: room.name,
         afterMediaId: selectedRender.id,
         afterImageUrl: selectedRender.url,
         caption,
+        bullets: nextBullets,
+        bulletsSourceHash: nextHash,
       };
 
       await prisma.deckSlide.update({
@@ -504,6 +584,21 @@ async function syncBeforeAfterSlides(
       // Don't recreate a slide the user explicitly dismissed.
       if (hiddenRoomIds.has(room.id)) continue;
 
+      // First-time sync: generate bullets from the current checklist.
+      let bullets: BeforeAfterBullet[] | null = null;
+      let bulletsSourceHash: string | null = null;
+      if (renderChecklist.length > 0) {
+        const fresh = await generateBeforeAfterBullets(renderChecklist);
+        if (fresh.length > 0) {
+          bullets = fresh.map((text, idx) => ({
+            text,
+            sourceKey: renderChecklist[idx] ?? null,
+            manuallyEdited: false,
+          }));
+          bulletsSourceHash = checklistHash;
+        }
+      }
+
       const content: BeforeAfterContent = {
         roomId: room.id,
         roomName: room.name,
@@ -512,6 +607,8 @@ async function syncBeforeAfterSlides(
         beforeImageUrl: beforeMedia.url,
         afterImageUrl: selectedRender.url,
         caption,
+        bullets,
+        bulletsSourceHash,
       };
 
       await prisma.deckSlide.create({
