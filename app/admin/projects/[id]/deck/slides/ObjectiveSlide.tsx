@@ -530,33 +530,31 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
+export function resolveObjectiveLayoutMode(
+  content: ObjectiveContent,
+): "pillars" | "statement" {
+  if (content.layout === "pillars" || content.layout === "statement") {
+    return content.layout;
+  }
+  const pillars = content.pillars ?? [];
+  const pillarsValid =
+    pillars.length === 3 &&
+    pillars.every((p) => p?.title?.trim() && p?.body?.trim());
+  return pillarsValid ? "pillars" : "statement";
+}
+
 export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
+  const mode = resolveObjectiveLayoutMode(content);
 
-  // New structured layout: if exactly 3 valid pillars are present, render the
-  // Pillar layout regardless of the stored layoutKey. This makes the upgrade
-  // implicit — once pillars arrive on the slide, the user sees the new UI.
-  const pillars = content.pillars ?? [];
-  if (
-    pillars.length === 3 &&
-    pillars.every((p) => p?.title?.trim() && p?.body?.trim())
-  ) {
+  if (mode === "pillars") {
     return <PillarLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 
-  // Migration fallbacks: map removed/renamed layouts to their replacements
-  const layout = slide.layoutKey;
-  const effectiveLayout =
-    layout === "statement-left"     ? "light-statement" :
-    layout === "executive-summary"  ? "light-statement" :
-    layout === "blueprint-overlay"  ? "light-statement" :
-    layout;
-
-  switch (effectiveLayout) {
-    case "dark-statement":
-      return <DarkStatementLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
-    case "light-statement":
-    default:
-      return <LightStatementLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+  // Statement mode. Legacy dark-statement layoutKey still routes to the dark
+  // variant so slides that previously opted in keep their appearance.
+  if (slide.layoutKey === "dark-statement") {
+    return <DarkStatementLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
+  return <LightStatementLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
 }

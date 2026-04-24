@@ -278,8 +278,14 @@ export interface ObjectiveContent extends SharedSlideFields {
   // ── New structured fields (Phase 8A) ──────────────────────────────────────
   /** Short opener (≤50 words, 2-3 sentences). New layout uses this over statementText. */
   objective?: string | null;
-  /** Exactly 3 pillars for the new 3-column layout. When absent → legacy prose layout. */
+  /** Exactly 3 pillars for the 3-column pillars layout. */
   pillars?: ObjectivePillar[];
+  /**
+   * Explicit layout mode. "pillars" → PillarLayout, "statement" → Statement
+   * layout. When absent, migration defaults to "pillars" if 3 valid pillars
+   * exist, otherwise "statement".
+   */
+  layout?: "pillars" | "statement" | null;
 
   // ── Per-field text styling ────────────────────────────────────────────────
   // Headline

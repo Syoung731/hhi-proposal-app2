@@ -779,17 +779,23 @@ function TextFormatGroup({
   onItalic: (v: boolean) => void;
   onUnderline: (v: boolean) => void;
 }) {
-  const btnStyle = (active: boolean): React.CSSProperties => ({
-    flex: 1,
-    fontSize: 11,
-    fontWeight: active ? 700 : 400,
-    padding: "3px 0",
-    cursor: "pointer",
-    background: active ? "#1F2937" : "#F3F4F6",
-    color: active ? "#fff" : "#374151",
-    border: `1px solid ${active ? "#1F2937" : "#D1D5DB"}`,
-    borderRadius: 0,
-  });
+  const btnStyle = (active: boolean): React.CSSProperties => {
+    const borderColor = active ? "#1F2937" : "#D1D5DB";
+    return {
+      flex: 1,
+      fontSize: 11,
+      fontWeight: active ? 700 : 400,
+      padding: "3px 0",
+      cursor: "pointer",
+      background: active ? "#1F2937" : "#F3F4F6",
+      color: active ? "#fff" : "#374151",
+      borderTop: `1px solid ${borderColor}`,
+      borderRight: `1px solid ${borderColor}`,
+      borderBottom: `1px solid ${borderColor}`,
+      borderLeft: `1px solid ${borderColor}`,
+      borderRadius: 0,
+    };
+  };
   return (
     <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
       <button onClick={() => onBold(!bold)} style={{ ...btnStyle(bold), borderRadius: "4px 0 0 4px" }}>
@@ -1432,13 +1438,29 @@ function ObjectiveInspector({
 
   const bullets = (content.bullets ?? ["", "", ""]).concat(["", "", ""]).slice(0, 3);
 
+  // Resolve the active layout mode. Must mirror resolveObjectiveLayoutMode()
+  // in ObjectiveSlide.tsx so the inspector and slide always agree.
+  const mode: "pillars" | "statement" = (() => {
+    if (content.layout === "pillars" || content.layout === "statement") {
+      return content.layout;
+    }
+    const ps = content.pillars ?? [];
+    const valid = ps.length === 3 && ps.every((p) => p?.title?.trim() && p?.body?.trim());
+    return valid ? "pillars" : "statement";
+  })();
+
   // Determine layout-aware headline color default
   const isLight = slide.layoutKey !== "dark-statement";
   const headlineColorDefault = isLight ? "#1B2A4A" : "#FFFFFF";
 
-  // ── Pillars editor (new structured layout) ─────────────────────────────
-  // The slide renders the 3-pillar layout when `content.pillars` has exactly 3
-  // valid entries. Editing any field below writes straight into slide content.
+  function setMode(next: "pillars" | "statement") {
+    if (next === "statement" && slide.layoutKey !== "dark-statement") {
+      onUpdate({ ...slide, layoutKey: "light-statement", content: { ...content, layout: next } });
+    } else {
+      updateContent({ layout: next });
+    }
+  }
+
   const pillarSlots: { title: string; body: string }[] = (() => {
     const seed = (content.pillars ?? []).slice(0, 3);
     while (seed.length < 3) seed.push({ title: "", body: "" });
@@ -1466,37 +1488,70 @@ function ObjectiveInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── PILLARS (new 3-pillar layout — Phase 8A) ───────────────────── */}
-      <SectionLabel>Pillars (3 required for new layout)</SectionLabel>
-      <FieldGroup label="Objective (short, ≤50 words)">
-        <TextArea
-          value={content.objective ?? ""}
-          onChange={(v) => updateContent({ objective: v })}
-          placeholder="2-3 sentence opener — frames the project as a single vision."
-          rows={3}
-        />
-      </FieldGroup>
-      {([0, 1, 2] as const).map((i) => (
-        <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
-          <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>
-            <TextInput
-              value={pillarSlots[i].title}
-              onChange={(v) => updatePillar(i, { title: v })}
-              placeholder={i === 0 ? "The Space" : i === 1 ? "The Connection" : "The Protection"}
-            />
-          </FieldGroup>
-          <FieldGroup label={`Pillar ${i + 1} — Body (≤20 words)`}>
-            <TextArea
-              value={pillarSlots[i].body}
-              onChange={(v) => updatePillar(i, { body: v })}
-              placeholder="One sentence describing this dimension."
-              rows={2}
-            />
-          </FieldGroup>
-        </div>
-      ))}
+      {/* ── LAYOUT MODE (Pillars vs Statement) ─────────────────────────── */}
+      <SectionLabel>Layout</SectionLabel>
+      <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}33`, borderRadius: 4, overflow: "hidden" }}>
+        {(["pillars", "statement"] as const).map((m) => {
+          const active = mode === m;
+          return (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              style={{
+                flex: 1,
+                fontSize: 12,
+                fontWeight: active ? 600 : 400,
+                padding: "6px 10px",
+                cursor: "pointer",
+                background: active ? branding.accentColor + "18" : "#F3F4F6",
+                color: active ? branding.textColor : "#6B7280",
+                borderTop: "none",
+                borderRight: "none",
+                borderBottom: "none",
+                borderLeft: m === "statement" ? `1px solid ${branding.accentColor}33` : "none",
+              }}
+            >
+              {m === "pillars" ? "Pillars" : "Statement"}
+            </button>
+          );
+        })}
+      </div>
 
-      {PF_GROUP_DIVIDER}
+      {mode === "pillars" && (
+        <>
+          {/* ── PILLARS (3-pillar layout) ──────────────────────────────── */}
+          <SectionLabel>Pillars</SectionLabel>
+          <FieldGroup label="Objective (short, ≤50 words)">
+            <TextArea
+              value={content.objective ?? ""}
+              onChange={(v) => updateContent({ objective: v })}
+              placeholder="2-3 sentence opener — frames the project as a single vision."
+              rows={3}
+            />
+          </FieldGroup>
+          {([0, 1, 2] as const).map((i) => (
+            <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
+              <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>
+                <TextInput
+                  value={pillarSlots[i].title}
+                  onChange={(v) => updatePillar(i, { title: v })}
+                  placeholder={i === 0 ? "The Space" : i === 1 ? "The Connection" : "The Protection"}
+                />
+              </FieldGroup>
+              <FieldGroup label={`Pillar ${i + 1} — Body (≤20 words)`}>
+                <TextArea
+                  value={pillarSlots[i].body}
+                  onChange={(v) => updatePillar(i, { body: v })}
+                  placeholder="One sentence describing this dimension."
+                  rows={2}
+                />
+              </FieldGroup>
+            </div>
+          ))}
+
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
 
       <FieldGroup label="Font">
         <PFontSelect
@@ -1535,6 +1590,8 @@ function ObjectiveInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {mode === "statement" && (
+        <>
       {/* ── STATEMENT ────────────────────────────────────────────────────── */}
       <SectionLabel>Statement</SectionLabel>
       <FieldGroup label="Text">
@@ -1701,6 +1758,8 @@ function ObjectiveInspector({
       </FieldGroup>
 
       {PF_GROUP_DIVIDER}
+        </>
+      )}
 
       {/* ── TEXT POSITION ────────────────────────────────────────────────── */}
       <SectionLabel>Text Position</SectionLabel>
@@ -8251,7 +8310,9 @@ export function InspectorPanel({
         );
       })()}
 
-      {/* Layout selection */}
+      {/* Layout selection — objective uses the Pillars/Statement toggle inside its inspector instead */}
+      {slide.type !== "objective" && (
+        <>
       <SectionLabel>Layout</SectionLabel>
       <div className="flex flex-col gap-1" style={{ marginBottom: 12 }}>
         {layouts.map((l) => (
@@ -8285,6 +8346,8 @@ export function InspectorPanel({
           </button>
         ))}
       </div>
+        </>
+      )}
 
       <Divider />
 
