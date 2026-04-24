@@ -4937,15 +4937,20 @@ function CopePageInspector({
               icons={brandIcons}
               value={item.iconId ?? null}
               onChange={(iconId) => {
+                // Clear the legacy Lucide `icon` key on every change so picking
+                // "No icon" fully suppresses the icon (the render path falls
+                // back to renderCopeIcon(item.icon) when iconUrl is absent).
                 const ic = iconId ? brandIcons.find((i) => i.id === iconId) : null;
-                updateItem(ii, { iconId: iconId ?? null, iconUrl: ic?.imageUrl ?? null });
+                updateItem(ii, { iconId: iconId ?? null, iconUrl: ic?.imageUrl ?? null, icon: null });
               }}
               label="Icon"
             />
           </FieldGroup>
-          <FieldGroup label="Callout Label">
-            <TextInput value={item.calloutLabel ?? ""} onChange={(v) => updateItem(ii, { calloutLabel: v || null })} placeholder="Short label for Annotated layout" />
-          </FieldGroup>
+          {slide.layoutKey === "annotated-diagram" && (
+            <FieldGroup label="Callout Label">
+              <TextInput value={item.calloutLabel ?? ""} onChange={(v) => updateItem(ii, { calloutLabel: v || null })} placeholder="Short label for Annotated layout" />
+            </FieldGroup>
+          )}
 
           {/* Bullets */}
           <div style={{ marginTop: 4, marginBottom: 4 }}>
@@ -4986,7 +4991,6 @@ function CopePageInspector({
         </div>
       ))}
 
-      <SharedCardStyleSection content={content} updateContent={updateContent} />
       {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
 

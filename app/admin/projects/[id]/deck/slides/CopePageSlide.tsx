@@ -227,8 +227,26 @@ function IconColumnsLayout({
                   {item.title}
                 </p>
 
+                {/* Description — renders above bullets when set */}
+                {item.description && (
+                  <p style={{
+                    fontFamily: descFont,
+                    fontSize: `${0.46 * descSize}em`,
+                    fontWeight: item.descriptionBold ? 700 : 400,
+                    fontStyle: item.descriptionItalic ? "italic" : undefined,
+                    textDecoration: item.descriptionUnderline ? "underline" : undefined,
+                    color: descColor,
+                    lineHeight: 1.6,
+                    opacity: 0.8,
+                    marginBottom: item.bullets && item.bullets.length > 0 ? "3.5%" : 0,
+                    textShadow: makeOutlineShadow(item.descriptionOutline),
+                  }}>
+                    {item.description}
+                  </p>
+                )}
+
                 {/* Bullets */}
-                {item.bullets && item.bullets.length > 0 ? (
+                {item.bullets && item.bullets.length > 0 && (
                   <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                     {item.bullets.map((b, bi) => (
                       <li key={bi} style={{ display: "flex", alignItems: "flex-start", gap: "4%", marginBottom: bi < item.bullets!.length - 1 ? "4%" : 0 }}>
@@ -249,20 +267,6 @@ function IconColumnsLayout({
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  <p style={{
-                    fontFamily: descFont,
-                    fontSize: `${0.46 * descSize}em`,
-                    fontWeight: item.descriptionBold ? 700 : 400,
-                    fontStyle: item.descriptionItalic ? "italic" : undefined,
-                    textDecoration: item.descriptionUnderline ? "underline" : undefined,
-                    color: descColor,
-                    lineHeight: 1.6,
-                    opacity: 0.8,
-                    textShadow: makeOutlineShadow(item.descriptionOutline),
-                  }}>
-                    {item.description}
-                  </p>
                 )}
               </div>
             );
