@@ -244,7 +244,11 @@ function LightStatementLayout({ slide, branding, hasAiBackground }: Props) {
   const bulletColor   = content.bulletColor     ?? "#374151";
   const textX         = content.textX           ?? 0.06;
   const textY         = content.textY           ?? 0.08;
-  const textWidth     = content.textWidth       ?? 42;
+  // Default 88% matches DarkStatementLayout. The previous 42% default was
+  // designed around a hero image on the right half of the slide, but that
+  // pattern is rarely used for Objective slides, so a full-width default
+  // fills the slide instead of leaving the right half empty.
+  const textWidth     = content.textWidth       ?? 88;
   const showCard      = content.showCard        ?? false;
   const cardBg        = hexToRgba(content.cardColor ?? "#000000", content.cardOpacity ?? 60);
 

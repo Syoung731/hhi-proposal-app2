@@ -1454,10 +1454,18 @@ function ObjectiveInspector({
   const headlineColorDefault = isLight ? "#1B2A4A" : "#FFFFFF";
 
   function setMode(next: "pillars" | "statement") {
+    // Clear any stale position values so the layout's built-in defaults apply
+    // cleanly when switching modes. Users can still tune position via the Text
+    // Position section afterwards; those explicit edits re-populate the fields.
+    const resetPositions = { textX: null, textY: null, textWidth: null };
     if (next === "statement" && slide.layoutKey !== "dark-statement") {
-      onUpdate({ ...slide, layoutKey: "light-statement", content: { ...content, layout: next } });
+      onUpdate({
+        ...slide,
+        layoutKey: "light-statement",
+        content: { ...content, ...resetPositions, layout: next },
+      });
     } else {
-      updateContent({ layout: next });
+      updateContent({ ...resetPositions, layout: next });
     }
   }
 
