@@ -1502,6 +1502,7 @@ function ObjectiveInspector({
                 fontSize: 12,
                 fontWeight: active ? 600 : 400,
                 padding: "6px 10px",
+                minHeight: 32,
                 cursor: "pointer",
                 background: active ? branding.accentColor + "18" : "#F3F4F6",
                 color: active ? branding.textColor : "#6B7280",
