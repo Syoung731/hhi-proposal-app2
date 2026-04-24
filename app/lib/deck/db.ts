@@ -490,26 +490,22 @@ async function syncBeforeAfterSlides(
   );
   if (eligible.length === 0) return;
 
-  // Phase 8C: fetch each eligible room's Render Controls list (scopeQA.renderChecklist)
-  // in a single batch query. Used below to auto-generate client-facing bullets.
-  // NOTE: the per-bullet "checked" state lives in browser localStorage (media-tab.tsx),
-  // not the DB — so we can't filter to only-checked items from the server. Instead
-  // we rewrite the entire checklist. See Phase 8C build notes for the deviation
-  // rationale.
+  // Phase 10: source of truth for Render Controls checked state is the
+  // RoomRenderCheck table (presence of a row = checked). Before/After bullets
+  // are generated from the checked subset only, so unchecking an item in
+  // Media tab actually removes the corresponding bullet on next sync.
   const eligibleRoomIds = eligible.map((r) => r.id);
-  const roomQARows = await prisma.room.findMany({
-    where: { id: { in: eligibleRoomIds } },
-    select: { id: true, scopeQA: true },
+  const checks = await prisma.roomRenderCheck.findMany({
+    where: { roomId: { in: eligibleRoomIds } },
+    select: { roomId: true, itemText: true },
   });
   const renderChecklistByRoom = new Map<string, string[]>();
-  for (const row of roomQARows) {
-    const qa = row.scopeQA as Record<string, unknown> | null;
-    const checklist = Array.isArray(qa?.renderChecklist)
-      ? (qa.renderChecklist as unknown[]).filter(
-          (s): s is string => typeof s === "string" && s.trim().length > 0,
-        )
-      : [];
-    renderChecklistByRoom.set(row.id, checklist);
+  for (const roomId of eligibleRoomIds) {
+    renderChecklistByRoom.set(roomId, []);
+  }
+  for (const c of checks) {
+    const list = renderChecklistByRoom.get(c.roomId);
+    if (list) list.push(c.itemText);
   }
 
   // Index existing before-after slides by roomId for O(1) lookup.
