@@ -264,6 +264,7 @@ model Room {
   media                      Media[]
   subAreas                   RoomSubArea[]
   jobItems                   JobItem[]
+  renderChecks               RoomRenderCheck[]
   project                    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   roomType                   RoomType?        @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
   stylePreset                StylePreset?     @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
@@ -281,6 +282,22 @@ model Room {
   @@index([origin])
   @@index([estimateUnit])
   @@index([roomTemplateId])
+}
+
+/// Phase 10 — per-room render-control checklist persistence.
+/// Presence of a row means the checklist item is checked.
+/// Absence means unchecked. No isChecked boolean — binary state, binary shape.
+/// itemText matches the bullet string in Room.scopeQA.renderChecklist and
+/// BeforeAfterBullet.sourceKey for downstream bullet regeneration.
+model RoomRenderCheck {
+  id        String   @id @default(cuid())
+  roomId    String
+  itemText  String
+  createdAt DateTime @default(now())
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, itemText])
+  @@index([roomId])
 }
 
 /// Optional finer-grained measurement segments for a Room/Section
