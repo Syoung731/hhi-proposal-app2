@@ -819,7 +819,7 @@ export async function extractRenderChecklistAction(roomId: string): Promise<stri
 
   const room = await prisma.room.findUnique({
     where: { id: roomId },
-    select: { scopeNarrative: true, scopeQA: true },
+    select: { projectId: true, scopeNarrative: true, scopeQA: true },
   });
   if (!room?.scopeNarrative) return [];
 
@@ -898,6 +898,11 @@ export async function extractRenderChecklistAction(roomId: string): Promise<stri
         skipDuplicates: true,
       }),
     ]);
+
+    // Re-extraction wrote fresh RoomRenderCheck rows; invalidate the project
+    // page so the client re-hydrates with the new checked set. Only fires on
+    // cache-miss — cache hits return early above.
+    revalidatePath(`/admin/projects/${room.projectId}`);
 
     return items;
   } catch (err) {

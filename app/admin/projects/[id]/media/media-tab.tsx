@@ -1267,18 +1267,15 @@ export function MediaTab({
   }, [activeRoomId, activeRoom?.scopeNarrative]);
 
   /**
-   * Current room: checked state per bullet.
-   * Unknown bullet defaults to true — covers the window between AI re-extraction
-   * returning a new item list and the subsequent router.refresh() re-hydrating
-   * renderChangesChecklistByRoom from the freshly-seeded DB state. Fresh items
-   * are always checked on the server (see extractRenderChecklistAction), so
-   * optimistically showing them as checked avoids a visual flicker.
+   * Current room: checked state per bullet. Source of truth is the hydrated
+   * `checked` map, which mirrors RoomRenderCheck rows — presence = true,
+   * absence = false. Fresh-extracted items are seeded server-side inside
+   * extractRenderChecklistAction's transaction, so by the time the rooms
+   * prop re-hydrates those items are already in the map.
    */
   const activeRoomBulletChecked = (bullet: string): boolean => {
-    if (!activeRoomId) return true;
-    const stored = renderChangesChecklistByRoom[activeRoomId];
-    if (stored?.checked && bullet in stored.checked) return stored.checked[bullet] === true;
-    return true;
+    if (!activeRoomId) return false;
+    return renderChangesChecklistByRoom[activeRoomId]?.checked?.[bullet] === true;
   };
 
   /**
@@ -1290,10 +1287,7 @@ export function MediaTab({
     if (!activeRoomId) return;
     const roomId = activeRoomId;
     const stored = renderChangesChecklistByRoom[roomId];
-    // Unknown bullet is treated as checked (matches activeRoomBulletChecked default).
-    const prevChecked = stored?.checked && bullet in stored.checked
-      ? stored.checked[bullet] === true
-      : true;
+    const prevChecked = stored?.checked?.[bullet] === true;
     // Optimistic: apply the new state locally.
     setRenderChangesChecklistByRoom((curr) => ({
       ...curr,
