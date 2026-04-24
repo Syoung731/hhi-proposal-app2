@@ -1308,6 +1308,90 @@ export async function clearSelectedRenderAction(
   return { ok: true };
 }
 
+// ─── Render checklist checked-state persistence (Phase 10) ───────────────────
+//
+// Presence of a RoomRenderCheck row means the item is checked; absence means
+// unchecked. Both actions are idempotent.
+
+/**
+ * Toggle a single render-checklist item's checked state for a room.
+ * Validates admin and project/room ownership. Idempotent.
+ */
+export async function setRenderCheckAction(
+  projectId: string,
+  roomId: string,
+  itemText: string,
+  checked: boolean,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!projectId || !roomId || !itemText) {
+    return { error: "Missing projectId, roomId, or itemText" };
+  }
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    select: { id: true },
+  });
+  if (!room) return { error: "Room not found" };
+
+  if (checked) {
+    await prisma.roomRenderCheck.upsert({
+      where: { roomId_itemText: { roomId, itemText } },
+      create: { roomId, itemText },
+      update: {},
+    });
+  } else {
+    await prisma.roomRenderCheck.deleteMany({
+      where: { roomId, itemText },
+    });
+  }
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  return {};
+}
+
+/**
+ * Replace the entire checked set for a room with the given items.
+ * Used for "check all / uncheck all" and after a fresh AI re-extraction
+ * to default newly-extracted items to checked. Idempotent.
+ */
+export async function setRenderChecksForRoomAction(
+  projectId: string,
+  roomId: string,
+  checkedItems: string[],
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  if (!projectId || !roomId) {
+    return { error: "Missing projectId or roomId" };
+  }
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    select: { id: true },
+  });
+  if (!room) return { error: "Room not found" };
+
+  const deduped = Array.from(
+    new Set(
+      checkedItems
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    ),
+  );
+
+  await prisma.$transaction([
+    prisma.roomRenderCheck.deleteMany({ where: { roomId } }),
+    prisma.roomRenderCheck.createMany({
+      data: deduped.map((itemText) => ({ roomId, itemText })),
+      skipDuplicates: true,
+    }),
+  ]);
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  return {};
+}
+
 const INSTRUCTION_MIN_LEN = 3;
 const INSTRUCTION_MAX_LEN = 500;
 
