@@ -19,6 +19,7 @@ import {
   extractRenderChecklistAction,
   cleanupOrphanedRenderingsAction,
   importRendrPhotosAction,
+  setRenderCheckAction,
 } from "./actions";
 import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
@@ -66,6 +67,11 @@ type RoomItem = {
   selectedRenderMediaId?: string | null;
   /** Room scope/renovation description; used to extract Render Changes bullets */
   scopeNarrative?: string | null;
+  /**
+   * Phase 10: itemText of every RoomRenderCheck row for this room.
+   * Presence = checked. Hydrated from `Room.renderChecks` on page load.
+   */
+  checkedRenderItems?: string[];
 };
 
 type Props = {
@@ -253,34 +259,15 @@ export const RENDR_PHOTO_TAG_PREFIX = "rendr-photo:";
 /** When set (e.g. Chrome Web Store or Edge Add-ons URL), "Install Extension" opens this; otherwise dev: "Open Chrome Extensions" → chrome://extensions. Production TODO: set NEXT_PUBLIC_ZILLOW_EXTENSION_STORE_URL to store listing URL. */
 const ZILLOW_EXTENSION_STORE_URL = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ZILLOW_EXTENSION_STORE_URL ?? null : null;
 
-const RENDER_CHANGES_CHECKLIST_KEY = "hhi-render-changes-checklist";
-
-/** Per-room checklist: bullet text → checked. Persisted in localStorage. */
+/**
+ * Phase 10: per-room checked-state cache mirroring RoomRenderCheck rows from the DB.
+ * `checked[bullet] === true` = a RoomRenderCheck row exists for this (room, bullet).
+ * Hydrated from `RoomItem.checkedRenderItems` on mount + when rooms prop changes.
+ * Writes flow through setRenderCheckAction (single-toggle); no localStorage.
+ */
 export type RenderChangesChecklistState = {
-  bullets: string[];
   checked: Record<string, boolean>;
 };
-
-function getStoredRenderChangesChecklist(projectId: string): Record<string, RenderChangesChecklistState> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(`${RENDER_CHANGES_CHECKLIST_KEY}-${projectId}`);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, RenderChangesChecklistState>;
-    return parsed;
-  } catch {
-    return {};
-  }
-}
-
-function setStoredRenderChangesChecklist(projectId: string, byRoom: Record<string, RenderChangesChecklistState>) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(`${RENDER_CHANGES_CHECKLIST_KEY}-${projectId}`, JSON.stringify(byRoom));
-  } catch {
-    // ignore
-  }
-}
 
 /**
  * @deprecated — rendering checklist now uses AI extraction (extractRenderChecklistAction).
@@ -792,7 +779,7 @@ export function MediaTab({
   const [updateSubmitting, setUpdateSubmitting] = useState(false);
   /** Optimistic placeholder media for just-queued update renders (until server data arrives). */
   const [optimisticRenderMedia, setOptimisticRenderMedia] = useState<MediaItem[]>([]);
-  /** Per-room Render Changes checklist (extracted bullets + checked state). Persisted in localStorage. */
+  /** Per-room checked-state cache; hydrated from RoomRenderCheck rows (Phase 10). */
   const [renderChangesChecklistByRoom, setRenderChangesChecklistByRoom] = useState<Record<string, RenderChangesChecklistState>>({});
   /** Custom change for first render: when checked and has text, appended to render bullets. */
   const [customChangeEnabled, setCustomChangeEnabled] = useState(false);
@@ -1180,10 +1167,20 @@ export function MediaTab({
         : rooms[0]?.id ?? null
     );
   }, [rooms, roomIds]);
-  // Hydrate Render Changes checklist from localStorage on mount / projectId change
+  // Phase 10: hydrate the per-room checked map from the rooms prop on mount +
+  // whenever the server-fetched rooms list changes (router.refresh, navigation).
+  // Shape derived entirely from DB — no localStorage.
   useEffect(() => {
-    setRenderChangesChecklistByRoom(getStoredRenderChangesChecklist(projectId));
-  }, [projectId]);
+    const next: Record<string, RenderChangesChecklistState> = {};
+    for (const r of rooms) {
+      const checked: Record<string, boolean> = {};
+      for (const item of r.checkedRenderItems ?? []) {
+        checked[item] = true;
+      }
+      next[r.id] = { checked };
+    }
+    setRenderChangesChecklistByRoom(next);
+  }, [rooms]);
 
   useEffect(() => {
     const firstBefore = existingForActive[0]?.id ?? null;
@@ -1269,7 +1266,14 @@ export function MediaTab({
     return () => { cancelled = true; };
   }, [activeRoomId, activeRoom?.scopeNarrative]);
 
-  /** Current room: checked state per bullet (stored + defaults). New bullets default checked. */
+  /**
+   * Current room: checked state per bullet.
+   * Unknown bullet defaults to true — covers the window between AI re-extraction
+   * returning a new item list and the subsequent router.refresh() re-hydrating
+   * renderChangesChecklistByRoom from the freshly-seeded DB state. Fresh items
+   * are always checked on the server (see extractRenderChecklistAction), so
+   * optimistically showing them as checked avoids a visual flicker.
+   */
   const activeRoomBulletChecked = (bullet: string): boolean => {
     if (!activeRoomId) return true;
     const stored = renderChangesChecklistByRoom[activeRoomId];
@@ -1277,19 +1281,37 @@ export function MediaTab({
     return true;
   };
 
-  function setActiveRoomBulletChecked(bullet: string, checked: boolean) {
+  /**
+   * Phase 10: toggle a bullet's checked state. Optimistic — React state flips
+   * synchronously, server action runs in the background. On error, revert and
+   * surface via setRenderError (the existing Render-section error banner).
+   */
+  async function setActiveRoomBulletChecked(bullet: string, checked: boolean) {
     if (!activeRoomId) return;
-    const stored = renderChangesChecklistByRoom[activeRoomId];
-    const nextChecked = { ...stored?.checked, [bullet]: checked };
-    const next: Record<string, RenderChangesChecklistState> = {
-      ...renderChangesChecklistByRoom,
-      [activeRoomId]: {
-        bullets: activeRoomBullets,
-        checked: nextChecked,
+    const roomId = activeRoomId;
+    const stored = renderChangesChecklistByRoom[roomId];
+    // Unknown bullet is treated as checked (matches activeRoomBulletChecked default).
+    const prevChecked = stored?.checked && bullet in stored.checked
+      ? stored.checked[bullet] === true
+      : true;
+    // Optimistic: apply the new state locally.
+    setRenderChangesChecklistByRoom((curr) => ({
+      ...curr,
+      [roomId]: {
+        checked: { ...curr[roomId]?.checked, [bullet]: checked },
       },
-    };
-    setRenderChangesChecklistByRoom(next);
-    setStoredRenderChangesChecklist(projectId, next);
+    }));
+    const result = await setRenderCheckAction(projectId, roomId, bullet, checked);
+    if (result?.error) {
+      // Rollback to previous value.
+      setRenderChangesChecklistByRoom((curr) => ({
+        ...curr,
+        [roomId]: {
+          checked: { ...curr[roomId]?.checked, [bullet]: prevChecked },
+        },
+      }));
+      setRenderError(result.error);
+    }
   }
 
   /** Checked bullets only; used when calling Render New. */

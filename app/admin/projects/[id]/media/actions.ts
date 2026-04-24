@@ -872,17 +872,32 @@ export async function extractRenderChecklistAction(roomId: string): Promise<stri
     const items: string[] = JSON.parse(text);
     if (!Array.isArray(items)) return [];
 
-    // Cache result
-    await prisma.room.update({
-      where: { id: roomId },
-      data: {
-        scopeQA: {
-          ...(existingQA ?? {}),
-          renderChecklist: items,
-          renderChecklistScopeHash: scopeHash,
+    // Cache result + default-all-checked the new item set atomically. Phase 10:
+    // fresh AI extraction replaces the checked set entirely so new items land
+    // checked (matches pre-migration UX where everything started checked).
+    // User unchecks are lost only when the underlying scope changes — which is
+    // also when extraction re-runs, so the invariant "checks reflect current
+    // scope" holds.
+    const deduped = Array.from(
+      new Set(items.map((s) => s.trim()).filter((s) => s.length > 0)),
+    );
+    await prisma.$transaction([
+      prisma.room.update({
+        where: { id: roomId },
+        data: {
+          scopeQA: {
+            ...(existingQA ?? {}),
+            renderChecklist: items,
+            renderChecklistScopeHash: scopeHash,
+          },
         },
-      },
-    });
+      }),
+      prisma.roomRenderCheck.deleteMany({ where: { roomId } }),
+      prisma.roomRenderCheck.createMany({
+        data: deduped.map((itemText) => ({ roomId, itemText })),
+        skipDuplicates: true,
+      }),
+    ]);
 
     return items;
   } catch (err) {

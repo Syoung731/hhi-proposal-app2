@@ -203,6 +203,7 @@ export function ProjectTabs({
                 sortOrder: r.sortOrder,
                 selectedRenderMediaId: r.selectedRenderMediaId,
                 scopeNarrative: r.scopeNarrative,
+                checkedRenderItems: r.renderChecks.map((c) => c.itemText),
               }))}
             projectStylePreset={project.stylePreset}
             coverHeroImageId={project.coverHeroImageId}
