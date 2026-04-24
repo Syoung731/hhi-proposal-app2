@@ -1490,7 +1490,7 @@ function ObjectiveInspector({
 
       {/* ── LAYOUT MODE (Pillars vs Statement) ─────────────────────────── */}
       <SectionLabel>Layout</SectionLabel>
-      <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}33`, borderRadius: 4, overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}`, borderRadius: 4, overflow: "hidden" }}>
         {(["pillars", "statement"] as const).map((m) => {
           const active = mode === m;
           return (
@@ -1504,12 +1504,12 @@ function ObjectiveInspector({
                 padding: "6px 10px",
                 minHeight: 32,
                 cursor: "pointer",
-                background: active ? branding.accentColor + "18" : "#F3F4F6",
-                color: active ? branding.textColor : "#6B7280",
+                background: active ? branding.accentColor : "#FFFFFF",
+                color: active ? "#FFFFFF" : "#374151",
                 borderTop: "none",
                 borderRight: "none",
                 borderBottom: "none",
-                borderLeft: m === "statement" ? `1px solid ${branding.accentColor}33` : "none",
+                borderLeft: m === "statement" ? `1px solid ${branding.accentColor}` : "none",
               }}
             >
               {m === "pillars" ? "Pillars" : "Statement"}
