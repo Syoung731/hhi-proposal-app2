@@ -503,6 +503,12 @@ export interface WhyUsContent extends SharedSlideFields {
    * testimonials from the library.
    */
   testimonialIds?: string[];
+  /**
+   * Testimonials-split layout: font-size multiplier for the testimonial quote
+   * and author lines. Default 1.0 (current hardcoded sizes). Shrink to fit
+   * more content when two long testimonials overflow the card.
+   */
+  testimonialTextSize?: number | null;
 
   // ── Per-field: Section title ──────────────────────────────────────────────
   sectionTitleFont?: string | null;

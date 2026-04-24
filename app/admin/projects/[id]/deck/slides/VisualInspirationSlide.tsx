@@ -18,37 +18,6 @@ const NAVY = "#1B2A4A";
 const GOLD = "#B8860B";
 const MUTED_NAVY = "#4A5568";
 
-// ─── Architectural watermark (top-right) ────────────────────────────────────
-
-function ArchitecturalWatermark({ color = NAVY, opacity = 0.04 }: { color?: string; opacity?: number }) {
-  return (
-    <svg
-      width="220"
-      height="220"
-      viewBox="0 0 220 220"
-      fill="none"
-      stroke={color}
-      strokeWidth={0.7}
-      style={{
-        position: "absolute",
-        top: "3%",
-        right: "3%",
-        opacity,
-        pointerEvents: "none",
-        zIndex: 2,
-      }}
-    >
-      <circle cx="110" cy="110" r="100" />
-      <circle cx="110" cy="110" r="70" />
-      <line x1="110" y1="10" x2="110" y2="210" />
-      <line x1="10" y1="110" x2="210" y2="110" />
-      <line x1="39" y1="39" x2="181" y2="181" />
-      <line x1="181" y1="39" x2="39" y2="181" />
-      <circle cx="110" cy="110" r="8" fill={color} fillOpacity={opacity * 3} stroke="none" />
-    </svg>
-  );
-}
-
 // ─── Outline shadow helper ─────────────────────────────────────────────────
 
 function makeOutlineShadow(color: string | null | undefined): string | undefined {
@@ -86,6 +55,11 @@ export function VisualInspirationSlide({ slide, branding, hasAiBackground }: Pro
   const caption = c.caption ?? "";
   const heroPhoto = c.heroPhoto ?? null;
   const photos = c.photos ?? [];
+  // Render the slide background transparent when EITHER an AI background or a
+  // brand background is selected so the SlideCard parent's background layer
+  // shows through. Previously only hasAiBackground was checked, which made the
+  // "Change background" picker appear inert on this slide type.
+  const hasBg = !!hasAiBackground || slide.backgroundId != null;
 
   switch (layoutKey) {
     case "hero-plus-stacked":
@@ -95,7 +69,7 @@ export function VisualInspirationSlide({ slide, branding, hasAiBackground }: Pro
           subtitle={subtitle}
           heroPhoto={heroPhoto}
           photos={photos}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -105,7 +79,7 @@ export function VisualInspirationSlide({ slide, branding, hasAiBackground }: Pro
         <MasonryGridLayout
           caption={caption}
           photos={photos}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -116,7 +90,7 @@ export function VisualInspirationSlide({ slide, branding, hasAiBackground }: Pro
           headline={headline}
           caption={caption}
           photos={photos}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -128,7 +102,7 @@ export function VisualInspirationSlide({ slide, branding, hasAiBackground }: Pro
           subtitle={subtitle}
           heroPhoto={heroPhoto}
           photos={photos}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -143,7 +117,7 @@ function HeroPlusStackedLayout({
   subtitle,
   heroPhoto,
   photos,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
@@ -151,7 +125,7 @@ function HeroPlusStackedLayout({
   subtitle: string;
   heroPhoto: string | null;
   photos: string[];
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: VisualInspirationContent;
   branding: DeckBranding;
 }) {
@@ -160,10 +134,8 @@ function HeroPlusStackedLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
-      <ArchitecturalWatermark />
-
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex" }}>
         {/* Left: hero photo ~65% */}
         <div style={{ width: "65%", height: "100%", position: "relative" }}>
@@ -266,13 +238,13 @@ function HeroPlusStackedLayout({
 function MasonryGridLayout({
   caption,
   photos,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
   caption: string;
   photos: string[];
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: VisualInspirationContent;
   branding: DeckBranding;
 }) {
@@ -291,10 +263,8 @@ function MasonryGridLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
-      <ArchitecturalWatermark opacity={0.03} />
-
       <div
         style={{
           position: "relative",
@@ -380,14 +350,14 @@ function SideBySideBleedLayout({
   headline,
   caption,
   photos,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
   headline: string;
   caption: string;
   photos: string[];
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: VisualInspirationContent;
   branding: DeckBranding;
 }) {
@@ -397,10 +367,8 @@ function SideBySideBleedLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
-      <ArchitecturalWatermark />
-
       <div
         style={{
           position: "relative",

@@ -2220,6 +2220,14 @@ function WhyUsInspector({
             Manage Testimonials
           </a>
 
+          <FieldGroup label={`Testimonial Size — ${(content.testimonialTextSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider
+              value={content.testimonialTextSize ?? 1.0}
+              onChange={(v) => updateContent({ testimonialTextSize: v })}
+              accentColor={branding.accentColor}
+            />
+          </FieldGroup>
+
           <Divider />
         </>
       )}

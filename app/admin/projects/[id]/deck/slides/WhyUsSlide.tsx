@@ -738,6 +738,7 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
 
   const displayedTestimonials = (content.testimonials ?? []).slice(0, 3);
   const displayedPillars = visiblePillars.slice(0, 4);
+  const testimonialTextScale = content.testimonialTextSize ?? 1.0;
 
   return (
     <div
@@ -830,7 +831,7 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
                   <p
                     className="font-serif"
                     style={{
-                      fontSize: "0.63em",
+                      fontSize: `${0.63 * testimonialTextScale}em`,
                       fontStyle: "italic",
                       color: branding.textColor,
                       lineHeight: 1.7,
@@ -846,7 +847,7 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
                   )}
                   <p
                     style={{
-                      fontSize: "0.54em",
+                      fontSize: `${0.54 * testimonialTextScale}em`,
                       color: "#6B7280",
                       fontWeight: 600,
                       letterSpacing: "0.04em",

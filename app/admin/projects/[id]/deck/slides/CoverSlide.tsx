@@ -340,6 +340,11 @@ function RightPanelOverlayLayout({ slide, branding }: Props) {
                 {resolveAddress(content, branding)}
               </p>
             )}
+            {content.date && (
+              <p style={{ fontSize: "0.58em", color: "#9CA3AF", marginTop: "0.15em" }}>
+                {content.date}
+              </p>
+            )}
           </div>
 
           {/* Footer */}
