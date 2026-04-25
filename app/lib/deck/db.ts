@@ -473,6 +473,29 @@ async function seedDefaultSlides(
   });
 }
 
+// ─── Auto-sync ordering helper ───────────────────────────────────────────────
+//
+// SlideRail's manual reorder rewrites every slide's `order` field as a
+// sequential integer (0, 1, 2, …). When sync recreates Scope Breakdown or
+// Before/After at a fixed numeric rank (the spec values 400 / 500), they land
+// far below those small integers and appear at the bottom of the deck.
+//
+// Instead, anchor newly-created auto-sync slides to the actual current order
+// of Scope Overview (or Objective if Scope Overview is absent — one of the
+// two always exists in the default spec). Using a small fractional offset
+// (~0.05–0.1) places them immediately after the anchor, regardless of whether
+// the deck uses integer ordering or 100-spaced spec ordering.
+
+function findAnchorOrder(existing: DbRow[], types: readonly SlideType[]): number | null {
+  for (const type of types) {
+    const row = existing.find((r) => r.type === type && !r.isUserHidden);
+    if (row) return row.order;
+  }
+  return null;
+}
+
+const SCOPE_ANCHOR_TYPES: readonly SlideType[] = ["scope-overview", "objective"];
+
 // ─── Auto-sync: Before/After slides ──────────────────────────────────────────
 //
 // Write scope: DeckSlide type "before-after" only. Registered in
@@ -522,6 +545,14 @@ async function syncBeforeAfterSlides(
     }
   }
 
+  // Anchor for newly-created Before/After slides — directly after Scope
+  // Overview (or Objective fallback). 0.5 falls between integer-reordered
+  // sibling orders (e.g. 3 → 3.5 → 4) and inside the default spec gap (300
+  // → 300.5 → 400). Falls back to the original spec value if neither anchor
+  // exists (defensive — one always does in practice).
+  const beforeAfterAnchor = findAnchorOrder(existing, SCOPE_ANCHOR_TYPES);
+  const beforeAfterBaseOrder = beforeAfterAnchor != null ? beforeAfterAnchor + 0.2 : 500;
+
   for (let i = 0; i < eligible.length; i++) {
     const room = eligible[i];
 
@@ -533,7 +564,12 @@ async function syncBeforeAfterSlides(
 
     const beforeMedia = room.beforeMedia[0];
     const caption = stripScopeClarifications(room.scopeNarrative ?? "") || null;
-    const order = 500 + i * 10;
+    // Spread sibling Before/After slides between the anchor and the next
+    // slide. 0.001 step keeps them tightly grouped while avoiding collisions
+    // for up to ~800 rooms before crossing the next anchor's order slot.
+    const order = beforeAfterAnchor != null
+      ? beforeAfterBaseOrder + i * 0.001
+      : 500 + i * 10;
 
     const existingRow = existingByRoom.get(room.id);
     const renderChecklist = renderChecklistByRoom.get(room.id) ?? [];
@@ -713,12 +749,18 @@ async function syncScopeBreakdownSlide(
       photos: [],
     };
 
+    // Anchor Scope Breakdown directly after Scope Overview (or Objective
+    // fallback). 0.1 places it before any Before/After slides created by the
+    // sibling sync, which use 0.2+ offsets from the same anchor.
+    const anchor = findAnchorOrder(existing, SCOPE_ANCHOR_TYPES);
+    const order = anchor != null ? anchor + 0.1 : 400;
+
     await prisma.deckSlide.create({
       data: {
         deckId,
         type: "scope-breakdown",
         layoutKey: "text-grid",
-        order: 400,
+        order,
         isEnabled: true,
         isUserHidden: false,
         isUserModified: false,
