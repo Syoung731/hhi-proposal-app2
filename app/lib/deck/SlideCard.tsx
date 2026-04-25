@@ -5,6 +5,32 @@ import type { BrandBackgroundForUI } from "@/app/admin/settings/settings-tabs";
 import { SlideRenderer } from "@/app/admin/projects/[id]/deck/slides/SlideRenderer";
 import { getBrandBackgroundStyles, isBackgroundDark } from "@/app/lib/brand-background-utils";
 
+// Slide types that DO NOT consume slide.textZone at render time. Audit:
+// only CoverSlide reads slide.textZone (CoverSlide.tsx:108, 237, 422, 602)
+// to position headline/body when textZone + backgroundId are both set.
+// Every other slide type ignores the field, so the dashed admin overlay
+// would just be visual noise (Steve's "ghost line" report).
+const TEXT_ZONE_OVERLAY_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
+  "objective",
+  "investment",
+  "why-us",
+  "scope-overview",
+  "before-after",
+  "scope-breakdown",
+  "risk-brief",
+  "process",
+  "core-values",
+  "project-timeline",
+  "cope-page",
+  "design-retainer",
+  "next-steps",
+  "closing-slide",
+  "visual-inspiration",
+  "client-testimonials",
+  "design-build-advantage",
+  "addition-overview",
+]);
+
 interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
@@ -70,11 +96,7 @@ export function SlideCard({
   const showTextZone =
     !hideTextZoneOverlay &&
     slide.textZone &&
-    slide.type !== "before-after" &&
-    slide.type !== "risk-brief" &&
-    slide.type !== "scope-overview" &&
-    slide.type !== "objective" &&
-    slide.type !== "visual-inspiration";
+    !TEXT_ZONE_OVERLAY_EXCLUDED_TYPES.has(slide.type);
 
   return (
     <>
