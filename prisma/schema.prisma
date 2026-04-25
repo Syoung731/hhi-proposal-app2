@@ -585,6 +585,8 @@ model CompanySettings {
   defaultProposalDisclaimer String?  @default("")
   defaultTimelineNote       String?
   designHourlyRate          Int? // shown on "Your Investment" slide — null hides the hourly-rate sentence entirely
+  brandTagline              String?  @default("Design. Build. Remodel.") // tagline shown on the closing slide; null/empty renders nothing
+  closingHeadline           String?  @default("Let's Build Something Extraordinary") // headline shown on the closing slide; null/empty renders nothing
 
   integrationsJson          Json?
   roomTypeLowPct            Float? // default -10 in UI; low = target * (1 + lowPct/100)

@@ -451,6 +451,51 @@ export function BrandingTab({
             )}
           </div>
         </div>
+
+        {/* Brand Voice section */}
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-5 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Brand Voice
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Headline and tagline shown on the closing slide of every proposal.
+            Leave blank to render nothing.
+          </p>
+          <div className="mt-4 flex flex-col gap-4">
+            <div>
+              <label
+                htmlFor="closingHeadline"
+                className="mb-1.5 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+              >
+                Closing headline
+              </label>
+              <input
+                id="closingHeadline"
+                name="closingHeadline"
+                type="text"
+                defaultValue={settings.closingHeadline ?? ""}
+                placeholder="Let's Build Something Extraordinary"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="brandTagline"
+                className="mb-1.5 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+              >
+                Brand tagline
+              </label>
+              <input
+                id="brandTagline"
+                name="brandTagline"
+                type="text"
+                defaultValue={settings.brandTagline ?? ""}
+                placeholder="Design. Build. Remodel."
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </div>
       </form>
     </div>
   );

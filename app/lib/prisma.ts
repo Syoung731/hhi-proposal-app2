@@ -61,7 +61,7 @@ const REQUIRED_RECENT_FIELDS: Record<string, string[]> = {
   Room: ["displayGroupId", "displayGroupOrder"], // Phase 8A.1
   Project: ["displayGroupOrder"], // Phase 8A.1
   Media: ["thumbnailUrl"], // Phase 9
-  CompanySettings: ["designHourlyRate"], // Phase 8C T1
+  CompanySettings: ["designHourlyRate", "brandTagline", "closingHeadline"], // Phase 8C T1, Phase 11 Pass 2A T9
   RoomRenderCheck: ["id", "roomId", "itemText"], // Phase 10
 };
 

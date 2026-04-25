@@ -22,6 +22,8 @@ export function adaptBrandingForDeck(
     zip?: string | null;
     phone?: string | null;
     email?: string | null;
+    brandTagline?: string | null;
+    closingHeadline?: string | null;
   } | null
 ): DeckBranding {
   const street = [settings?.addressLine1, settings?.addressLine2]
@@ -44,5 +46,7 @@ export function adaptBrandingForDeck(
     address: parts || null,
     phone: settings?.phone ?? null,
     email: settings?.email ?? null,
+    brandTagline: settings?.brandTagline ?? null,
+    closingHeadline: settings?.closingHeadline ?? null,
   };
 }

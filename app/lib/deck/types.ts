@@ -102,6 +102,10 @@ export interface DeckBranding {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  /** Tagline rendered on the closing slide. Null/empty renders nothing. */
+  brandTagline?: string | null;
+  /** Headline rendered on the closing slide. Null/empty renders nothing. */
+  closingHeadline?: string | null;
 }
 
 // ─── Shared Slide Content Fields ────────────────────────────────────────────

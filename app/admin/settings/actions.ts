@@ -99,6 +99,12 @@ export async function saveBrandingAction(
   const primaryColorLegacy = (formData.get("primaryColor") as string)?.trim() || null;
   const primaryColorHex = normalizeHex(primaryColorHexRaw) ?? normalizeHex(primaryColorLegacy);
   const textColorHex = normalizeHex(textColorHexRaw);
+  const brandTaglineRaw = formData.get("brandTagline");
+  const closingHeadlineRaw = formData.get("closingHeadline");
+  const brandTagline =
+    typeof brandTaglineRaw === "string" ? (brandTaglineRaw.trim() || null) : undefined;
+  const closingHeadline =
+    typeof closingHeadlineRaw === "string" ? (closingHeadlineRaw.trim() || null) : undefined;
   await prisma.companySettings.update({
     where: { id: settings.id },
     data: {
@@ -107,6 +113,8 @@ export async function saveBrandingAction(
       primaryColorHex: primaryColorHex ?? undefined,
       textColorHex: textColorHex ?? undefined,
       ...(primaryColorLegacy !== null && { primaryColor: primaryColorLegacy }),
+      ...(brandTagline !== undefined && { brandTagline }),
+      ...(closingHeadline !== undefined && { closingHeadline }),
     },
   });
   revalidatePath("/admin/settings");

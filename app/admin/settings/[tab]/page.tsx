@@ -121,6 +121,8 @@ export default async function SettingsTabPage({
         defaultProposalDisclaimer: settings.defaultProposalDisclaimer ?? "",
         defaultTimelineNote: settings.defaultTimelineNote,
         designHourlyRate: settings.designHourlyRate,
+        brandTagline: settings.brandTagline,
+        closingHeadline: settings.closingHeadline,
         integrationsJson: settings.integrationsJson,
         roomTypeLowPct: settings.roomTypeLowPct,
         roomTypeHighPct: settings.roomTypeHighPct,

@@ -84,8 +84,10 @@ function ContactBlock({
 export function ClosingSlide({ slide, branding, hasAiBackground }: Props) {
   const c = (slide.content ?? {}) as ClosingSlideContent;
   const layoutKey = slide.layoutKey as string;
-  const headline = slide.headline ?? CLOSING_SLIDE_DEFAULTS.headline;
-  const tagline = c.tagline ?? CLOSING_SLIDE_DEFAULTS.tagline;
+  // Headline + tagline pull from CompanySettings via DeckBranding. Per-slide
+  // overrides win; if both slide and settings are blank, render nothing.
+  const headline = slide.headline ?? branding.closingHeadline ?? "";
+  const tagline = c.tagline ?? branding.brandTagline ?? "";
   const subheadline = c.subheadline ?? null;
   const contactEmail = c.contactEmail || branding.email || null;
   const contactPhone = c.contactPhone || branding.phone || null;

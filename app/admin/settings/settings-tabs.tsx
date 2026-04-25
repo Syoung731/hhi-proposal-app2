@@ -91,6 +91,10 @@ export type CompanySettingsForUI = {
   defaultTimelineNote: string | null;
   /** Shown on the "Your Investment" retainer slide. null hides the hourly-rate sentence entirely. */
   designHourlyRate: number | null;
+  /** Tagline rendered on the Closing slide. null/empty renders nothing. */
+  brandTagline: string | null;
+  /** Headline rendered on the Closing slide. null/empty renders nothing. */
+  closingHeadline: string | null;
   integrationsJson: unknown;
   roomTypeLowPct: number | null;
   roomTypeHighPct: number | null;
