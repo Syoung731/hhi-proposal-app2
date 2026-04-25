@@ -431,25 +431,6 @@ export function BrandingTab({
               })()}
             </div>
           </div>
-          <div className="mt-6 flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={status === "saving"}
-              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              {status === "saving" ? "Saving…" : "Save"}
-            </button>
-            {status === "saved" && (
-              <span className="text-sm text-green-600 dark:text-green-400">
-                Saved successfully.
-              </span>
-            )}
-            {status === "error" && errorMessage && (
-              <span className="text-sm text-red-600 dark:text-red-400">
-                {errorMessage}
-              </span>
-            )}
-          </div>
         </div>
 
         {/* Brand Voice section */}
@@ -495,6 +476,27 @@ export function BrandingTab({
               />
             </div>
           </div>
+        </div>
+
+        {/* Save — submits the whole Branding form (colors + Brand Voice) */}
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={status === "saving"}
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {status === "saving" ? "Saving…" : "Save"}
+          </button>
+          {status === "saved" && (
+            <span className="text-sm text-green-600 dark:text-green-400">
+              Saved successfully.
+            </span>
+          )}
+          {status === "error" && errorMessage && (
+            <span className="text-sm text-red-600 dark:text-red-400">
+              {errorMessage}
+            </span>
+          )}
         </div>
       </form>
     </div>
