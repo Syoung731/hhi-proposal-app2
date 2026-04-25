@@ -70,14 +70,13 @@ import type { BrandBackgroundForUI } from "@/app/admin/settings/settings-tabs";
 import { analyzeBackgroundTextZoneAction } from "@/app/admin/settings/branding/backgrounds/actions";
 import { BrandingColorRow } from "@/components/ui/BrandingColorRow";
 import { SLIDE_FONTS } from "@/app/lib/slide-constants";
-import { SlideAIRegenerate } from "./SlideAIRegenerate";
 import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
 import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction } from "./actions";
 
 interface Props {
   slide: ProposalSlide | null;
   branding: DeckBranding;
-  /** Project ID — passed to SlideAIRegenerate for the API call. */
+  /** Project ID — used by inspectors that fetch project-scoped data. */
   projectId: string;
   onUpdate: (updated: ProposalSlide) => void;
   onDuplicate: (id: string) => void;
@@ -93,12 +92,6 @@ interface Props {
   onBackgroundChange?: (backgroundId: string | null) => void;
   /** Callback when user edits the text zone. */
   onTextZoneChange?: (zone: TextZoneSetting | null) => void;
-  /**
-   * Callback for AI-generated background URL.
-   * Must bypass updateSlide to avoid triggering isUserModified.
-   * Pass null to clear the current AI background.
-   */
-  onAiBackgroundChange?: (url: string | null) => void;
   /**
    * Clears isUserModified on the investment slide and re-runs the full
    * server sync so fresh line items are pulled from the Investment tab.
@@ -8235,7 +8228,6 @@ export function InspectorPanel({
   brandBackgrounds = [],
   onBackgroundChange,
   onTextZoneChange,
-  onAiBackgroundChange,
   onResyncInvestment,
 }: Props) {
   if (!slide) {
@@ -8483,21 +8475,6 @@ export function InspectorPanel({
       </div>
 
       <Divider />
-
-      {/* AI Background — not shown for Cover (hero photo is the background) */}
-      {onAiBackgroundChange && slide.type !== "cover" && (
-        <>
-          <SlideAIRegenerate
-            slideType={slide.type}
-            slideId={slide.id}
-            projectId={projectId}
-            currentAiBackground={slide.aiBackground ?? null}
-            onAccept={(url) => onAiBackgroundChange(url)}
-            onDiscard={() => {/* no-op: discard just closes the preview */}}
-          />
-          <Divider />
-        </>
-      )}
 
       {/* Actions */}
       <SectionLabel>Actions</SectionLabel>

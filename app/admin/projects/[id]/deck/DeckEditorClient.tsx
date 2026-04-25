@@ -603,20 +603,6 @@ export function DeckEditorClient({
     );
   }, [activeSlideId]);
 
-  /**
-   * Update aiBackground directly on the active slide WITHOUT going through
-   * updateSlide, so isUserModified is never touched by this operation.
-   * Pass null to clear the current AI background.
-   */
-  const handleAiBackgroundChange = useCallback((url: string | null) => {
-    if (!activeSlideId) return;
-    setSlides((prev) =>
-      prev.map((s) =>
-        s.id === activeSlideId ? { ...s, aiBackground: url ?? undefined } : s
-      )
-    );
-  }, [activeSlideId]);
-
   const duplicateSlide = useCallback((id: string) => {
     setSlides((prev) => {
       const idx = prev.findIndex((s) => s.id === id);
@@ -1208,7 +1194,6 @@ export function DeckEditorClient({
             brandBackgrounds={brandBackgrounds}
             onBackgroundChange={handleBackgroundChange}
             onTextZoneChange={handleTextZoneChange}
-            onAiBackgroundChange={handleAiBackgroundChange}
             onResyncInvestment={handleResyncInvestment}
           />
         </div>
