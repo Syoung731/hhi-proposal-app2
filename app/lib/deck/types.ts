@@ -1017,6 +1017,9 @@ export interface ProjectTimelineContent extends SharedSlideFields {
   footnoteUnderline?: boolean | null;
   footnoteColor?: string | null;
   footnoteOutline?: string | null;
+
+  /** When true, all phases mirror the first phase's style values. */
+  lockItemStyles?: boolean | null;
 }
 
 /** A single COPE (Cost of Project Execution) item. */

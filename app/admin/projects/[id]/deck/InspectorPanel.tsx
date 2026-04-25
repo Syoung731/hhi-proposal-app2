@@ -4432,13 +4432,30 @@ function ProjectTimelineInspector({
   const phases = content.phases ?? DEFAULT_TL_PHASES;
   const accent = content.accentColor ?? branding.accentColor;
   const layoutKey = slide.layoutKey as string;
+  const locked = !!content.lockItemStyles;
+
+  const TIMELINE_STYLE_KEYS: (keyof ProjectPhase)[] = [
+    "nameFont", "nameSize", "nameBold", "nameItalic", "nameUnderline", "nameColor", "nameOutline",
+    "durationFont", "durationSize", "durationBold", "durationItalic", "durationUnderline", "durationColor", "durationOutline",
+    "descriptionFont", "descriptionSize", "descriptionBold", "descriptionItalic", "descriptionUnderline", "descriptionColor", "descriptionOutline",
+    "noteFont", "noteSize", "noteBold", "noteItalic", "noteUnderline", "noteColor", "noteOutline",
+  ];
 
   function updateContent(patch: Partial<ProjectTimelineContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
   function updatePhase(idx: number, patch: Partial<ProjectPhase>) {
-    const updated = phases.map((p, i) => (i === idx ? { ...p, ...patch } : p));
+    let updated = phases.map((p, i) => (i === idx ? { ...p, ...patch } : p));
+    if (locked && idx === 0) {
+      const stylePatch: Partial<ProjectPhase> = {};
+      for (const k of TIMELINE_STYLE_KEYS) {
+        if (k in patch) (stylePatch as unknown as Record<string, unknown>)[k] = (patch as unknown as Record<string, unknown>)[k];
+      }
+      if (Object.keys(stylePatch).length > 0) {
+        updated = updated.map((p, i) => i === 0 ? p : { ...p, ...stylePatch });
+      }
+    }
     updateContent({ phases: updated });
   }
 
@@ -4556,6 +4573,17 @@ function ProjectTimelineInspector({
           + Add
         </button>
       </div>
+      <PLockItemStylesToggle checked={locked} onChange={(v) => {
+        if (v && phases.length > 1) {
+          const src = phases[0];
+          const stylePatch: Partial<ProjectPhase> = {};
+          for (const k of TIMELINE_STYLE_KEYS) (stylePatch as unknown as Record<string, unknown>)[k] = (src as unknown as Record<string, unknown>)[k];
+          const synced = phases.map((p, i) => i === 0 ? p : { ...p, ...stylePatch });
+          updateContent({ lockItemStyles: true, phases: synced });
+        } else {
+          updateContent({ lockItemStyles: v || null });
+        }
+      }} />
 
       {phases.map((phase, pi) => (
         <div key={phase.id} style={{ marginBottom: 16 }}>
