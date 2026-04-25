@@ -2065,6 +2065,12 @@ function WhyUsInspector({
   const content = (slide.content ?? {}) as WhyUsContent;
   const allPillars = content.pillars ?? [];
   const testimonials = content.testimonials ?? [];
+  const locked = !!content.lockItemStyles;
+
+  const WHYUS_PILLAR_STYLE_KEYS: (keyof WhyUsPillarItem)[] = [
+    "titleFont", "titleSize", "titleBold", "titleItalic", "titleUnderline", "titleColor", "titleOutline",
+    "descriptionFont", "descriptionSize", "descriptionBold", "descriptionItalic", "descriptionUnderline", "descriptionColor", "descriptionOutline",
+  ];
 
   // Testimonial library state (same pattern as ClientTestimonialsInspector)
   const [libraryItems, setLibraryItems] = useState<WhyUsTestimonial[]>([]);
@@ -2362,12 +2368,36 @@ function WhyUsInspector({
             {visiblePillars2.length > 0 && (
               <>
                 <SectionLabel>Pillar Styles</SectionLabel>
+                <PLockItemStylesToggle checked={locked} onChange={(v) => {
+                  if (v && visiblePillars2.length > 1) {
+                    const src = visiblePillars2[0];
+                    const stylePatch: Partial<WhyUsPillarItem> = {};
+                    for (const k of WHYUS_PILLAR_STYLE_KEYS) (stylePatch as unknown as Record<string, unknown>)[k] = (src as unknown as Record<string, unknown>)[k];
+                    const visibleSet = new Set(visiblePillars2.slice(1).map((p) => p.id));
+                    const updatedPillars = (content.pillars ?? []).map((p) =>
+                      visibleSet.has(p.id) ? { ...p, ...stylePatch } : p
+                    );
+                    updateContent({ lockItemStyles: true, pillars: updatedPillars });
+                  } else {
+                    updateContent({ lockItemStyles: v || null });
+                  }
+                }} />
                 {visiblePillars2.map((pillar: WhyUsPillarItem, pi: number) => {
                   const pIdx = (content.pillars ?? []).findIndex((p) => p.id === pillar.id);
                   if (pIdx < 0) return null;
                   function updatePillar(patch: Partial<typeof pillar>) {
-                    const updated = [...(content.pillars ?? [])];
+                    let updated = [...(content.pillars ?? [])];
                     updated[pIdx] = { ...updated[pIdx], ...patch };
+                    if (locked && pi === 0) {
+                      const stylePatch: Partial<WhyUsPillarItem> = {};
+                      for (const k of WHYUS_PILLAR_STYLE_KEYS) {
+                        if (k in patch) (stylePatch as unknown as Record<string, unknown>)[k] = (patch as unknown as Record<string, unknown>)[k];
+                      }
+                      if (Object.keys(stylePatch).length > 0) {
+                        const visibleSet = new Set(visiblePillars2.slice(1).map((p) => p.id));
+                        updated = updated.map((p) => visibleSet.has(p.id) ? { ...p, ...stylePatch } : p);
+                      }
+                    }
                     updateContent({ pillars: updated });
                   }
                   return (

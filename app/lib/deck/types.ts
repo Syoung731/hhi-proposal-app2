@@ -519,6 +519,9 @@ export interface WhyUsContent extends SharedSlideFields {
   sectionTitleUnderline?: boolean | null;
   sectionTitleColor?: string | null;
   sectionTitleOutline?: string | null;
+
+  /** When true, all visible pillars mirror the first pillar's style values. */
+  lockItemStyles?: boolean | null;
 }
 
 /**
