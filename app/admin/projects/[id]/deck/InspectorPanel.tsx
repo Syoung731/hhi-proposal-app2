@@ -2402,10 +2402,13 @@ function WhyUsInspector({
                   }
                   return (
                     <div key={pillar.id} style={{ marginBottom: 12, paddingLeft: 4 }}>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{pillar.title}</p>
+                      <p style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{pillar.title || "(Untitled pillar)"}</p>
 
-                      {/* Title styles */}
+                      {/* Title — content always editable; lock-sizes only governs styling */}
                       <p style={{ fontSize: 9, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Title</p>
+                      <FieldGroup label="Text">
+                        <TextInput value={pillar.title ?? ""} onChange={(v) => updatePillar({ title: v })} placeholder="Pillar title" />
+                      </FieldGroup>
                       <FieldGroup label="Font">
                         <PFontSelect value={pillar.titleFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updatePillar({ titleFont: v })} />
                       </FieldGroup>
@@ -2424,8 +2427,11 @@ function WhyUsInspector({
                         <POutlineRow accentColor={branding.accentColor} value={pillar.titleOutline} onChangeFn={(v) => updatePillar({ titleOutline: v })} />
                       </FieldGroup>
 
-                      {/* Description styles */}
+                      {/* Description — content always editable; lock-sizes only governs styling */}
                       <p style={{ fontSize: 9, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4, marginTop: 8 }}>Description</p>
+                      <FieldGroup label="Text">
+                        <TextArea value={pillar.body ?? ""} onChange={(v) => updatePillar({ body: v })} placeholder="Pillar description" rows={2} />
+                      </FieldGroup>
                       <FieldGroup label="Font">
                         <PFontSelect value={pillar.descriptionFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updatePillar({ descriptionFont: v })} />
                       </FieldGroup>
