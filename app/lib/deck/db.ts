@@ -579,6 +579,14 @@ async function syncBeforeAfterSlides(
       // Slide already exists — refresh render + caption unless user modified it.
       if (existingRow.isUserModified) continue;
 
+      // Re-anchor stale orders. If the row's order is far above the anchor
+      // (e.g. still carrying the legacy 500+i*10 hardcoded fallback), assume
+      // the user has not deliberately positioned it and pull it back to the
+      // freshly-computed anchor offset. Manual reorders land near the anchor
+      // (small integer or 0.x deltas), so the +50 threshold leaves them alone.
+      const shouldReAnchor =
+        beforeAfterAnchor != null && existingRow.order > beforeAfterAnchor + 50;
+
       const currentContent = (existingRow.content ?? {}) as BeforeAfterContent;
 
       // Phase 8C bullet merge:
@@ -618,6 +626,7 @@ async function syncBeforeAfterSlides(
           headline: room.name,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           content: updatedContent as any,
+          ...(shouldReAnchor ? { order } : {}),
         },
       });
     } else {
@@ -728,10 +737,20 @@ async function syncScopeBreakdownSlide(
       rooms: mergedRooms,
     };
 
+    // Re-anchor stale orders on existing rows. Same heuristic as
+    // syncBeforeAfterSlides: anything more than 50 above the anchor is
+    // assumed to be a legacy hardcoded fallback (was 400) rather than a
+    // user-positioned slide.
+    const reAnchor = findAnchorOrder(existing, SCOPE_ANCHOR_TYPES);
+    const shouldReAnchor = reAnchor != null && existingRow.order > reAnchor + 50;
+
     await prisma.deckSlide.update({
       where: { id: existingRow.id },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: { content: updatedContent as any },
+      data: {
+        content: updatedContent as any,
+        ...(shouldReAnchor ? { order: reAnchor + 0.1 } : {}),
+      },
     });
   } else {
     const scopeRooms: ScopeBreakdownRoom[] = unrendered.map((room) => ({
