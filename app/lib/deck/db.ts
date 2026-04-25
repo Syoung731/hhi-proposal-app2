@@ -932,10 +932,20 @@ async function syncInvestmentSlide(
     lineItems,
   };
 
+  // Phase 11 Pass 2A T10: auto-correct the legacy "Projected Investment" title
+  // on existing rows. Phase 8C.1 renamed the seed default to "Investment by
+  // Space" but only fresh seeds got the new title. Match exactly so any
+  // user-customized title is preserved. Once corrected, the conditional is a
+  // no-op on every subsequent sync.
+  const shouldRetitleHeadline = investmentRow.headline === "Projected Investment";
+
   await prisma.deckSlide.update({
     where: { id: investmentRow.id },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: { content: updatedContent as any },
+    data: {
+      content: updatedContent as any,
+      ...(shouldRetitleHeadline && { headline: "Investment by Space" }),
+    },
   });
 }
 
