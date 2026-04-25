@@ -109,25 +109,6 @@ function renderIcon(name: string, color: string, size?: string) {
   );
 }
 
-// ─── Architectural watermark ────────────────────────────────────────────────
-
-function ArchitecturalWatermark({ color = NAVY, opacity = 0.04 }: { color?: string; opacity?: number }) {
-  return (
-    <svg
-      width="220" height="220" viewBox="0 0 220 220" fill="none" stroke={color} strokeWidth={0.7}
-      style={{ position: "absolute", top: "3%", right: "3%", opacity, pointerEvents: "none", zIndex: 2 }}
-    >
-      <circle cx="110" cy="110" r="100" />
-      <circle cx="110" cy="110" r="70" />
-      <line x1="110" y1="10" x2="110" y2="210" />
-      <line x1="10" y1="110" x2="210" y2="110" />
-      <line x1="39" y1="39" x2="181" y2="181" />
-      <line x1="181" y1="39" x2="39" y2="181" />
-      <circle cx="110" cy="110" r="8" fill={color} fillOpacity={opacity * 3} stroke="none" />
-    </svg>
-  );
-}
-
 // ─── Main component ─────────────────────────────────────────────────────────
 
 export function DesignBuildAdvantageSlide({ slide, branding, hasAiBackground }: Props) {
@@ -197,7 +178,6 @@ function IconCardsLayout({
       {hasBg && <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />}
       {hasBg && <PhotoOverlay opacity={overlayOpacity ?? 0.55} />}
       {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
-      {!hasBg && <ArchitecturalWatermark />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content, alignItems: "center" }}>
         <div style={{
@@ -489,7 +469,6 @@ function QuadGridLayout({
       {hasBg && <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />}
       {hasBg && <PhotoOverlay opacity={overlayOpacity ?? 0.55} />}
       {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
-      {!hasBg && <ArchitecturalWatermark />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         <div style={{ textAlign: "center", marginBottom: "0.6em" }}>
@@ -611,8 +590,6 @@ function CycleDiagramLayout({
 
   return (
     <div className="relative w-full h-full" style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}>
-      <ArchitecturalWatermark />
-
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header */}
         <div style={{ textAlign: "center", marginBottom: "0.4em" }}>

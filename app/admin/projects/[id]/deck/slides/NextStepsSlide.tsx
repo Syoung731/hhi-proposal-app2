@@ -19,36 +19,6 @@ const NAVY = "#1B2A4A";
 const GOLD = "#B8860B";
 const MUTED_NAVY = "#4A5568";
 
-// ─── Architectural watermark (top-right) ────────────────────────────────────
-
-function ArchitecturalWatermark({ color = NAVY, opacity = 0.04 }: { color?: string; opacity?: number }) {
-  return (
-    <svg
-      width="220"
-      height="220"
-      viewBox="0 0 220 220"
-      fill="none"
-      stroke={color}
-      strokeWidth={0.7}
-      style={{
-        position: "absolute",
-        top: "3%",
-        right: "3%",
-        opacity,
-        pointerEvents: "none",
-      }}
-    >
-      <circle cx="110" cy="110" r="100" />
-      <circle cx="110" cy="110" r="70" />
-      <line x1="110" y1="10" x2="110" y2="210" />
-      <line x1="10" y1="110" x2="210" y2="110" />
-      <line x1="39" y1="39" x2="181" y2="181" />
-      <line x1="181" y1="39" x2="39" y2="181" />
-      <circle cx="110" cy="110" r="8" fill={color} fillOpacity={opacity * 3} stroke="none" />
-    </svg>
-  );
-}
-
 // ─── Outline shadow helper ──────────────────────────────────────────────────
 
 function makeOutlineShadow(color: string | null | undefined): string | undefined {
@@ -177,7 +147,6 @@ function NumberedPhotoLayout({
       className="relative w-full h-full"
       style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
     >
-      <ArchitecturalWatermark />
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex" }}>
         {/* Left content ~60% */}
@@ -328,7 +297,6 @@ function ColumnGridPhotosLayout({
       className="relative w-full h-full"
       style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
     >
-      <ArchitecturalWatermark />
 
       <div
         style={{
@@ -494,7 +462,6 @@ function TwoByTwoGridLayout({
       className="relative w-full h-full"
       style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
     >
-      <ArchitecturalWatermark />
 
       <div
         style={{
@@ -686,8 +653,6 @@ function LargeNumberHeroLayout({
           />
         </>
       )}
-
-      <ArchitecturalWatermark opacity={0.03} />
 
       <div
         style={{

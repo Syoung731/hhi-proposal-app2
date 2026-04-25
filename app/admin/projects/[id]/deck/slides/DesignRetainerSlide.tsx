@@ -67,36 +67,6 @@ function GoldCheck({ color = GOLD, size = "1.1em" }: { color?: string; size?: st
   );
 }
 
-// ─── Architectural watermark (top-right) ────────────────────────────────────
-
-function ArchitecturalWatermark({ color = NAVY, opacity = 0.04 }: { color?: string; opacity?: number }) {
-  return (
-    <svg
-      width="220"
-      height="220"
-      viewBox="0 0 220 220"
-      fill="none"
-      stroke={color}
-      strokeWidth={0.7}
-      style={{
-        position: "absolute",
-        top: "3%",
-        right: "3%",
-        opacity,
-        pointerEvents: "none",
-      }}
-    >
-      <circle cx="110" cy="110" r="100" />
-      <circle cx="110" cy="110" r="70" />
-      <line x1="110" y1="10" x2="110" y2="210" />
-      <line x1="10" y1="110" x2="210" y2="110" />
-      <line x1="39" y1="39" x2="181" y2="181" />
-      <line x1="181" y1="39" x2="39" y2="181" />
-      <circle cx="110" cy="110" r="8" fill={color} fillOpacity={opacity * 3} stroke="none" />
-    </svg>
-  );
-}
-
 // ─── Main slide component ────────────────────────────────────────────────────
 
 export function DesignRetainerSlide({ slide, branding, hasAiBackground }: Props) {
@@ -224,8 +194,6 @@ function CenteredHeroLayout({
         background: hasAiBackground ? "transparent" : LINEN,
       }}
     >
-      <ArchitecturalWatermark />
-
       <div
         style={{
           position: "relative",
@@ -418,8 +386,6 @@ function FramedCardLayout({
         background: hasAiBackground ? "transparent" : LINEN,
       }}
     >
-      <ArchitecturalWatermark opacity={0.03} />
-
       <div
         style={{
           position: "relative",
@@ -793,8 +759,6 @@ function ThreeBandSummaryLayout({
         background: hasAiBackground ? "transparent" : LINEN,
       }}
     >
-      <ArchitecturalWatermark opacity={0.035} />
-
       <div
         style={{
           position: "relative",
