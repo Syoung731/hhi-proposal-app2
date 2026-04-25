@@ -73,7 +73,8 @@ export function SlideCard({
     slide.type !== "before-after" &&
     slide.type !== "risk-brief" &&
     slide.type !== "scope-overview" &&
-    slide.type !== "objective";
+    slide.type !== "objective" &&
+    slide.type !== "visual-inspiration";
 
   return (
     <>
