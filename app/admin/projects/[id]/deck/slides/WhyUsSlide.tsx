@@ -151,6 +151,7 @@ function PillarCard({
 
 function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const resolvedAccent = content.accentColor ?? "#B8860B";
   const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
@@ -179,7 +180,7 @@ function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   });
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
       {/* Dashed grid watermark */}
       <svg
         style={{
@@ -278,6 +279,7 @@ function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 
 function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const resolvedAccent = content.accentColor ?? "#B8860B";
   const accent = resolvedAccent;
   const cardShadowKey = content.cardShadow ?? "normal";
@@ -303,7 +305,7 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}
     >
       {/* Dot-grid texture */}
       <svg
@@ -526,6 +528,7 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
 
 function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const resolvedAccent = content.accentColor ?? "#B8860B";
   const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
@@ -539,7 +542,7 @@ function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : "#FFFFFF", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : "#FFFFFF", overflow: "hidden" }}
     >
       {/* Faint vertical accent guide */}
       <div
@@ -726,6 +729,7 @@ function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 
 function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const resolvedAccent = content.accentColor ?? "#B8860B";
   const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
@@ -743,7 +747,7 @@ function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutPro
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}
     >
       {/* Dark right-column panel */}
       <div

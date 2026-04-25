@@ -168,6 +168,7 @@ function BulletCard({ content, branding }: { content: AdditionOverviewContent; b
 
 function PhotoCadOverlayLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as AdditionOverviewContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const hasGenerated = !!content.cadGeneratedImageUrl;
   const displayUrl = hasGenerated ? content.cadGeneratedImageUrl! : content.sourcePhotoUrl;
   const accent = content.accentColor ?? branding.accentColor;
@@ -182,7 +183,7 @@ function PhotoCadOverlayLayout({ slide, branding, hasAiBackground }: LayoutProps
         height: "100%",
         position: "relative",
         overflow: "hidden",
-        background: hasAiBackground ? "transparent" : "#1B2A4A",
+        background: hasBg ? "transparent" : "#1B2A4A",
       }}
     >
       {/* Photo layer — generated image (shifted by nudge) or source photo */}
@@ -270,6 +271,7 @@ function PhotoCadOverlayLayout({ slide, branding, hasAiBackground }: LayoutProps
 
 function PhotoBulletCardLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as AdditionOverviewContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const photoUrl = content.sourcePhotoUrl;
   const photoWidth = content.photoPanelWidth ?? 70;
   const accent = content.accentColor ?? branding.accentColor;
@@ -282,7 +284,7 @@ function PhotoBulletCardLayout({ slide, branding, hasAiBackground }: LayoutProps
         display: "flex",
         position: "relative",
         overflow: "hidden",
-        background: hasAiBackground ? "transparent" : "#F5F0E8",
+        background: hasBg ? "transparent" : "#F5F0E8",
       }}
     >
       {/* Left panel — photo */}
@@ -366,6 +368,7 @@ function PhotoBulletCardLayout({ slide, branding, hasAiBackground }: LayoutProps
 
 function CombinedLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as AdditionOverviewContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const hasGenerated = !!content.cadGeneratedImageUrl;
   const displayUrl = hasGenerated ? content.cadGeneratedImageUrl! : content.sourcePhotoUrl;
   const photoWidth = content.photoPanelWidth ?? 70;
@@ -381,7 +384,7 @@ function CombinedLayout({ slide, branding, hasAiBackground }: LayoutProps) {
         display: "flex",
         position: "relative",
         overflow: "hidden",
-        background: hasAiBackground ? "transparent" : "#F5F0E8",
+        background: hasBg ? "transparent" : "#F5F0E8",
       }}
     >
       {/* Left panel — generated image (shifted by nudge) or source photo */}

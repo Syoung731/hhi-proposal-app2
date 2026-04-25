@@ -95,6 +95,7 @@ export function CoreValuesSlide({ slide, branding, hasAiBackground }: Props) {
   const sectionLabel = c.sectionLabel ?? "WHO WE ARE";
   const headline = slide.headline ?? "Built on a Foundation of Values";
   const values = c.values && c.values.length > 0 ? c.values : DEFAULT_CORE_VALUES;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
 
   switch (layoutKey) {
     case "quad-grid":
@@ -104,7 +105,7 @@ export function CoreValuesSlide({ slide, branding, hasAiBackground }: Props) {
           headline={headline}
           values={values}
           backgroundImageUrl={c.backgroundImageUrl}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -115,7 +116,7 @@ export function CoreValuesSlide({ slide, branding, hasAiBackground }: Props) {
           sectionLabel={sectionLabel}
           headline={headline}
           values={values}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -126,7 +127,7 @@ export function CoreValuesSlide({ slide, branding, hasAiBackground }: Props) {
           sectionLabel={sectionLabel}
           headline={headline}
           values={values}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -137,7 +138,7 @@ export function CoreValuesSlide({ slide, branding, hasAiBackground }: Props) {
           sectionLabel={sectionLabel}
           headline={headline}
           values={values}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -152,7 +153,7 @@ function QuadGridLayout({
   headline,
   values,
   backgroundImageUrl,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
@@ -160,7 +161,7 @@ function QuadGridLayout({
   headline: string;
   values: CoreValue[];
   backgroundImageUrl?: string | null;
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
@@ -194,7 +195,7 @@ function QuadGridLayout({
         style={{
           position: "absolute",
           inset: 0,
-          background: hasAiBackground && !backgroundImageUrl
+          background: hasBg && !backgroundImageUrl
             ? "transparent"
             : backgroundImageUrl
               ? "rgba(26,35,50,0.78)"
@@ -333,14 +334,14 @@ function CardsRowLayout({
   sectionLabel,
   headline,
   values,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
   sectionLabel: string;
   headline: string;
   values: CoreValue[];
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
@@ -358,7 +359,7 @@ function CardsRowLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
     >
 
       <div
@@ -533,14 +534,14 @@ function LabeledListLayout({
   sectionLabel,
   headline,
   values,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
   sectionLabel: string;
   headline: string;
   values: CoreValue[];
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
@@ -558,7 +559,7 @@ function LabeledListLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
     >
 
       <div
@@ -692,14 +693,14 @@ function IconCardsLayout({
   sectionLabel,
   headline,
   values,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: {
   sectionLabel: string;
   headline: string;
   values: CoreValue[];
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
@@ -717,7 +718,7 @@ function IconCardsLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
     >
 
       <div

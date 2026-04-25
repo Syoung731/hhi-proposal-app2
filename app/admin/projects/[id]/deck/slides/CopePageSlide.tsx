@@ -79,6 +79,7 @@ export function CopePageSlide({ slide, branding, hasAiBackground }: Props) {
   const headline = slide.headline ?? "The Cost of Project Execution";
   const subheadline = c.subheadline ?? null;
   const items = c.items && c.items.length > 0 ? c.items : HHI_DEFAULT_COPE_ITEMS;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
 
   switch (layoutKey) {
     case "quad-photos":
@@ -88,7 +89,7 @@ export function CopePageSlide({ slide, branding, hasAiBackground }: Props) {
           headline={headline}
           subheadline={subheadline}
           items={items}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -101,7 +102,7 @@ export function CopePageSlide({ slide, branding, hasAiBackground }: Props) {
           subheadline={subheadline}
           items={items}
           heroImageUrl={c.heroImageUrl}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -113,7 +114,7 @@ export function CopePageSlide({ slide, branding, hasAiBackground }: Props) {
           headline={headline}
           subheadline={subheadline}
           items={items}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -124,10 +125,10 @@ export function CopePageSlide({ slide, branding, hasAiBackground }: Props) {
 // ─── Layout A: Icon Columns ──────────────────────────────────────────────────
 
 function IconColumnsLayout({
-  sectionLabel, headline, subheadline, items, hasAiBackground, content, branding,
+  sectionLabel, headline, subheadline, items, hasBg, content, branding,
 }: {
   sectionLabel: string; headline: string; subheadline: string | null;
-  items: CopeItem[]; hasAiBackground?: boolean; content: CopePageContent; branding: DeckBranding;
+  items: CopeItem[]; hasBg?: boolean; content: CopePageContent; branding: DeckBranding;
 }) {
   const resolvedAccent = content.accentColor ?? GOLD;
 
@@ -147,7 +148,7 @@ function IconColumnsLayout({
   const fallbackBodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}>
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header */}
         <div style={{ flexShrink: 0, marginBottom: "2.5%" }}>
@@ -288,10 +289,10 @@ function IconColumnsLayout({
 // ─── Layout B: Quad Photos ───────────────────────────────────────────────────
 
 function QuadPhotosLayout({
-  sectionLabel, headline, subheadline, items, hasAiBackground, content, branding,
+  sectionLabel, headline, subheadline, items, hasBg, content, branding,
 }: {
   sectionLabel: string; headline: string; subheadline: string | null;
-  items: CopeItem[]; hasAiBackground?: boolean; content: CopePageContent; branding: DeckBranding;
+  items: CopeItem[]; hasBg?: boolean; content: CopePageContent; branding: DeckBranding;
 }) {
   const accent = content.accentColor ?? GOLD;
   const cells = items.slice(0, 4);
@@ -306,7 +307,7 @@ function QuadPhotosLayout({
   const fallbackBodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}>
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header */}
         <div style={{ flexShrink: 0, marginBottom: "2.5%" }}>
@@ -407,10 +408,10 @@ function QuadPhotosLayout({
 // ─── Layout C: Annotated Diagram ─────────────────────────────────────────────
 
 function AnnotatedDiagramLayout({
-  sectionLabel, headline, subheadline, items, heroImageUrl, hasAiBackground, content, branding,
+  sectionLabel, headline, subheadline, items, heroImageUrl, hasBg, content, branding,
 }: {
   sectionLabel: string; headline: string; subheadline: string | null;
-  items: CopeItem[]; heroImageUrl?: string | null; hasAiBackground?: boolean; content: CopePageContent; branding: DeckBranding;
+  items: CopeItem[]; heroImageUrl?: string | null; hasBg?: boolean; content: CopePageContent; branding: DeckBranding;
 }) {
   const accent = content.accentColor ?? GOLD;
 
@@ -430,7 +431,7 @@ function AnnotatedDiagramLayout({
   const fallbackBodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}>
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex" }}>
         {/* Left panel */}
         <div style={{ width: "40%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content, overflow: "hidden" }}>

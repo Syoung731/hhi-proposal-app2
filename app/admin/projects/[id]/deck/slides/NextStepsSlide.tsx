@@ -81,6 +81,7 @@ export function NextStepsSlide({ slide, branding, hasAiBackground }: Props) {
   const sectionLabel = c.sectionLabel ?? "WHAT HAPPENS NEXT";
   const headline = slide.headline ?? "Your Path Forward";
   const steps = c.steps && c.steps.length > 0 ? c.steps : HHI_DEFAULT_NEXT_STEPS;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
 
   const common = {
     sectionLabel,
@@ -91,7 +92,7 @@ export function NextStepsSlide({ slide, branding, hasAiBackground }: Props) {
     showAddress: c.showAddress,
     address: branding.address,
     rightPhoto: c.rightPhoto,
-    hasAiBackground,
+    hasBg,
     content: c,
     branding,
   };
@@ -121,7 +122,7 @@ interface LayoutProps {
   showAddress?: boolean | null;
   address?: string | null;
   rightPhoto?: string | null;
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: NextStepsContent;
   branding: DeckBranding;
 }
@@ -137,7 +138,7 @@ function NumberedPhotoLayout({
   showAddress,
   address,
   rightPhoto,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: LayoutProps) {
@@ -145,7 +146,7 @@ function NumberedPhotoLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex" }}>
@@ -287,7 +288,7 @@ function ColumnGridPhotosLayout({
   contactPhone,
   showAddress,
   address,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: LayoutProps) {
@@ -295,7 +296,7 @@ function ColumnGridPhotosLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
 
       <div
@@ -452,7 +453,7 @@ function TwoByTwoGridLayout({
   contactPhone,
   showAddress,
   address,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: LayoutProps) {
@@ -460,7 +461,7 @@ function TwoByTwoGridLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
 
       <div
@@ -614,7 +615,7 @@ function LargeNumberHeroLayout({
   showAddress,
   address,
   rightPhoto,
-  hasAiBackground,
+  hasBg,
   content,
   branding,
 }: LayoutProps) {
@@ -624,7 +625,7 @@ function LargeNumberHeroLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}
+      style={{ overflow: "hidden", background: hasBg ? "transparent" : LINEN }}
     >
       {/* Optional right photo with overlay */}
       {hasPhoto && (

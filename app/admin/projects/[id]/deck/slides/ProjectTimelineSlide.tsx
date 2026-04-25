@@ -46,6 +46,7 @@ export function ProjectTimelineSlide({ slide, branding, hasAiBackground }: Props
   const phases = c.phases && c.phases.length > 0 ? c.phases : DEFAULT_TIMELINE_PHASES;
   const accent = c.accentColor ?? GOLD;
   const footnote = c.footnoteText ?? null;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
 
   switch (layoutKey) {
     case "vertical-alternating":
@@ -56,7 +57,7 @@ export function ProjectTimelineSlide({ slide, branding, hasAiBackground }: Props
           phases={phases}
           accent={accent}
           footnote={footnote}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -69,7 +70,7 @@ export function ProjectTimelineSlide({ slide, branding, hasAiBackground }: Props
           phases={phases}
           accent={accent}
           footnote={footnote}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -82,7 +83,7 @@ export function ProjectTimelineSlide({ slide, branding, hasAiBackground }: Props
           phases={phases}
           accent={accent}
           footnote={footnote}
-          hasAiBackground={hasAiBackground}
+          hasBg={hasBg}
           content={c}
           branding={branding}
         />
@@ -98,7 +99,7 @@ interface LayoutProps {
   phases: ProjectPhase[];
   accent: string;
   footnote: string | null;
-  hasAiBackground?: boolean;
+  hasBg?: boolean;
   content: ProjectTimelineContent;
   branding: DeckBranding;
 }
@@ -107,7 +108,7 @@ interface LayoutProps {
 // Left-aligned vertical line with filled navy dots. Phase name + gold duration
 // right of dot, description below.
 
-function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, hasAiBackground, content, branding }: LayoutProps) {
+function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, hasBg, content, branding }: LayoutProps) {
   const resolvedAccent = content.accentColor ?? GOLD;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
@@ -118,7 +119,7 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
     >
       <div
         style={{
@@ -290,14 +291,14 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
 // ─── Layout B: Vertical Alternating ──────────────────────────────────────────
 // Center vertical line, phases alternate left/right.
 
-function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, hasAiBackground, content, branding }: LayoutProps) {
+function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, hasBg, content, branding }: LayoutProps) {
   const resolvedAccent = content.accentColor ?? GOLD;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
     >
       <div
         style={{
@@ -519,7 +520,7 @@ function PhaseBlock({ phase, accent, align }: { phase: ProjectPhase; accent: str
 // ─── Layout C: Stepped / Indented Hierarchy ──────────────────────────────────
 // Each phase indented progressively further right. Minimal, text-heavy.
 
-function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasAiBackground, content, branding }: LayoutProps) {
+function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasBg, content, branding }: LayoutProps) {
   const resolvedAccent = content.accentColor ?? GOLD;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
@@ -529,7 +530,7 @@ function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasAi
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
     >
       <div
         style={{

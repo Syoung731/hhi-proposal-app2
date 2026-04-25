@@ -70,10 +70,12 @@ export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
   const footerColor = c.footerColor ?? c.bodyColor ?? branding.textColor;
   const footerShadow = makeOutlineShadow(c.footerOutline);
 
+  const hasBg = hasAiBackground || slide.backgroundId != null;
+
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasAiBackground ? "transparent" : "#F5F4F0", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : "#F5F4F0", overflow: "hidden" }}
     >
       {/* Dot grid watermark */}
       <svg

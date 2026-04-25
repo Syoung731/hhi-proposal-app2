@@ -165,6 +165,7 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
 
 function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
@@ -173,7 +174,7 @@ function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
   const hasPhotos = photos.length > 0;
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
       {/* Subtle dot-grid watermark */}
       <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", opacity: 0.022 }} xmlns="http://www.w3.org/2000/svg" aria-hidden>
         <defs>
@@ -231,13 +232,14 @@ function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
 
 function DarkTableLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : NAVY, overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : NAVY, overflow: "hidden" }}>
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header */}
         <div style={{ flexShrink: 0, marginBottom: "4%" }}>
@@ -315,6 +317,7 @@ function ScopeIcon({ name, color, size = "2em" }: { name?: string; color: string
 
 function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
@@ -324,7 +327,7 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
   const displayRooms = visibleRooms.slice(0, 5);
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header — centered */}
         <div style={{ flexShrink: 0, marginBottom: "4%", textAlign: "center" }}>
@@ -379,6 +382,7 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
 
 function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
@@ -388,7 +392,7 @@ function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
   const displayRooms = visibleRooms.slice(0, 3);
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : NAVY, overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : NAVY, overflow: "hidden" }}>
       {/* Architectural blueprint watermark */}
       <svg style={{ position: "absolute", right: 0, top: 0, width: "50%", height: "100%", pointerEvents: "none", opacity: 0.04 }} xmlns="http://www.w3.org/2000/svg" aria-hidden>
         <defs>
@@ -459,6 +463,7 @@ function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
 
 function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
@@ -469,7 +474,7 @@ function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
   const displayRooms = visibleRooms.slice(0, 4);
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header — centered */}
         <div style={{ flexShrink: 0, marginBottom: "3%", textAlign: "center" }}>
@@ -545,6 +550,7 @@ function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
 
 function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
+  const hasBg = hasAiBackground || slide.backgroundId != null;
   const accent = resolveAccent(content);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
@@ -554,7 +560,7 @@ function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
   const displayRooms = visibleRooms.slice(0, 3);
 
   return (
-    <div className="relative w-full h-full" style={{ background: hasAiBackground ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+    <div className="relative w-full h-full" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
       {/* Subtle grid lines */}
       <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", opacity: 0.035 }} xmlns="http://www.w3.org/2000/svg" aria-hidden>
         <defs>

@@ -71,11 +71,13 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   // compact / spacious presets unchanged.
   const lineItemPadding = content.lineItemSizePreset === "compact" ? "0.32em 0.9em" : content.lineItemSizePreset === "spacious" ? "0.65em 0.9em" : "0.42em 0.9em";
 
+  const hasBg = hasAiBackground || slide.backgroundId != null;
+
   return (
     <div
       className="relative w-full h-full flex flex-col"
       style={{
-        background: hasAiBackground ? "transparent" : "#FAFAF8",
+        background: hasBg ? "transparent" : "#FAFAF8",
         padding: SLIDE_PADDING.content,
       }}
     >
