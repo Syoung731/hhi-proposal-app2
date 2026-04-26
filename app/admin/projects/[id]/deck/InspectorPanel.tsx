@@ -1426,10 +1426,32 @@ function ObjectiveInspector({
   const content = (slide.content ?? {}) as ObjectiveContent;
 
   function updateContent(patch: Partial<ObjectiveContent>) {
-    onUpdate({ ...slide, content: { ...content, ...patch } });
+    // Mark the slide as user-modified so the deck-page hydration in
+    // app/admin/projects/[id]/deck/page.tsx stops overwriting these
+    // fields from Project.objective / .bullets / .objectivePillars on
+    // subsequent loads. Mirrors InvestmentInspector's pattern.
+    onUpdate({ ...slide, content: { ...content, ...patch }, isUserModified: true });
   }
 
   const bullets = (content.bullets ?? ["", "", ""]).concat(["", "", ""]).slice(0, 3);
+
+  // Pillars-mode bullets allow up to 6 highlight phrases. Stored in the same
+  // content.bullets field as the statement-mode proof-points; the renderer
+  // .filter(Boolean)s empties so trailing blank rows just don't appear.
+  const pillarBulletSlots: string[] = (() => {
+    const seed = (content.bullets ?? []).slice(0, 6).map((b) => String(b ?? ""));
+    while (seed.length < 6) seed.push("");
+    return seed;
+  })();
+
+  function updatePillarBullet(index: number, value: string) {
+    const next = [...pillarBulletSlots];
+    next[index] = value;
+    // Trim trailing empties for cleaner storage but keep interior blanks so
+    // the user can leave row 3 empty without collapsing rows 4-6.
+    while (next.length > 0 && next[next.length - 1] === "") next.pop();
+    updateContent({ bullets: next });
+  }
 
   // Resolve the active layout mode. Must mirror resolveObjectiveLayoutMode()
   // in ObjectiveSlide.tsx so the inspector and slide always agree.
@@ -1486,75 +1508,6 @@ function ObjectiveInspector({
           placeholder="e.g. Project Objective"
         />
       </FieldGroup>
-
-      {PF_GROUP_DIVIDER}
-
-      {/* ── LAYOUT MODE (Pillars vs Statement) ─────────────────────────── */}
-      <SectionLabel>Layout</SectionLabel>
-      <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}`, borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
-        {(["pillars", "statement"] as const).map((m) => {
-          const active = mode === m;
-          return (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              style={{
-                flex: 1,
-                fontSize: 12,
-                fontWeight: active ? 600 : 400,
-                padding: "6px 10px",
-                minHeight: 32,
-                cursor: "pointer",
-                background: active ? branding.accentColor : "#FFFFFF",
-                color: active ? "#FFFFFF" : "#374151",
-                borderTop: "none",
-                borderRight: "none",
-                borderBottom: "none",
-                borderLeft: m === "statement" ? `1px solid ${branding.accentColor}` : "none",
-              }}
-            >
-              {m === "pillars" ? "Pillars" : "Statement"}
-            </button>
-          );
-        })}
-      </div>
-
-      {mode === "pillars" && (
-        <>
-          {/* ── PILLARS (3-pillar layout) ──────────────────────────────── */}
-          <SectionLabel>Pillars</SectionLabel>
-          <FieldGroup label="Objective (short, ≤50 words)">
-            <TextArea
-              value={content.objective ?? ""}
-              onChange={(v) => updateContent({ objective: v })}
-              placeholder="2-3 sentence opener — frames the project as a single vision."
-              rows={3}
-            />
-          </FieldGroup>
-          {([0, 1, 2] as const).map((i) => (
-            <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
-              <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>
-                <TextInput
-                  value={pillarSlots[i].title}
-                  onChange={(v) => updatePillar(i, { title: v })}
-                  placeholder={i === 0 ? "The Space" : i === 1 ? "The Connection" : "The Protection"}
-                />
-              </FieldGroup>
-              <FieldGroup label={`Pillar ${i + 1} — Body (≤20 words)`}>
-                <TextArea
-                  value={pillarSlots[i].body}
-                  onChange={(v) => updatePillar(i, { body: v })}
-                  placeholder="One sentence describing this dimension."
-                  rows={2}
-                />
-              </FieldGroup>
-            </div>
-          ))}
-
-          {PF_GROUP_DIVIDER}
-        </>
-      )}
-
       <FieldGroup label="Font">
         <PFontSelect
           value={content.headlineFont ?? SLIDE_FONTS.defaults.headline}
@@ -1592,6 +1545,255 @@ function ObjectiveInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {/* LEGACY: Pillars vs Statement toggle. Once statement layouts are removed, this whole section + setMode + mode resolution can be deleted (always pillars). */}
+      {/* ── LAYOUT MODE (Pillars vs Statement) ─────────────────────────── */}
+      <SectionLabel>Layout</SectionLabel>
+      <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}`, borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
+        {(["pillars", "statement"] as const).map((m) => {
+          const active = mode === m;
+          return (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              style={{
+                flex: 1,
+                fontSize: 12,
+                fontWeight: active ? 600 : 400,
+                padding: "6px 10px",
+                minHeight: 32,
+                cursor: "pointer",
+                background: active ? branding.accentColor : "#FFFFFF",
+                color: active ? "#FFFFFF" : "#374151",
+                borderTop: "none",
+                borderRight: "none",
+                borderBottom: "none",
+                borderLeft: m === "statement" ? `1px solid ${branding.accentColor}` : "none",
+              }}
+            >
+              {m === "pillars" ? "Pillars" : "Statement"}
+            </button>
+          );
+        })}
+      </div>
+
+      {mode === "pillars" && (
+        <>
+          {/* ── OBJECTIVE OPENER ──────────────────────────────────────────── */}
+          <SectionLabel>Objective</SectionLabel>
+          <FieldGroup label="Text (short, ≤50 words)">
+            <TextArea
+              value={content.objective ?? ""}
+              onChange={(v) => updateContent({ objective: v })}
+              placeholder="2-3 sentence opener — frames the project as a single vision."
+              rows={3}
+            />
+          </FieldGroup>
+          <FieldGroup label="Font">
+            <PFontSelect
+              value={content.objectiveFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline}
+              onChange={(v) => updateContent({ objectiveFont: v })}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Size — ${(content.objectiveSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor}
+              value={content.objectiveSize ?? 1.0}
+              onChange={(v) => updateContent({ objectiveSize: v })}
+            />
+          </FieldGroup>
+          <PStyleButtons
+            bold={content.objectiveBold} italic={content.objectiveItalic} underline={content.objectiveUnderline}
+            onBold={(v) => updateContent({ objectiveBold: v })}
+            onItalic={(v) => updateContent({ objectiveItalic: v })}
+            onUnderline={(v) => updateContent({ objectiveUnderline: v })}
+          />
+          <div style={{ marginTop: 8 }}>
+            <FieldGroup label="Color">
+              <BrandingColorRow branding={branding}
+                value={content.objectiveColor}
+                defaultVal="#1A2332"
+                onChange={(v) => updateContent({ objectiveColor: v })}
+                onReset={() => updateContent({ objectiveColor: null })}
+              />
+            </FieldGroup>
+          </div>
+          <FieldGroup label="Outline">
+            <POutlineRow accentColor={branding.accentColor}
+              value={content.objectiveOutline}
+              onChangeFn={(v) => updateContent({ objectiveOutline: v })}
+            />
+          </FieldGroup>
+
+          {PF_GROUP_DIVIDER}
+
+          {/* ── PROJECT HIGHLIGHT BULLETS ─────────────────────────────────── */}
+          <SectionLabel>Project Highlights</SectionLabel>
+          <p style={{ fontSize: 10, color: "#9CA3AF", marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>
+            Up to 6 bullets. Render between the objective and the 3 pillars. Auto-populated from the Overview tab on Generate Overview; edit here to override.
+          </p>
+          {([0, 1, 2, 3, 4, 5] as const).map((i) => (
+            <FieldGroup key={i} label={`Bullet ${i + 1}`}>
+              <TextInput
+                value={pillarBulletSlots[i]}
+                onChange={(v) => updatePillarBullet(i, v)}
+                placeholder={
+                  i === 0 ? "Open kitchen reoriented to the water view"
+                    : i === 1 ? "Primary suite expansion with spa-grade bath"
+                    : i === 2 ? "Whole-home envelope rebuild for coastal durability"
+                    : i === 3 ? "Mechanical and electrical systems modernized throughout"
+                    : i === 4 ? "(optional)"
+                    : "(optional)"
+                }
+              />
+            </FieldGroup>
+          ))}
+          <FieldGroup label="Font">
+            <PFontSelect
+              value={content.bulletsFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body}
+              onChange={(v) => updateContent({ bulletsFont: v })}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Size — ${(content.bulletsSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor}
+              value={content.bulletsSize ?? 1.0}
+              onChange={(v) => updateContent({ bulletsSize: v })}
+            />
+          </FieldGroup>
+          <PStyleButtons
+            bold={content.bulletsBold} italic={content.bulletsItalic} underline={content.bulletsUnderline}
+            onBold={(v) => updateContent({ bulletsBold: v })}
+            onItalic={(v) => updateContent({ bulletsItalic: v })}
+            onUnderline={(v) => updateContent({ bulletsUnderline: v })}
+          />
+          <div style={{ marginTop: 8 }}>
+            <FieldGroup label="Bullet Text Color">
+              <BrandingColorRow branding={branding}
+                value={content.bulletColor}
+                defaultVal="#374151"
+                onChange={(v) => updateContent({ bulletColor: v })}
+                onReset={() => updateContent({ bulletColor: null })}
+              />
+            </FieldGroup>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <FieldGroup label="Bullet Icon Color">
+              <BrandingColorRow branding={branding}
+                value={content.bulletIconColor}
+                defaultVal={branding.accentColor}
+                onChange={(v) => updateContent({ bulletIconColor: v })}
+                onReset={() => updateContent({ bulletIconColor: null })}
+              />
+            </FieldGroup>
+          </div>
+          <FieldGroup label="Outline">
+            <POutlineRow accentColor={branding.accentColor}
+              value={content.bulletsOutline}
+              onChangeFn={(v) => updateContent({ bulletsOutline: v })}
+            />
+          </FieldGroup>
+
+          {PF_GROUP_DIVIDER}
+
+          {/* ── PILLARS (3-column footer band) ─────────────────────────────── */}
+          <SectionLabel>Pillars</SectionLabel>
+          {([0, 1, 2] as const).map((i) => (
+            <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
+              <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>
+                <TextInput
+                  value={pillarSlots[i].title}
+                  onChange={(v) => updatePillar(i, { title: v })}
+                  placeholder={i === 0 ? "The Space" : i === 1 ? "The Connection" : "The Protection"}
+                />
+              </FieldGroup>
+              <FieldGroup label={`Pillar ${i + 1} — Body (≤20 words)`}>
+                <TextArea
+                  value={pillarSlots[i].body}
+                  onChange={(v) => updatePillar(i, { body: v })}
+                  placeholder="One sentence describing this dimension."
+                  rows={2}
+                />
+              </FieldGroup>
+            </div>
+          ))}
+
+          {/* Pillar title typography (applies to all 3 pillar titles) */}
+          <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginTop: 12, marginBottom: 6 }}>Title typography (all 3 pillars)</p>
+          <FieldGroup label="Font">
+            <PFontSelect
+              value={content.pillarTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline}
+              onChange={(v) => updateContent({ pillarTitleFont: v })}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Size — ${(content.pillarTitleSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor}
+              value={content.pillarTitleSize ?? 1.0}
+              onChange={(v) => updateContent({ pillarTitleSize: v })}
+            />
+          </FieldGroup>
+          <PStyleButtons
+            bold={content.pillarTitleBold} italic={content.pillarTitleItalic} underline={content.pillarTitleUnderline}
+            onBold={(v) => updateContent({ pillarTitleBold: v })}
+            onItalic={(v) => updateContent({ pillarTitleItalic: v })}
+            onUnderline={(v) => updateContent({ pillarTitleUnderline: v })}
+          />
+          <div style={{ marginTop: 8 }}>
+            <FieldGroup label="Color">
+              <BrandingColorRow branding={branding}
+                value={content.pillarTitleColor}
+                defaultVal="#1B2A4A"
+                onChange={(v) => updateContent({ pillarTitleColor: v })}
+                onReset={() => updateContent({ pillarTitleColor: null })}
+              />
+            </FieldGroup>
+          </div>
+          <FieldGroup label="Outline">
+            <POutlineRow accentColor={branding.accentColor}
+              value={content.pillarTitleOutline}
+              onChangeFn={(v) => updateContent({ pillarTitleOutline: v })}
+            />
+          </FieldGroup>
+
+          {/* Pillar body typography (applies to all 3 pillar bodies) */}
+          <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginTop: 14, marginBottom: 6 }}>Body typography (all 3 pillars)</p>
+          <FieldGroup label="Font">
+            <PFontSelect
+              value={content.pillarBodyFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body}
+              onChange={(v) => updateContent({ pillarBodyFont: v })}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Size — ${(content.pillarBodySize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor}
+              value={content.pillarBodySize ?? 1.0}
+              onChange={(v) => updateContent({ pillarBodySize: v })}
+            />
+          </FieldGroup>
+          <PStyleButtons
+            bold={content.pillarBodyBold} italic={content.pillarBodyItalic} underline={content.pillarBodyUnderline}
+            onBold={(v) => updateContent({ pillarBodyBold: v })}
+            onItalic={(v) => updateContent({ pillarBodyItalic: v })}
+            onUnderline={(v) => updateContent({ pillarBodyUnderline: v })}
+          />
+          <div style={{ marginTop: 8 }}>
+            <FieldGroup label="Color">
+              <BrandingColorRow branding={branding}
+                value={content.pillarBodyColor}
+                defaultVal="#374151"
+                onChange={(v) => updateContent({ pillarBodyColor: v })}
+                onReset={() => updateContent({ pillarBodyColor: null })}
+              />
+            </FieldGroup>
+          </div>
+          <FieldGroup label="Outline">
+            <POutlineRow accentColor={branding.accentColor}
+              value={content.pillarBodyOutline}
+              onChangeFn={(v) => updateContent({ pillarBodyOutline: v })}
+            />
+          </FieldGroup>
+
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
+
+      {/* LEGACY: entire statement-mode block (Statement, Supporting Text, proof-bullets) is for the pre-pillar layouts. Remove with the Pillars/Statement toggle and Light/DarkStatementLayout in cleanup pass. */}
       {mode === "statement" && (
         <>
       {/* ── STATEMENT ────────────────────────────────────────────────────── */}
@@ -1833,9 +2035,6 @@ function ObjectiveInspector({
           </FieldGroup>
         </>
       )}
-      <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      <SharedTypographySection content={content} updateContent={updateContent} branding={branding} />
-      <SharedTextLayoutSection content={content} updateContent={updateContent} />
       {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>

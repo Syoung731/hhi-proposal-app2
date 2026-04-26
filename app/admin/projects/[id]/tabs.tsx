@@ -104,7 +104,6 @@ export function ProjectTabs({
               client2Last: project.client2Last,
               transcriptText: project.transcriptText,
               objective: project.objective,
-              supportingText: project.supportingText,
               bullets: project.bullets,
               scopeOverview: project.scopeOverview,
               coverHeroImageId: project.coverHeroImageId,

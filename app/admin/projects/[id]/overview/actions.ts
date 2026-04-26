@@ -39,7 +39,6 @@ export async function updateProjectOverviewAction(
   const client2Last = (formData.get("client2Last") as string)?.trim() ?? "";
   const transcriptText = (formData.get("transcriptText") as string)?.trim() || null;
   const objective = (formData.get("objective") as string)?.trim() || null;
-  const supportingText = (formData.get("supportingText") as string)?.trim() || null;
   const bulletsRaw = (formData.get("bullets") as string)?.trim() || "";
   const bullets = bulletsRaw ? bulletsRaw.split("\n").map((b) => b.trim()).filter(Boolean) : [];
   const scopeOverview = (formData.get("scopeOverview") as string)?.trim() || null;
@@ -90,7 +89,6 @@ export async function updateProjectOverviewAction(
       client2Last: client2Last || null,
       transcriptText,
       objective,
-      supportingText,
       bullets,
       scopeOverview,
       ...(coverHeroImageId !== undefined && { coverHeroImageId }),
@@ -98,7 +96,7 @@ export async function updateProjectOverviewAction(
   });
   // Invalidate project page (Overview tab) and preview so router.refresh() fetches updated data.
   // Also invalidate the deck route — the Objective slide reads project.objective,
-  // supportingText, bullets, and objectivePillars, all of which this action updates.
+  // bullets, and objectivePillars, all of which this action updates.
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
   revalidatePath(`/admin/projects/${projectId}/deck`);

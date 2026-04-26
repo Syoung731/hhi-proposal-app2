@@ -26,7 +26,6 @@ type OverviewDraft = {
   client2First?: string;
   client2Last?: string;
   objective?: string;
-  supportingText?: string;
   bullets?: string[];
   scopeOverview?: string;
 };
@@ -47,7 +46,6 @@ const DIFF_FIELD_IDS = [
   "title",
   "subtitle",
   "objective",
-  "supportingText",
   "bullets",
   "scopeOverview",
   "addressLine1",
@@ -67,7 +65,6 @@ const DIFF_FIELD_LABELS: Record<DiffFieldId, string> = {
   title: "Title",
   subtitle: "Subtitle",
   objective: "Objective",
-  supportingText: "Supporting Text",
   bullets: "Bullets",
   scopeOverview: "Scope Overview",
   addressLine1: "Address line 1",
@@ -100,7 +97,6 @@ type Props = {
     client2Last: string | null;
     transcriptText: string | null;
     objective: string | null;
-    supportingText: string | null;
     bullets: string[];
     scopeOverview: string | null;
     coverHeroImageId: string | null;
@@ -213,7 +209,7 @@ export function OverviewTab({ projectId, project }: Props) {
     const overviewFieldNames = [
       "title", "subtitle", "addressLine1", "addressLine2", "city", "state", "zip",
       "client1First", "client1Last", "client2First", "client2Last", "objective",
-      "supportingText", "bullets", "scopeOverview",
+      "bullets", "scopeOverview",
     ] as const;
     if (form) {
       for (const name of overviewFieldNames) {
@@ -650,7 +646,7 @@ export function OverviewTab({ projectId, project }: Props) {
                           <span className="text-xs text-zinc-500 dark:text-zinc-500">
                             AI suggestion:
                           </span>
-                          {(field === "objective" || field === "supportingText" || field === "bullets" || field === "scopeOverview") ? (
+                          {(field === "objective" || field === "bullets" || field === "scopeOverview") ? (
                             <textarea
                               className="mt-1 w-full rounded-md border border-amber-200 bg-white px-2 py-1 text-sm text-zinc-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400 dark:border-amber-700 dark:bg-zinc-900 dark:text-zinc-100"
                               rows={field === "objective" ? 3 : field === "scopeOverview" ? 4 : 2}
@@ -957,30 +953,16 @@ export function OverviewTab({ projectId, project }: Props) {
         </div>
 
         <div>
-          <label className={labelClass}>Supporting Text</label>
-          <textarea
-            name="supportingText"
-            defaultValue={project.supportingText ?? ""}
-            rows={3}
-            className={inputClass}
-            placeholder="AI-generated supporting paragraph — regenerate to populate"
-          />
-          {!project.supportingText && (
-            <p className="mt-1 text-xs text-zinc-400">Not yet generated — click Regenerate above to populate.</p>
-          )}
-        </div>
-
-        <div>
-          <label className={labelClass}>Bullets</label>
+          <label className={labelClass}>Project Highlight Bullets</label>
           <textarea
             name="bullets"
             defaultValue={(project.bullets ?? []).join("\n")}
-            rows={3}
+            rows={6}
             className={inputClass}
-            placeholder="One bullet per line (up to 3)"
+            placeholder="One highlight per line (4–6 recommended). Renders between the objective and the 3 pillars on the Project Objective slide."
           />
           {(!project.bullets || project.bullets.length === 0) && (
-            <p className="mt-1 text-xs text-zinc-400">Not yet generated — click Regenerate above to populate.</p>
+            <p className="mt-1 text-xs text-zinc-400">Not yet generated — click Generate Overview above to populate from the room scopes.</p>
           )}
         </div>
 

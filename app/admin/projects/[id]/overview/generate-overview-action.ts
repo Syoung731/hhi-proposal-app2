@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/app/lib/prisma";
 import { extractFromTranscript, type TranscriptExtraction } from "@/app/lib/ai/extract-from-transcript";
-import { generateLuxuryObjectiveParagraph, generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
+import { generateLuxuryObjectiveParagraph, generateScopeOverviewNarrative, generateProjectHighlightBullets } from "@/app/lib/ai/objective-content";
 
 function classifyRoomCategory(name: string): "kitchen" | "bath" | "laundry" | "bedroom" | "living" | "dining" | "office" | "other" {
   const n = name.toLowerCase();
@@ -132,8 +132,9 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
     orderBy: { sortOrder: "asc" },
   });
 
-  // Run transcript extraction, luxury objective, and scope overview generation in parallel
-  const [result, luxuryResult, scopeOverviewResult] = await Promise.all([
+  // Run transcript extraction, luxury objective, scope overview, and
+  // highlight-bullet generation in parallel.
+  const [result, luxuryResult, scopeOverviewResult, highlightBullets] = await Promise.all([
     extractFromTranscript(project.transcriptText),
     generateLuxuryObjectiveParagraph({
       transcriptText: project.transcriptText,
@@ -149,6 +150,15 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
           clientName: clientName || "the homeowner",
         }).catch(() => null)
       : Promise.resolve(null),
+    rooms.length > 0
+      ? generateProjectHighlightBullets({
+          transcriptText: project.transcriptText,
+          rooms,
+          companyName,
+          projectAddress: projectAddress || null,
+          clientName: clientName || null,
+        }).catch(() => [] as string[])
+      : Promise.resolve([] as string[]),
   ]);
 
   const overview = result.overview ?? {};
@@ -169,8 +179,6 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
   // Objective slide can render the new 3-pillar layout on every load.
   if (luxuryResult) {
     overview.objective = luxuryResult.objective;
-    (overview as Record<string, unknown>).supportingText = luxuryResult.supportingText;
-    (overview as Record<string, unknown>).bullets = luxuryResult.bullets;
     try {
       await prisma.project.update({
         where: { id: projectId },
@@ -186,6 +194,13 @@ export async function generateOverviewFromTranscriptAction(projectId: string) {
     } catch (err) {
       console.warn("[generateOverviewFromTranscript] failed to persist objectivePillars:", err);
     }
+  }
+
+  // Highlight bullets fill the middle of the Objective slide. Sourced from
+  // room scopes, not the transcript, so they reflect the actual project
+  // scope. Stored on Project.bullets via the Overview-tab apply flow.
+  if (highlightBullets.length > 0) {
+    (overview as Record<string, unknown>).bullets = highlightBullets;
   }
 
   // Regression: title (address — projectType) must not equal subtitle (summary sentence)

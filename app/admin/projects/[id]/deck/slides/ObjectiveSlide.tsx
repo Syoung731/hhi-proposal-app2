@@ -226,6 +226,7 @@ function positionedBlock(
   );
 }
 
+// LEGACY: pre-pillar Objective layout. Only routed to when no valid pillars exist; superseded by PillarLayout. Remove with the Statement mode toggle in cleanup pass.
 // ─── 1. Light Statement (renamed from Statement Left) ────────────────────────
 function LightStatementLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
@@ -291,6 +292,7 @@ function LightStatementLayout({ slide, branding, hasAiBackground }: Props) {
   );
 }
 
+// LEGACY: pre-pillar Objective layout. Only routed to when slide.layoutKey === "dark-statement"; superseded by PillarLayout. Remove with the Statement mode toggle in cleanup pass.
 // ─── 2. Dark Statement ───────────────────────────────────────────────────────
 function DarkStatementLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
@@ -412,12 +414,41 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   // benefit from the pillar layout once pillars are set).
   const objective = (content.objective ?? content.statementText ?? "").trim();
   const pillars = (content.pillars ?? []).slice(0, 3);
+  // Highlight bullets fill the middle of the slide between the opener and
+  // the 3 pillars. Sourced from Project.bullets via the deck hydration in
+  // app/admin/projects/[id]/deck/page.tsx.
+  const bullets = (content.bullets ?? []).filter(Boolean).slice(0, 6);
 
   const headlineColor = content.headlineColor ?? "#1B2A4A";
   const headlineShadow = makeOutlineShadow(content.headlineOutline);
-  const objectiveColor = content.statementColor ?? "#1A2332";
-  const pillarTitleColor = content.headlineColor ?? "#1B2A4A";
-  const pillarBodyColor = content.supportingColor ?? "#374151";
+
+  // Objective opener typography
+  const objectiveFont = content.objectiveFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const objectiveColor = content.objectiveColor ?? content.statementColor ?? "#1A2332";
+  const objectiveEm = (content.objectiveSize ?? 1.0) * 1.1;
+
+  // Pillar title + body typography
+  const pillarTitleFont = content.pillarTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const pillarTitleColor = content.pillarTitleColor ?? content.headlineColor ?? "#1B2A4A";
+  const pillarTitleEm = (content.pillarTitleSize ?? 1.0) * 1.15;
+  const pillarBodyFont = content.pillarBodyFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const pillarBodyColor = content.pillarBodyColor ?? content.supportingColor ?? "#374151";
+  const pillarBodyEm = (content.pillarBodySize ?? 1.0) * 0.78;
+
+  // Bullets typography (already wired in earlier task)
+  const bulletBodyFont = content.bulletsFont ?? content.supportingTextFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const bulletTextColor = content.bulletColor ?? pillarBodyColor;
+  const bulletIconClr = content.bulletIconColor ?? accent;
+  const bulletsEm = (content.bulletsSize ?? 1.0) * 0.95;
+
+  // Text Position + Card controls from the inspector. Defaults match the
+  // legacy hardcoded box so existing slides render identically until the
+  // user actually drags a slider.
+  const textX = content.textX ?? 0.06;
+  const textY = content.textY ?? 0.08;
+  const textWidth = content.textWidth ?? 88;
+  const showCard = content.showCard ?? false;
+  const cardBg = hexToRgba(content.cardColor ?? "#000000", content.cardOpacity ?? 60);
 
   return (
     <div
@@ -429,13 +460,21 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
       <div
         style={{
           position: "absolute",
-          left: "6%",
-          top: "8%",
-          right: "6%",
+          left: `${textX * 100}%`,
+          top: `${textY * 100}%`,
+          width: `${textWidth}%`,
           bottom: "8%",
+          zIndex: 2,
+        }}
+      ><div
+        style={{
+          width: "100%",
+          height: "100%",
           display: "flex",
           flexDirection: "column",
-          zIndex: 2,
+          background: showCard ? cardBg : "transparent",
+          borderRadius: showCard ? 10 : 0,
+          padding: showCard ? "4% 5%" : 0,
         }}
       >
         {/* Headline */}
@@ -460,18 +499,63 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
         {/* Short objective paragraph */}
         {objective && (
           <p
-            className="font-serif"
             style={{
-              fontSize: "1.1em",
+              fontSize: `${objectiveEm}em`,
               color: objectiveColor,
               lineHeight: 1.55,
-              marginBottom: "5%",
+              marginBottom: bullets.length > 0 ? "3%" : "5%",
               maxWidth: "82%",
-              fontWeight: 400,
+              fontFamily: objectiveFont,
+              textShadow: makeOutlineShadow(content.objectiveOutline),
+              ...biuStyle(content.objectiveBold, content.objectiveItalic, content.objectiveUnderline),
             }}
           >
             {objective}
           </p>
+        )}
+
+        {/* Project highlight bullets — fill the middle of the slide. */}
+        {bullets.length > 0 && (
+          <ul
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              marginBottom: "4%",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.55em",
+              maxWidth: "88%",
+            }}
+          >
+            {bullets.map((b, i) => (
+              <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: "0.7em" }}>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    width: "0.45em",
+                    height: "0.45em",
+                    background: bulletIconClr,
+                    borderRadius: "50%",
+                    marginTop: "0.55em",
+                    display: "block",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: `${bulletsEm}em`,
+                    color: bulletTextColor,
+                    lineHeight: 1.55,
+                    fontFamily: bulletBodyFont,
+                    textShadow: makeOutlineShadow(content.bulletsOutline),
+                    ...biuStyle(content.bulletsBold, content.bulletsItalic, content.bulletsUnderline),
+                  }}
+                >
+                  {b}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
 
         {/* 3-column pillar grid */}
@@ -493,24 +577,28 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
                 }}
               />
               <h3
-                className="font-serif"
                 style={{
-                  fontSize: "1.15em",
-                  fontWeight: 700,
+                  fontSize: `${pillarTitleEm}em`,
                   color: pillarTitleColor,
                   lineHeight: 1.2,
                   marginBottom: "0.5em",
-                  fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+                  fontFamily: pillarTitleFont,
+                  fontWeight: (content.pillarTitleBold ?? true) ? 700 : 400,
+                  fontStyle: content.pillarTitleItalic ? "italic" : undefined,
+                  textDecoration: content.pillarTitleUnderline ? "underline" : undefined,
+                  textShadow: makeOutlineShadow(content.pillarTitleOutline),
                 }}
               >
                 {pillar.title}
               </h3>
               <p
                 style={{
-                  fontSize: "0.78em",
+                  fontSize: `${pillarBodyEm}em`,
                   color: pillarBodyColor,
                   lineHeight: 1.55,
-                  fontFamily: content.supportingTextFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body,
+                  fontFamily: pillarBodyFont,
+                  textShadow: makeOutlineShadow(content.pillarBodyOutline),
+                  ...biuStyle(content.pillarBodyBold, content.pillarBodyItalic, content.pillarBodyUnderline),
                 }}
               >
                 {pillar.body}
@@ -518,6 +606,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
             </div>
           ))}
         </div>
+      </div>
       </div>
 
       <LogoOverlay
@@ -555,8 +644,7 @@ export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {
     return <PillarLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 
-  // Statement mode. Legacy dark-statement layoutKey still routes to the dark
-  // variant so slides that previously opted in keep their appearance.
+  // LEGACY: statement-mode fallback. Once Light/DarkStatementLayout are removed in the cleanup pass, this whole branch + resolveObjectiveLayoutMode collapse to "always render PillarLayout".
   if (slide.layoutKey === "dark-statement") {
     return <DarkStatementLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
