@@ -41,6 +41,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       title: true,
       subtitle: true,
       objective: true,
+      // LEGACY: only consumed by statement-mode hydration. Remove with statement layouts.
       supportingText: true,
       bullets: true,
       client1First: true,
@@ -155,6 +156,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
         sortOrder: true,
         selectedRenderMediaId: true,
         scopeNarrative: true,
+        scopeOverviewShort: true,
         isProjectOverhead: true,
         media: {
           where: {
@@ -184,6 +186,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       sortOrder: room.sortOrder,
       selectedRenderMediaId: room.selectedRenderMediaId,
       scopeNarrative: room.scopeNarrative ?? undefined,
+      scopeOverviewShort: room.scopeOverviewShort,
       isProjectOverhead: room.isProjectOverhead,
       beforeMedia: room.media
         .filter((m) => m.type === "EXISTING")
@@ -383,6 +386,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
       objectiveConfig?.objectiveText?.trim() ||
       project.objective?.trim() ||
       null;
+    // LEGACY: project.supportingText is unused by PillarLayout. Drop this read + the slide.content.supportingText assignment below when statement layouts go.
     const supportingText = project.supportingText?.trim() || null;
     const bullets = (project.bullets ?? []).filter(Boolean);
     const title = objectiveConfig?.title?.trim() || null;

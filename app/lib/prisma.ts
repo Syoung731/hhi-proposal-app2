@@ -58,7 +58,7 @@ function hasAllExpectedFields(
  * treat it as a protocol, not a suggestion.
  */
 const REQUIRED_RECENT_FIELDS: Record<string, string[]> = {
-  Room: ["displayGroupId", "displayGroupOrder"], // Phase 8A.1
+  Room: ["displayGroupId", "displayGroupOrder", "scopeOverviewShort"], // Phase 8A.1; scopeOverviewShort added for paginated Scope Breakdown
   Project: ["displayGroupOrder"], // Phase 8A.1
   Media: ["thumbnailUrl"], // Phase 9
   CompanySettings: ["designHourlyRate", "brandTagline", "closingHeadline"], // Phase 8C T1, Phase 11 Pass 2A T9

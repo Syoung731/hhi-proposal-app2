@@ -56,6 +56,7 @@ export type WhyUsLayoutKey =
   | "testimonials-split";
 export type ScopeOverviewLayoutKey = "split-panel" | "image-row";
 export type BeforeAfterLayoutKey = "side-by-side" | "after-emphasis";
+// LEGACY: "three-pillars" caps at 3 rooms and offers no value with the new pagination model. Remove from the union and from ScopeBreakdownSlide.tsx in cleanup pass.
 export type ScopeBreakdownLayoutKey = "text-grid" | "dark-table" | "icon-columns" | "cards-split" | "photo-grid" | "three-pillars";
 export type RiskBriefLayoutKey = "two-column" | "comparison-table";
 export type ProcessLayoutKey = "three-stages";
@@ -275,20 +276,17 @@ export interface ObjectivePillar {
 }
 
 export interface ObjectiveContent extends SharedSlideFields {
+  // LEGACY: statementText is the pre-pillar opener prose. Replaced by `objective` in PillarLayout. Remove with statement-mode cleanup.
   statementText?: string | null;
+  // LEGACY: supportingText was a second prose block under statementText. Never rendered in PillarLayout. Remove with statement-mode cleanup.
   supportingText?: string | null;
   bullets?: string[];
 
-  // ── New structured fields (Phase 8A) ──────────────────────────────────────
-  /** Short opener (≤50 words, 2-3 sentences). New layout uses this over statementText. */
+  /** Short opener (≤50 words, 2-3 sentences). Used by PillarLayout. */
   objective?: string | null;
   /** Exactly 3 pillars for the 3-column pillars layout. */
   pillars?: ObjectivePillar[];
-  /**
-   * Explicit layout mode. "pillars" → PillarLayout, "statement" → Statement
-   * layout. When absent, migration defaults to "pillars" if 3 valid pillars
-   * exist, otherwise "statement".
-   */
+  // LEGACY: layout mode toggle. Once statement layouts are removed, this field collapses to always-pillars.
   layout?: "pillars" | "statement" | null;
 
   // ── Per-field text styling ────────────────────────────────────────────────
@@ -300,12 +298,13 @@ export interface ObjectiveContent extends SharedSlideFields {
   headlineItalic?: boolean | null;
   headlineUnderline?: boolean | null;
 
+  // LEGACY: statement* and supporting* style fields are only used by Light/DarkStatementLayout. Remove with statement-mode cleanup.
   // Statement
   statementFont?: string | null;
   statementSize?: number | null;
   statementColor?: string | null;
   statementOutline?: string | null;
-  statementBold?: boolean | null;      // default: true
+  statementBold?: boolean | null;
   statementItalic?: boolean | null;
   statementUnderline?: boolean | null;
 
@@ -327,6 +326,33 @@ export interface ObjectiveContent extends SharedSlideFields {
   bulletsUnderline?: boolean | null;
   bulletsOutline?: string | null;
   bulletIconColor?: string | null;
+
+  // Objective opener (PillarLayout — the short paragraph between headline and bullets)
+  objectiveFont?: string | null;
+  objectiveSize?: number | null;
+  objectiveColor?: string | null;
+  objectiveBold?: boolean | null;
+  objectiveItalic?: boolean | null;
+  objectiveUnderline?: boolean | null;
+  objectiveOutline?: string | null;
+
+  // Pillar title (3-column grid headers)
+  pillarTitleFont?: string | null;
+  pillarTitleSize?: number | null;
+  pillarTitleColor?: string | null;
+  pillarTitleBold?: boolean | null;
+  pillarTitleItalic?: boolean | null;
+  pillarTitleUnderline?: boolean | null;
+  pillarTitleOutline?: string | null;
+
+  // Pillar body (3-column grid descriptions)
+  pillarBodyFont?: string | null;
+  pillarBodySize?: number | null;
+  pillarBodyColor?: string | null;
+  pillarBodyBold?: boolean | null;
+  pillarBodyItalic?: boolean | null;
+  pillarBodyUnderline?: boolean | null;
+  pillarBodyOutline?: string | null;
 
   // ── Text block position & size (0–1 normalised) ─────────────────────────
   textX?: number | null;
@@ -628,6 +654,8 @@ export interface RoomWithMedia {
   selectedRenderMediaId: string | null;
   /** Room.scopeNarrative — used to auto-populate caption text on generated slides. */
   scopeNarrative?: string;
+  /** Short ~50-word summary used by the Scope Breakdown slides. Auto-generated. */
+  scopeOverviewShort?: string | null;
   /** True when the room represents project-level overhead (COPE). */
   isProjectOverhead?: boolean;
   /** Uploaded/existing photos for this room (type=EXISTING, excludes HERO). */
@@ -1985,6 +2013,7 @@ export const SCOPE_BREAKDOWN_LAYOUTS: { key: ScopeBreakdownLayoutKey; label: str
   { key: "icon-columns", label: "Icon Columns" },
   { key: "cards-split", label: "Cards Split" },
   { key: "photo-grid", label: "Photo Grid" },
+  // LEGACY: Three Pillars caps at 3 rooms — incompatible with 8-rooms-per-slide pagination. User confirmed no value. Remove this entry in cleanup pass.
   { key: "three-pillars", label: "Three Pillars" },
 ];
 

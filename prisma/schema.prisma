@@ -44,6 +44,7 @@ model Project {
   subtitle                 String?
   coverHeroImageId         String?
   objective                String?
+  // LEGACY: dead column — replaced by objectivePillars + bullets in the pillar layout. Drop in cleanup pass.
   supportingText           String?
   bullets                  String[]                  @default([])
   scopeOverview            String?
@@ -92,10 +93,8 @@ model Project {
   // Scope flag: when true, the default deck includes an Addition Overview slide.
   hasAddition Boolean @default(false)
 
-  // Structured objective pillars for the new Objective slide layout.
+  // Structured objective pillars for the Objective slide pillar layout.
   // Shape: Array<{ title: string; body: string }> (exactly 3 items when set).
-  // Null when the project has never run the new Generate Overview flow — the
-  // deck falls back to the legacy objective/supportingText/bullets prose.
   objectivePillars Json?
 
   // Phase 8A.1 — Investment tab display-group order.
@@ -201,6 +200,9 @@ model Room {
   widthIn                    Int?
   ceilingHeightIn            Int?
   scopeNarrative             String           @default("")
+  // Short ~50-word per-room summary used by the Scope Breakdown deck slides.
+  // Auto-generated from `scopeNarrative` during regenerateDefaultDeck.
+  scopeOverviewShort         String?
   sortOrder                  Int              @default(0)
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
@@ -992,7 +994,11 @@ model DeckSlide {
   deckId         String
   type           String
   layoutKey      String
-  order          Int              @default(0)
+  // Float (not Int) so the auto-sync code can use fractional offsets like
+  // anchor + 0.2 + i*0.001 to slot Before/After + Scope Breakdown slides
+  // immediately after their anchor without colliding. The codebase has
+  // always intended fractional ordering — see findAnchorOrder() doc.
+  order          Float            @default(0)
   isEnabled      Boolean          @default(true)
   isUserHidden   Boolean          @default(false)
   isUserModified Boolean          @default(false)

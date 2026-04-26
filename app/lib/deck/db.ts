@@ -57,6 +57,7 @@ import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
 // disk as a preserved utility (decision #3). Re-import here if the feature
 // ever comes back.
 import { generateBeforeAfterBullets, hashRenderChecklist } from "@/app/lib/ai/before-after-bullets";
+import { generateRoomScopeOverviewShort } from "@/app/lib/ai/objective-content";
 
 /**
  * Phase 8C: merge freshly-generated auto-bullets with the existing slide's
@@ -680,10 +681,36 @@ async function syncBeforeAfterSlides(
   }
 }
 
-// ─── Auto-sync: Scope Breakdown slide ────────────────────────────────────────
+// ─── Auto-sync: Scope Breakdown slides ───────────────────────────────────────
 //
 // Write scope: DeckSlide type "scope-breakdown" only. Registered in
 // SYNC_WRITE_SCOPES below.
+//
+// Pagination: rooms beyond ROOMS_PER_SCOPE_BREAKDOWN_SLIDE spill onto
+// continuation slides ("Additional Areas Included (continued)"). Ordering
+// places these slides AFTER Before/After (which uses anchor + 0.2 + i*0.001)
+// by anchoring at + 0.3 + i*0.001. Description per room is sourced from
+// `Room.scopeOverviewShort` (a 40-60 word summary populated by
+// `ensureRoomScopeOverviewShorts` upstream); falls back to the full
+// scopeNarrative for any room missing a summary.
+
+const ROOMS_PER_SCOPE_BREAKDOWN_SLIDE = 8;
+
+const SCOPE_BREAKDOWN_INTRO =
+  "These spaces are included in the project and will be completed to the same level of quality and detail.";
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function scopeRoomDescription(room: RoomWithMedia): string {
+  const short = (room.scopeOverviewShort ?? "").trim();
+  if (short) return short;
+  return stripScopeClarifications(room.scopeNarrative ?? "");
+}
 
 async function syncScopeBreakdownSlide(
   deckId: string,
@@ -693,103 +720,109 @@ async function syncScopeBreakdownSlide(
   // Rooms without a selected render need written scope coverage.
   // Exclude project-overhead (COPE) rooms — they have their own dedicated slide.
   const unrendered = rooms.filter((r) => !r.selectedRenderMediaId && !r.isProjectOverhead);
-  if (unrendered.length === 0) return;
 
-  // Find the auto scope-breakdown slide (at most one per deck).
-  const existingRow = existing.find(
-    (r) => r.type === "scope-breakdown" && r.source === "auto"
-  );
+  // All existing auto scope-breakdown rows, sorted by current order so we
+  // align them with target pages by index.
+  const existingAutoRows = existing
+    .filter((r) => r.type === "scope-breakdown" && r.source === "auto")
+    .sort((a, b) => a.order - b.order);
 
-  if (existingRow) {
-    if (existingRow.isUserModified || existingRow.isUserHidden) return;
+  if (unrendered.length === 0) {
+    // No rooms to render — delete any existing auto rows that aren't owned
+    // by the user (user-modified or hidden are left alone).
+    for (const row of existingAutoRows) {
+      if (row.isUserModified || row.isUserHidden) continue;
+      await prisma.deckSlide.delete({ where: { id: row.id } });
+    }
+    return;
+  }
 
-    // Merge rooms: preserve existing description + isIncluded; add new rooms.
-    // Phase 8C.1: T6 categorization reverted — no auto-classification on sync.
-    // The `category` / `manuallyClassified` fields remain as optional on the
-    // ScopeBreakdownRoom type (Option A) but are no longer written here. Legacy
-    // rows in the DB that still carry those fields are harmless; nothing reads
-    // them after the render revert.
-    const existingContent = (existingRow.content ?? {}) as ScopeBreakdownContent;
+  const pages = chunk(unrendered, ROOMS_PER_SCOPE_BREAKDOWN_SLIDE);
+
+  // Anchor pages AFTER Before/After slides. Before/After uses
+  // anchor + 0.2 + i*0.001 (caps around +0.215 for ~15 rendered rooms),
+  // so 0.3 leaves a clean gap.
+  const anchor = findAnchorOrder(existing, SCOPE_ANCHOR_TYPES);
+  const baseOrder = anchor != null ? anchor + 0.3 : 410;
+
+  for (let i = 0; i < pages.length; i++) {
+    const pageRooms = pages[i];
+    const existingRow = existingAutoRows[i];
+    const desiredOrder = baseOrder + i * 0.001;
+    const isContinuation = i > 0;
+    const headline = isContinuation
+      ? "Additional Areas Included (continued)"
+      : "Additional Areas Included";
+
+    // Build the per-room content array. Preserve user-edited description +
+    // isIncluded from the existing row when the room id matches; otherwise
+    // pull from Room.scopeOverviewShort (preferred) or scopeNarrative.
+    const existingContent = (existingRow?.content ?? {}) as ScopeBreakdownContent;
     const existingRoomMap = new Map<string, ScopeBreakdownRoom>(
       (existingContent.rooms ?? []).map((r) => [r.id, r])
     );
 
-    const mergedRooms: ScopeBreakdownRoom[] = unrendered.map((room) => {
+    const scopeRooms: ScopeBreakdownRoom[] = pageRooms.map((room) => {
       const prev = existingRoomMap.get(room.id);
-      if (prev) {
-        return {
-          id: room.id,
-          name: room.name, // name may have changed
-          description: prev.description,
-          isIncluded: prev.isIncluded,
-        };
-      }
+      const description = prev?.description ?? scopeRoomDescription(room);
       return {
         id: room.id,
         name: room.name,
-        description: stripScopeClarifications(room.scopeNarrative ?? ""),
-        isIncluded: true,
+        description,
+        isIncluded: prev?.isIncluded ?? true,
       };
     });
 
-    const updatedContent: ScopeBreakdownContent = {
-      ...existingContent,
-      rooms: mergedRooms,
-    };
-
-    // Re-anchor stale orders on existing rows. Same heuristic as
-    // syncBeforeAfterSlides: anything more than 50 above the anchor is
-    // assumed to be a legacy hardcoded fallback (was 400) rather than a
-    // user-positioned slide.
-    const reAnchor = findAnchorOrder(existing, SCOPE_ANCHOR_TYPES);
-    const shouldReAnchor = reAnchor != null && existingRow.order > reAnchor + 50;
-
-    await prisma.deckSlide.update({
-      where: { id: existingRow.id },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: {
-        content: updatedContent as any,
-        ...(shouldReAnchor ? { order: reAnchor + 0.1 } : {}),
-      },
-    });
-  } else {
-    const scopeRooms: ScopeBreakdownRoom[] = unrendered.map((room) => ({
-      id: room.id,
-      name: room.name,
-      description: stripScopeClarifications(room.scopeNarrative ?? ""),
-      isIncluded: true,
-    }));
-
     const content: ScopeBreakdownContent = {
-      title: null,
-      introText:
-        "These spaces are included in the project and will be completed to the same level of quality and detail.",
+      ...existingContent,
+      title: existingContent.title ?? null,
+      introText: existingContent.introText ?? SCOPE_BREAKDOWN_INTRO,
       rooms: scopeRooms,
-      photos: [],
+      photos: existingContent.photos ?? [],
     };
 
-    // Anchor Scope Breakdown directly after Scope Overview (or Objective
-    // fallback). 0.1 places it before any Before/After slides created by the
-    // sibling sync, which use 0.2+ offsets from the same anchor.
-    const anchor = findAnchorOrder(existing, SCOPE_ANCHOR_TYPES);
-    const order = anchor != null ? anchor + 0.1 : 400;
+    if (existingRow) {
+      // User-owned slide — leave it alone. This breaks the index alignment
+      // for following pages (their existingRow may now belong to a different
+      // page index), but that's fine: the algorithm just falls through to
+      // create-new for those pages.
+      if (existingRow.isUserModified || existingRow.isUserHidden) continue;
 
-    await prisma.deckSlide.create({
-      data: {
-        deckId,
-        type: "scope-breakdown",
-        layoutKey: "text-grid",
-        order,
-        isEnabled: true,
-        isUserHidden: false,
-        isUserModified: false,
-        source: "auto",
-        headline: "Additional Areas Included",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        content: content as any,
-        isLocked: false,
-      },
-    });
+      await prisma.deckSlide.update({
+        where: { id: existingRow.id },
+        data: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          content: content as any,
+          order: desiredOrder,
+          headline,
+        },
+      });
+    } else {
+      await prisma.deckSlide.create({
+        data: {
+          deckId,
+          type: "scope-breakdown",
+          layoutKey: "text-grid",
+          order: desiredOrder,
+          isEnabled: true,
+          isUserHidden: false,
+          isUserModified: false,
+          source: "auto",
+          headline,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          content: content as any,
+          isLocked: false,
+        },
+      });
+    }
+  }
+
+  // Delete excess existing auto rows beyond the page count (e.g. project
+  // shrunk and a continuation slide is no longer needed). Skip user-owned.
+  for (let i = pages.length; i < existingAutoRows.length; i++) {
+    const row = existingAutoRows[i];
+    if (row.isUserModified || row.isUserHidden) continue;
+    await prisma.deckSlide.delete({ where: { id: row.id } });
   }
 }
 
@@ -1336,6 +1369,62 @@ export async function getDeckForProject({
 }
 
 /**
+ * For every room that needs a Scope Breakdown entry but doesn't have a short
+ * summary yet, generate one in parallel via Claude and persist it on the
+ * Room row. Returns the input roomsWithMedia with `scopeOverviewShort`
+ * populated for the rooms we just generated, so the caller can pass enriched
+ * data straight into `syncScopeBreakdownSlide` without re-fetching.
+ *
+ * Skipped rooms: those with a Before/After render selected (covered by their
+ * own slide), COPE rooms, rooms with empty/very-short scopeNarrative, and
+ * rooms that already have a non-empty scopeOverviewShort cached.
+ */
+async function ensureRoomScopeOverviewShorts(
+  rooms: RoomWithMedia[],
+): Promise<RoomWithMedia[]> {
+  const settings = await prisma.companySettings.findFirst({ select: { companyName: true } });
+  const companyName = (settings?.companyName ?? "").trim() || "HHI Builders";
+
+  const needsGeneration = rooms.filter((r) =>
+    !r.selectedRenderMediaId &&
+    !r.isProjectOverhead &&
+    !((r.scopeOverviewShort ?? "").trim()) &&
+    (r.scopeNarrative ?? "").trim().length >= 20
+  );
+
+  if (needsGeneration.length === 0) return rooms;
+
+  const generated = await Promise.all(
+    needsGeneration.map(async (room) => {
+      const summary = await generateRoomScopeOverviewShort({
+        roomName: room.name,
+        scopeNarrative: room.scopeNarrative ?? "",
+        companyName,
+      });
+      return { id: room.id, summary };
+    }),
+  );
+
+  // Persist in one transaction-like batch so a failure mid-loop doesn't leave
+  // half the rooms with summaries and half without.
+  await Promise.all(
+    generated.map(({ id, summary }) =>
+      prisma.room.update({
+        where: { id },
+        data: { scopeOverviewShort: summary },
+      }),
+    ),
+  );
+
+  const summaryById = new Map(generated.map((g) => [g.id, g.summary]));
+  return rooms.map((r) =>
+    summaryById.has(r.id)
+      ? { ...r, scopeOverviewShort: summaryById.get(r.id) ?? null }
+      : r,
+  );
+}
+
+/**
  * Manually generate (or regenerate) the default deck for a project.
  *
  * Two modes:
@@ -1429,8 +1518,14 @@ export async function regenerateDefaultDeck({
     where: { deckId: deck.id },
     orderBy: { order: "asc" },
   });
-  await syncBeforeAfterSlides(deck.id, afterSeed, roomsWithMedia);
-  await syncScopeBreakdownSlide(deck.id, afterSeed, roomsWithMedia);
+
+  // Ensure scope-breakdown rooms have a short summary before the slides sync.
+  // Generates only the rooms that are missing — first-run regenerates fill in
+  // ~50-word summaries; subsequent regenerates are no-ops once cached on Room.
+  const enrichedRooms = await ensureRoomScopeOverviewShorts(roomsWithMedia);
+
+  await syncBeforeAfterSlides(deck.id, afterSeed, enrichedRooms);
+  await syncScopeBreakdownSlide(deck.id, afterSeed, enrichedRooms);
   await syncInvestmentSlide(deck.id, projectId, afterSeed);
   await syncProjectTimelineSlide(deck.id, projectId, afterSeed);
   await syncRetainerFromProject(deck.id, projectId, afterSeed);

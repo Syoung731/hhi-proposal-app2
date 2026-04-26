@@ -152,6 +152,7 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
       return <CardsSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "photo-grid":
       return <PhotoGridLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    // LEGACY: "three-pillars" caps at 3 rooms; superseded by pagination at 8 rooms/slide. Remove this case + ThreePillarsLayout in cleanup pass.
     case "three-pillars":
       return <ThreePillarsLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     default: // "text-grid"
@@ -548,6 +549,7 @@ function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
 // Inspired by Refined PDF p2 — "Elevating Functionality"
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// LEGACY: hard-capped at 3 rooms — incompatible with the 8-rooms-per-slide pagination model. User confirmed no value. Remove with the case in resolveLayout above.
 function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;

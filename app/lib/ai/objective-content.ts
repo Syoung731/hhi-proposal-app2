@@ -203,10 +203,6 @@ export type LuxuryObjectiveResult = {
   objective: string;
   /** Exactly 3 pillars. Titles 2-4 words; bodies ≤20 words each. */
   pillars: LuxuryObjectivePillar[];
-  /** Back-compat — empty string under the new prompt; legacy decks still render. */
-  supportingText: string;
-  /** Back-compat — derived from pillars as "Title — body" strings. */
-  bullets: string[];
 };
 
 const OBJECTIVE_FALLBACK: LuxuryObjectiveResult = {
@@ -216,8 +212,6 @@ const OBJECTIVE_FALLBACK: LuxuryObjectiveResult = {
     { title: "Fixed-Price Build", body: "The contract price is locked before the first swing of a hammer." },
     { title: "Seamless Execution", body: "One point of accountability from concept through final walkthrough." },
   ],
-  supportingText: "",
-  bullets: [],
 };
 
 function wordCount(s: string): number {
@@ -373,15 +367,191 @@ Return ONLY the JSON object — no markdown, no code fences, no commentary.`;
     return OBJECTIVE_FALLBACK;
   }
 
-  // Back-compat derived fields for legacy decks that still read bullets.
-  const bullets = pillars.map((p) => `${p.title} — ${p.body}`);
-
   return {
     objective,
     pillars,
-    supportingText: "",
-    bullets,
   };
+}
+
+/**
+ * Generate 4-6 short, scannable project-highlight bullets from transcript +
+ * room scope narratives. Used to fill the middle of the Objective slide
+ * between the opener paragraph and the 3 pillars. Bullets reflect the actual
+ * scope of work (kitchen, primary suite, envelope, etc.) — not generic
+ * platitudes. Returns an empty array when no room scopes are available.
+ */
+export async function generateProjectHighlightBullets(options: {
+  transcriptText: string;
+  rooms: { name: string; scopeNarrative: string; bucket: string }[];
+  companyName: string;
+  projectAddress?: string | null;
+  clientName?: string | null;
+}): Promise<string[]> {
+  const transcript = (options.transcriptText ?? "").trim();
+  // Prefer BASE rooms, fall back to ALTERNATE if no BASE rooms have scopes.
+  const baseRooms = options.rooms.filter(
+    (r) => r.bucket === "BASE" && (r.scopeNarrative ?? "").trim().length >= 20
+  );
+  const altRooms = options.rooms.filter(
+    (r) => r.bucket === "ALTERNATE" && (r.scopeNarrative ?? "").trim().length >= 20
+  );
+  const filtered = baseRooms.length > 0 ? baseRooms : altRooms;
+
+  if (filtered.length === 0) {
+    return [];
+  }
+
+  const company = options.companyName || "our company";
+  const address = (options.projectAddress ?? "").trim();
+  const client = (options.clientName ?? "").trim();
+
+  const formattedRoomScopes = filtered
+    .map((r) => `${r.name}: ${r.scopeNarrative.trim()}`)
+    .join("\n");
+
+  const systemContent = `You are a senior proposal writer for ${company}, a luxury design-build remodeling company on Hilton Head Island, SC. You write client-facing proposal content that is confident, specific, and professionally elevated.
+
+Your task is to produce 4-6 project-highlight bullets for the Project Objective slide, based on the room scope narratives. These bullets sit between a short objective opener and 3 supporting pillars — they should communicate WHAT is being transformed across the home in scannable phrases.
+
+OUTPUT (STRICT):
+Return a JSON object with exactly this shape:
+
+{
+  "bullets": ["string", "string", ...]
+}
+
+- Return between 4 and 6 bullets. Not 3, not 7.
+- No markdown, no commentary, no prose around the JSON.
+
+EACH BULLET MUST:
+- Be a single noun phrase or short statement, 6-12 words.
+- Name a specific room, system, or project element from the room scopes.
+- Describe outcome ("Reimagined kitchen oriented to the marsh view"), not contractor task ("Demo kitchen and install new cabinets").
+- Be active and specific. Avoid filler words.
+- Read as part of a list — do NOT prefix with bullet characters, dashes, numbers, or "•".
+
+EXAMPLES OF GOOD BULLETS (shape only — do not copy):
+- "Open kitchen reoriented to the water view"
+- "Primary suite expansion with spa-grade bath"
+- "Whole-home envelope rebuild for coastal durability"
+- "New wing addition matching the original architecture"
+- "Mechanical and electrical systems modernized throughout"
+- "Reconfigured guest wing with three updated bedrooms"
+
+TONE:
+- Professional, warm, confident — trusted advisor voice, not contractor voice.
+- No contractor jargon: no "demo", "rough-in", "punch list", "FFE", "MEP", "scope of work".
+- No filler: no "world-class", "state-of-the-art", "cutting-edge".
+- No pricing, no scheduling, no caveats.
+
+GROUPING RULES:
+- One bullet per major room or scope theme — do not produce two bullets for the same kitchen.
+- If multiple bathrooms share similar work, group them ("Primary and guest baths fully remastered").
+- Always include any envelope / structural / addition work mentioned in the scopes — these are high-value highlights clients care about.`;
+
+  const userContent = `Generate the highlight bullets for this remodeling proposal.
+
+Client: ${client || "(not provided)"}
+Project address: ${address || "(not provided)"}
+
+Room scopes:
+${formattedRoomScopes}
+
+${transcript ? `Transcript context (use only to disambiguate; the room scopes above are the source of truth):\n${transcript.slice(0, 4000)}\n` : ""}
+Return ONLY the JSON object — no markdown, no code fences, no commentary.`;
+
+  const response = await callClaude({
+    max_tokens: 600,
+    temperature: 0.5,
+    system: systemContent,
+    messages: [{ role: "user", content: userContent }],
+  });
+
+  const rawText = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
+  if (!rawText) {
+    console.warn("[generateProjectHighlightBullets] empty response");
+    return [];
+  }
+
+  let parsed: { bullets?: unknown };
+  try {
+    parsed = JSON.parse(stripJsonFences(rawText)) as typeof parsed;
+  } catch (e) {
+    console.warn("[generateProjectHighlightBullets] JSON parse failed:", e);
+    return [];
+  }
+
+  const rawBullets = Array.isArray(parsed.bullets) ? parsed.bullets : [];
+  const cleaned = rawBullets
+    .map((b) => String(b ?? "").trim().replace(/^[•\-*\d.)\s]+/, "").trim())
+    .filter((b) => b.length > 0);
+
+  // Enforce 4-6 cap so the slide layout stays readable.
+  return cleaned.slice(0, 6);
+}
+
+/**
+ * Summarize a single room's full scopeNarrative into a short, client-facing
+ * blurb (~50 words) for the Scope Breakdown deck slides. Returns the summary
+ * text directly (no JSON wrapper) — keeps the prompt cheap and the parse
+ * trivial. Returns the trimmed full narrative as a fallback if the AI call
+ * fails or comes back empty.
+ */
+export async function generateRoomScopeOverviewShort(options: {
+  roomName: string;
+  scopeNarrative: string;
+  companyName: string;
+}): Promise<string> {
+  const narrative = (options.scopeNarrative ?? "").trim();
+  if (narrative.length < 20) {
+    return narrative;
+  }
+
+  const company = options.companyName || "our company";
+  const roomName = (options.roomName ?? "").trim() || "this space";
+
+  const systemContent = `You are a senior proposal writer for ${company}, a luxury design-build remodeling company on Hilton Head Island, SC. You write concise, client-facing summaries for proposal decks.
+
+Your task: read a long-form room scope narrative and produce a SHORT summary (40-60 words, 2-3 sentences) that communicates the transformation of that room — what it becomes, not what gets demolished or installed.
+
+RULES:
+- 40 to 60 words. Hard ceiling 70.
+- 2 or 3 sentences. Single paragraph. No bullets, no lists.
+- Outcome-focused — describe the finished result, not contractor tasks.
+- Active voice, professional, warm. No filler ("world-class", "state-of-the-art").
+- No contractor jargon ("demo", "rough-in", "punch list", "FFE", "MEP", "scope of work").
+- No pricing, no scheduling, no caveats.
+- Do NOT prefix with the room name or any heading — just the summary text.
+- Return ONLY the summary text. No quotes, no markdown, no preamble, no JSON.`;
+
+  const userContent = `Room: ${roomName}
+
+Full scope narrative:
+${narrative}
+
+Return only the 40-60 word summary.`;
+
+  try {
+    const response = await callClaude({
+      max_tokens: 200,
+      temperature: 0.5,
+      system: systemContent,
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const rawText = (response.content[0]?.type === "text" ? response.content[0].text : "")?.trim();
+    if (!rawText) {
+      console.warn(`[generateRoomScopeOverviewShort] empty response for "${roomName}"`);
+      return narrative;
+    }
+
+    // Strip surrounding quotes if the model added them despite the instruction.
+    const cleaned = rawText.replace(/^["'`]+|["'`]+$/g, "").trim();
+    return cleaned || narrative;
+  } catch (e) {
+    console.warn(`[generateRoomScopeOverviewShort] failed for "${roomName}":`, e);
+    return narrative;
+  }
 }
 
 /**

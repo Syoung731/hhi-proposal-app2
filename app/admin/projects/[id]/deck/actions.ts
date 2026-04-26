@@ -118,6 +118,7 @@ export async function generateDefaultDeckAction(
         sortOrder: true,
         selectedRenderMediaId: true,
         scopeNarrative: true,
+        scopeOverviewShort: true,
         isProjectOverhead: true,
         media: {
           where: {
@@ -135,6 +136,7 @@ export async function generateDefaultDeckAction(
       sortOrder: room.sortOrder,
       selectedRenderMediaId: room.selectedRenderMediaId,
       scopeNarrative: room.scopeNarrative ?? undefined,
+      scopeOverviewShort: room.scopeOverviewShort,
       isProjectOverhead: room.isProjectOverhead,
       beforeMedia: room.media
         .filter((m) => m.type === "EXISTING")
@@ -283,6 +285,7 @@ export async function refreshDeckAction(
         sortOrder: true,
         selectedRenderMediaId: true,
         scopeNarrative: true,
+        scopeOverviewShort: true,
         media: {
           where: {
             OR: [
@@ -302,6 +305,7 @@ export async function refreshDeckAction(
       sortOrder: room.sortOrder,
       selectedRenderMediaId: room.selectedRenderMediaId,
       scopeNarrative: room.scopeNarrative ?? undefined,
+      scopeOverviewShort: room.scopeOverviewShort,
       beforeMedia: room.media
         .filter((m) => m.type === "EXISTING")
         .map((m) => ({ id: m.id, url: m.url, kind: m.kind, renderStatus: m.renderStatus, caption: m.caption })),
