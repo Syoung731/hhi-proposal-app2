@@ -35,6 +35,22 @@ const ORIENTATION_OPTIONS = [
   { value: "UNKNOWN", label: "Unknown" },
 ] as const;
 
+/** A single project-scoped photo or render thumbnail shown on the "Project
+ *  Photos" tab. Caller flattens its rooms / front-page media into this shape. */
+export type ProjectMediaItem = {
+  id: string;
+  url: string;
+  thumbnailUrl?: string | null;
+  badge: "Photo" | "Render";
+  caption?: string | null;
+};
+
+/** A group of project-scoped media (e.g. one room, or "Front Page"). */
+export type ProjectMediaGroup = {
+  label: string;
+  items: ProjectMediaItem[];
+};
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -50,6 +66,9 @@ type Props = {
   requireProject?: boolean;
   /** Optional initial filters when the picker is first opened (e.g. from Objective builder). */
   initialFilters?: Partial<ListLibraryMediaFilters>;
+  /** When provided, the modal renders two tabs: "Project Photos" (this data) and
+   *  "Photo Library" (the existing flow). Default tab = Project. */
+  projectMedia?: ProjectMediaGroup[];
 };
 
 export function LibraryMediaPicker({
@@ -62,10 +81,14 @@ export function LibraryMediaPicker({
   projectId,
   requireProject,
   initialFilters,
+  projectMedia,
 }: Props) {
+  const tabbed = (projectMedia?.length ?? 0) > 0;
+  const [activeTab, setActiveTab] = useState<"project" | "library">("project");
   const [items, setItems] = useState<LibraryMediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [projectSelected, setProjectSelected] = useState<ProjectMediaItem | null>(null);
   const [filters, setFilters] = useState<ListLibraryMediaFilters>(() => ({
     page: 1,
     pageSize: 24,
@@ -75,6 +98,7 @@ export function LibraryMediaPicker({
 
   const fetchList = useCallback(async () => {
     if (!open) return;
+    if (tabbed && activeTab !== "library") return;
     if (requireProject && !projectId) return;
     setLoading(true);
     const section = filters.roomTypeIds?.[0] ?? "";
@@ -108,6 +132,8 @@ export function LibraryMediaPicker({
     }
   }, [
     open,
+    tabbed,
+    activeTab,
     mode,
     includeUnapproved,
     projectId,
@@ -124,11 +150,17 @@ export function LibraryMediaPicker({
     filters.sort,
   ]);
 
+  // Reset selection + initial tab only when the modal opens.
   useEffect(() => {
-    if (open) {
-      setSelected(new Set());
-      fetchList();
-    }
+    if (!open) return;
+    setSelected(new Set());
+    setProjectSelected(null);
+    setActiveTab(tabbed ? "project" : "library");
+  }, [open, tabbed]);
+
+  // Fetch the library list when needed (open + on Library tab + filters).
+  useEffect(() => {
+    if (open) fetchList();
   }, [open, fetchList]);
 
   const toggle = (id: string) => {
@@ -144,6 +176,31 @@ export function LibraryMediaPicker({
   };
 
   const handleConfirm = () => {
+    if (tabbed && activeTab === "project") {
+      if (!projectSelected) return;
+      const synth: LibraryMediaItem = {
+        id: projectSelected.id,
+        fileKey: projectSelected.id,
+        url: projectSelected.url,
+        thumbnailUrl: projectSelected.thumbnailUrl ?? null,
+        title: projectSelected.caption ?? null,
+        description: null,
+        roomTypeIds: [],
+        tags: [],
+        useType: projectSelected.badge === "Render" ? "RENDER" : "AFTER",
+        quality: "STANDARD",
+        orientation: "UNKNOWN",
+        marketingApproved: false,
+        sourceProjectName: null,
+        photographer: null,
+        sortOrder: 0,
+        createdAt: "",
+        updatedAt: "",
+      };
+      onSelect([synth]);
+      onClose();
+      return;
+    }
     const selectedItems = items.filter((i) => selected.has(i.id));
     onSelect(selectedItems);
     onClose();
@@ -158,7 +215,7 @@ export function LibraryMediaPicker({
       <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            Select from Photo Library
+            {tabbed ? "Select Photo" : "Select from Photo Library"}
           </h2>
           <button
             type="button"
@@ -168,11 +225,34 @@ export function LibraryMediaPicker({
             ✕
           </button>
         </div>
+        {tabbed && (
+          <div className="flex border-b border-zinc-200 px-6 dark:border-zinc-800">
+            {(["project", "library"] as const).map((tab) => {
+              const label = tab === "project" ? "Project Photos" : "Photo Library";
+              const active = activeTab === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
+                    active
+                      ? "border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100"
+                      : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {missingProject && (
           <div className="border-b border-zinc-200 bg-amber-50 px-6 py-3 text-sm text-amber-800 dark:border-zinc-800 dark:bg-amber-950/40 dark:text-amber-200">
             Missing projectId – cannot load project photos.
           </div>
         )}
+        {(!tabbed || activeTab === "library") && (
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-6 py-3 dark:border-zinc-800">
           <select
             value={filters.roomTypeIds?.[0] ?? ""}
@@ -240,6 +320,64 @@ export function LibraryMediaPicker({
             className="w-32 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
           />
         </div>
+        )}
+        {tabbed && activeTab === "project" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            {(projectMedia ?? []).every((g) => g.items.length === 0) ? (
+              <p className="py-8 text-center text-sm text-zinc-500">
+                No project photos found. Add photos in the Media tab.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-5">
+                {(projectMedia ?? []).map((group) => {
+                  if (group.items.length === 0) return null;
+                  return (
+                    <div key={group.label}>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
+                        {group.label}
+                      </p>
+                      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
+                        {group.items.map((m) => {
+                          const isSelected = projectSelected?.id === m.id;
+                          const imgUrl = m.thumbnailUrl ?? m.url;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => setProjectSelected(m)}
+                              className={`relative aspect-[4/3] w-full overflow-hidden rounded-lg border-2 transition ${
+                                isSelected
+                                  ? "border-zinc-900 ring-2 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
+                                  : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
+                              }`}
+                            >
+                              {imgUrl && isAllowedHostForNextImage(imgUrl) ? (
+                                <Image src={imgUrl} alt={m.caption ?? group.label} fill className="object-cover" sizes="120px" />
+                              ) : imgUrl ? (
+                                <img src={imgUrl} alt={m.caption ?? group.label} className="h-full w-full object-cover" />
+                              ) : null}
+                              <span
+                                className="absolute bottom-0 left-0 right-0 px-2 py-0.5 text-center text-[10px] font-semibold text-white"
+                                style={{ background: m.badge === "Render" ? "rgba(22,163,74,0.85)" : "rgba(0,0,0,0.55)" }}
+                              >
+                                {m.badge}
+                              </span>
+                              {isSelected && (
+                                <span className="absolute right-2 top-2 rounded-full bg-zinc-900 px-2 py-0.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           {missingProject ? (
             <p className="py-8 text-center text-sm text-amber-700 dark:text-amber-300">
@@ -293,9 +431,12 @@ export function LibraryMediaPicker({
             </div>
           )}
         </div>
+        )}
         <div className="flex items-center justify-between border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {selected.size} selected
+            {tabbed && activeTab === "project"
+              ? (projectSelected ? "1 selected" : "0 selected")
+              : `${selected.size} selected`}
           </p>
           <div className="flex gap-2">
             <button
@@ -308,7 +449,10 @@ export function LibraryMediaPicker({
             <button
               type="button"
               onClick={handleConfirm}
-              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+              disabled={
+                tabbed && activeTab === "project" ? !projectSelected : selected.size === 0
+              }
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed dark:bg-zinc-100 dark:text-zinc-900"
             >
               Select
             </button>
