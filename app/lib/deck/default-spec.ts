@@ -82,7 +82,7 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
     {
       type: "before-after",
       order: 500,
-      layoutKey: "side-by-side",
+      layoutKey: "after-emphasis",
     },
     {
       type: "cope-page",

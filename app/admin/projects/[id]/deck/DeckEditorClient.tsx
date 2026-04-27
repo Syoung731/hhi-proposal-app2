@@ -656,7 +656,7 @@ export function DeckEditorClient({
       type === "client-testimonials" ? "quote-cards"     :
       type === "design-build-advantage" ? designBuildDefaults.defaultLayout :
       type === "addition-overview" ? "combined" :
-      /* before-after */            "side-by-side";
+      /* before-after */            "after-emphasis";
 
     const headline =
       type === "cover"            ? "New Cover"                  :
@@ -868,7 +868,7 @@ export function DeckEditorClient({
         return {
           id: generateId(),
           type: "before-after" as const,
-          layoutKey: "side-by-side" as const,
+          layoutKey: "after-emphasis" as const,
           order: 0,
           isEnabled: true,
           headline: room.name,

@@ -205,7 +205,7 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
               }}
             >
               <Label text={content.beforeLabel ?? "Before"} accent={accent} dark
-                font={content.beforeLabelFont} size={content.beforeLabelSize}
+                font={content.beforeLabelFont} size={content.beforeLabelSize ?? 2.5}
                 bold={content.beforeLabelBold} italic={content.beforeLabelItalic}
                 underline={content.beforeLabelUnderline} color={content.beforeLabelColor}
                 outline={content.beforeLabelOutline} />
@@ -251,7 +251,7 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
               }}
             >
               <Label text={content.afterLabel ?? "After"} accent={accent} dark
-                font={content.afterLabelFont} size={content.afterLabelSize}
+                font={content.afterLabelFont} size={content.afterLabelSize ?? 2.5}
                 bold={content.afterLabelBold} italic={content.afterLabelItalic}
                 underline={content.afterLabelUnderline} color={content.afterLabelColor}
                 outline={content.afterLabelOutline} />
@@ -278,7 +278,7 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
               key={i}
               style={{
                 fontFamily: bodyFont,
-                fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 0.6}em`,
+                fontSize: `${(content.captionSize ?? content.captionFontSize ?? 2.0) * 0.6}em`,
                 color: content.captionColor ?? resolvedCaptionColor,
                 display: "inline-flex",
                 alignItems: "center",
@@ -300,7 +300,7 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           <p
             style={{
               fontFamily: content.captionFont ?? bodyFont,
-              fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 1.0}em`,
+              fontSize: `${(content.captionSize ?? content.captionFontSize ?? 2.0) * 1.0}em`,
               fontWeight: content.captionBold ? 700 : 400,
               fontStyle: content.captionItalic ?? (caption ? true : false) ? "italic" : "normal",
               textDecoration: content.captionUnderline ? "underline" : "none",
@@ -393,7 +393,7 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
                     alignItems: "baseline",
                     gap: "0.5em",
                     fontFamily: content.captionFont ?? bodyFont,
-                    fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 0.6}em`,
+                    fontSize: `${(content.captionSize ?? content.captionFontSize ?? 2.0) * 0.6}em`,
                     color: content.captionColor ?? resolvedCaptionColor,
                     lineHeight: 1.5,
                   }}
@@ -407,7 +407,7 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
             <p
               style={{
                 fontFamily: content.captionFont ?? bodyFont,
-                fontSize: `${(content.captionSize ?? content.captionFontSize ?? 1.0) * 1.0}em`,
+                fontSize: `${(content.captionSize ?? content.captionFontSize ?? 2.0) * 1.0}em`,
                 fontWeight: content.captionBold ? 700 : 400,
                 fontStyle: content.captionItalic !== false ? "italic" : "normal",
                 textDecoration: content.captionUnderline ? "underline" : "none",
@@ -435,7 +435,7 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
               className="uppercase tracking-widest"
               style={{
                 fontFamily: content.beforeLabelFont ?? "'Jost', sans-serif",
-                fontSize: `${(content.beforeLabelSize ?? 1.0) * 0.45}em`,
+                fontSize: `${(content.beforeLabelSize ?? 2.5) * 0.45}em`,
                 fontWeight: (content.beforeLabelBold !== false) ? 600 : 400,
                 fontStyle: content.beforeLabelItalic ? "italic" : "normal",
                 color: content.beforeLabelColor ?? "rgba(255,255,255,0.4)",
@@ -543,7 +543,7 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
             className="uppercase tracking-widest"
             style={{
               fontFamily: content.afterLabelFont ?? "'Jost', sans-serif",
-              fontSize: `${(content.afterLabelSize ?? 1.0) * 0.5}em`,
+              fontSize: `${(content.afterLabelSize ?? 2.5) * 0.5}em`,
               fontWeight: (content.afterLabelBold !== false) ? 600 : 400,
               fontStyle: content.afterLabelItalic ? "italic" : "normal",
               color: content.afterLabelColor ?? "rgba(255,255,255,0.85)",
