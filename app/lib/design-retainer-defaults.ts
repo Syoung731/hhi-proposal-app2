@@ -26,8 +26,8 @@ export const DESIGN_RETAINER_DEFAULTS: {
 } = {
   defaultLayout: "three-band-summary",
   defaultSectionLabel: "YOUR INVESTMENT",
-  defaultHeadline: "Your Investment",
-  defaultTagline: "Your investment in certainty before construction begins.",
+  defaultHeadline: "Your investment",
+  defaultTagline: "",
   defaultRetainerAmount: "$22,000",
   defaultBenefits: DEFAULT_DESIGN_RETAINER_BENEFITS,
 };

@@ -51,7 +51,7 @@ import type {
   BeforeAfterBullet,
 } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
-import { computeRetainer, formatRetainerAmount } from "@/app/lib/retainer";
+import { computeRetainer } from "@/app/lib/retainer";
 // Phase 8C.1: T6 scope categorization reverted — classifyScopeItem import
 // dropped. The classifier utility (app/lib/scope/classifier.ts) remains on
 // disk as a preserved utility (decision #3). Re-import here if the feature
@@ -280,19 +280,19 @@ function buildSlideDataFromSpec(
       };
 
     case "design-retainer":
-      // Phase 8C: seed as "Your Investment" + three-band-summary layout. The
-      // retainerAmount is a placeholder until syncRetainerFromProject computes
-      // the real value on first deck load. Benefits match the locked Phase 8C
-      // copy verbatim (DEFAULT_DESIGN_RETAINER_BENEFITS).
+      // Seed values are placeholders — syncRetainerFromProject computes
+      // retainerLow/High and constructionLow/High on first deck load.
+      // Benefits match DEFAULT_DESIGN_RETAINER_BENEFITS verbatim.
       return {
         ...base,
         type: "design-retainer",
         layoutKey: spec.layoutKey,
-        headline: "Your Investment",
+        headline: "Your investment",
         content: {
           sectionLabel: "YOUR INVESTMENT",
-          tagline: "Your investment in certainty before construction begins.",
-          retainerAmount: "$22,000",
+          retainerAmount: 22000,
+          retainerRounding: 1000,
+          constructionRounding: 1000,
           benefits: [
             "Full architectural design and space planning",
             "HOA / ARB submission and approval management",
@@ -665,7 +665,7 @@ async function syncBeforeAfterSlides(
         data: {
           deckId,
           type: "before-after",
-          layoutKey: "side-by-side",
+          layoutKey: "after-emphasis",
           order,
           isEnabled: true,
           isUserHidden: false,
@@ -1165,14 +1165,13 @@ async function syncRetainerFromProject(
   });
   const designHourlyRate = companySettings?.designHourlyRate ?? null;
 
-  // design-retainer slide — string amount + three-band-summary inputs
+  // design-retainer slide — numeric ranges for retainer + construction
   const retainerRow = existing.find((r) => r.type === "design-retainer");
   if (retainerRow && !retainerRow.isUserModified) {
     const c = (retainerRow.content ?? {}) as DesignRetainerContent;
     const next: DesignRetainerContent = {
       ...c,
-      retainerAmount: project.retainerEnabled ? formatRetainerAmount(amount) : null,
-      retainerAmountNumber: project.retainerEnabled ? amount : null,
+      retainerAmount: project.retainerEnabled ? amount : null,
       retainerEnabled: project.retainerEnabled,
       constructionLow: subtotalLow > 0 ? subtotalLow : null,
       constructionHigh: subtotalHigh > 0 ? subtotalHigh : null,

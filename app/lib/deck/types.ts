@@ -63,7 +63,7 @@ export type ProcessLayoutKey = "three-stages";
 export type CoreValuesLayoutKey = "quad-grid" | "cards-row" | "labeled-list" | "icon-cards";
 export type ProjectTimelineLayoutKey = "vertical-dot" | "vertical-alternating" | "stepped-hierarchy";
 export type CopePageLayoutKey = "icon-columns" | "quad-photos" | "annotated-diagram";
-export type DesignRetainerLayoutKey = "centered-hero" | "framed-card" | "dark-overlay-modal" | "three-band-summary";
+export type DesignRetainerLayoutKey = "three-band-summary";
 export type NextStepsLayoutKey = "numbered-photo" | "column-grid-photos" | "two-by-two-grid" | "large-number-hero";
 export type ClosingSlideLayoutKey = "dark-centered" | "light-logo-centered" | "photo-white-card";
 export type VisualInspirationLayoutKey = "hero-plus-stacked" | "masonry-grid" | "side-by-side-bleed";
@@ -415,10 +415,20 @@ export interface InvestmentContent extends SharedSlideFields {
   tableHeaderBgColor?: string | null;
   /** Show retainer section at bottom. Default: true. */
   showRetainerSection?: boolean | null;
-  /** Line item density. Default: 'normal'. */
+  /** Line item density. Default: 'normal'. @deprecated Use lineItemPaddingY. */
   lineItemSizePreset?: "compact" | "normal" | "spacious" | null;
+  /** Vertical em padding per row, replaces lineItemSizePreset. Default: 0.42. */
+  lineItemPaddingY?: number | null;
+  /** Body-text scale multiplier (table cells). Default: 1.0. */
+  bodyTextScale?: number | null;
   /** Retainer box accent color (hex). Default: #B8860B. */
   retainerAccentColor?: string | null;
+
+  // ── Per-field: "Includes" sub-text (rendered beneath each row label) ─────
+  includesTextFont?: string | null;
+  /** Multiplier on body text scale. Default: 0.6. */
+  includesTextScale?: number | null;
+  includesTextColor?: string | null;
 
   // ── Per-field: Headline ──────────────────────────────────────────────────
   headlineSize?: number | null;
@@ -1151,53 +1161,28 @@ export interface DesignRetainerBenefit {
   textOutline?: string | null;
 }
 
-/** Content shape for design-retainer slides. */
+/** Content shape for design-retainer slides (single layout: three-band-summary). */
 export interface DesignRetainerContent extends SharedSlideFields {
-  /** Section label above the headline. Default: "DESIGN RETAINER". */
+  /** Section label above the headline. Default: "YOUR INVESTMENT". */
   sectionLabel?: string | null;
   /** Tagline shown below headline. */
   tagline?: string | null;
-  /** The retainer amount string, e.g. "$22,000". */
-  retainerAmount?: string | null;
-  /** One-line description (used in framed-card layout). */
-  description?: string | null;
-  /** Fine print / included note. */
-  noteText?: string | null;
-  /** Background image URL for dark-overlay-modal layout. */
-  backgroundImage?: string | null;
-  /** Benefit bullet points. Supports legacy string[] and new object[]. */
+  /** Benefit bullet points (Band 1). Supports legacy string[] and new object[]. */
   benefits?: (string | DesignRetainerBenefit)[];
+  /** When true, all bullets inherit style fields from benefits[0]. */
+  lockItemStyles?: boolean | null;
 
-  // ── Phase 8C: three-band-summary layout inputs ─────────────────────────
-  /** Construction subtotal low, summed from Room.totalLow at sync time. */
-  constructionLow?: number | null;
-  /** Construction subtotal high, summed from Room.totalHigh at sync time. */
-  constructionHigh?: number | null;
-  /**
-   * Hourly rate snapshotted from CompanySettings.designHourlyRate at sync
-   * time. null → hourly-rate sentence is omitted from the slide. Captured
-   * into slide content so published snapshots preserve the value even if
-   * Settings changes later.
-   */
+  // ── Auto-sync inputs (written by syncRetainerFromProject) ──────────────
+  /** Hourly rate snapshotted from CompanySettings.designHourlyRate. */
   designHourlyRate?: number | null;
-  /**
-   * Whether the retainer is enabled for this project. Snapshotted from
-   * Project.retainerEnabled at sync time. When false, the three-band
-   * layout hides Band 1 / Band 3 and shows Band 2 as the emotional landing.
-   */
+  /** Whether the retainer is enabled — snapshotted from Project.retainerEnabled. */
   retainerEnabled?: boolean | null;
-  /**
-   * Numeric retainer amount (dollars) — sibling to the formatted string.
-   * Used by three-band-summary to compute the Band 3 total. Null when
-   * retainer is disabled.
-   */
-  retainerAmountNumber?: number | null;
 
-  // ── Per-field: Section label (font + color only per Section 6) ──────────
+  // ── Per-field: Section label ────────────────────────────────────────────
   sectionLabelFont?: string | null;
   sectionLabelColor?: string | null;
 
-  // ── Per-field: Headline ──────────────────────────────────────────────────
+  // ── Per-field: Headline ─────────────────────────────────────────────────
   headlineFont2?: string | null;
   headlineSize?: number | null;
   headlineBold?: boolean | null;
@@ -1206,7 +1191,7 @@ export interface DesignRetainerContent extends SharedSlideFields {
   headlineColor2?: string | null;
   headlineOutline?: string | null;
 
-  // ── Per-field: Tagline ───────────────────────────────────────────────────
+  // ── Per-field: Tagline ──────────────────────────────────────────────────
   taglineFont?: string | null;
   taglineSize?: number | null;
   taglineBold?: boolean | null;
@@ -1215,36 +1200,83 @@ export interface DesignRetainerContent extends SharedSlideFields {
   taglineColor?: string | null;
   taglineOutline?: string | null;
 
-  // ── Per-field: Retainer Amount ───────────────────────────────────────────
+  // ── Band 1: Retainer Label ("Design / Feasibility Retainer") ────────────
+  retainerLabelText?: string | null;
+  retainerLabelFont?: string | null;
+  retainerLabelSize?: number | null;
+  retainerLabelBold?: boolean | null;
+  retainerLabelItalic?: boolean | null;
+  retainerLabelUnderline?: boolean | null;
+  retainerLabelColor?: string | null;
+  retainerLabelOutline?: string | null;
+
+  // ── Band 1: Retainer Amount (single dollar value) ───────────────────────
+  /** Retainer amount (dollars). Synced from project settings; user may override. */
+  retainerAmount?: number | null;
+  /** Round-to step in dollars applied at display time (1, 100, 1000, 10000). null = no rounding. */
+  retainerRounding?: number | null;
   amountFont?: string | null;
-  /** Default: 3.0 (large display number). */
   amountSize?: number | null;
-  /** Default: true. */
   amountBold?: boolean | null;
   amountItalic?: boolean | null;
   amountUnderline?: boolean | null;
-  /** Default: resolvedAccent (gold). */
   amountColor?: string | null;
   amountOutline?: string | null;
 
-  // ── Per-field: Description ───────────────────────────────────────────────
-  descriptionFont?: string | null;
-  descriptionSize?: number | null;
-  descriptionBold?: boolean | null;
-  descriptionItalic?: boolean | null;
-  descriptionUnderline?: boolean | null;
-  descriptionColor?: string | null;
-  descriptionOutline?: string | null;
+  // ── Band 1: Retainer Description ("Design work billed at...") ──────────
+  /** When null, auto-generated from designHourlyRate. */
+  retainerDescText?: string | null;
+  retainerDescFont?: string | null;
+  retainerDescSize?: number | null;
+  retainerDescBold?: boolean | null;
+  retainerDescItalic?: boolean | null;
+  retainerDescUnderline?: boolean | null;
+  retainerDescColor?: string | null;
+  retainerDescOutline?: string | null;
 
-  // ── Per-field: Note Text (fine print) ────────────────────────────────────
-  noteFont?: string | null;
-  /** Default: 0.75 (fine print). */
-  noteSize?: number | null;
-  noteBold?: boolean | null;
-  noteItalic?: boolean | null;
-  noteUnderline?: boolean | null;
-  noteColor?: string | null;
-  noteOutline?: string | null;
+  // ── Band 2: Construction Label ──────────────────────────────────────────
+  constructionLabelText?: string | null;
+  constructionLabelFont?: string | null;
+  constructionLabelSize?: number | null;
+  constructionLabelBold?: boolean | null;
+  constructionLabelItalic?: boolean | null;
+  constructionLabelUnderline?: boolean | null;
+  constructionLabelColor?: string | null;
+  constructionLabelOutline?: string | null;
+
+  // ── Band 2: Construction Amount (numeric range, auto-synced from rooms) ─
+  /** Construction subtotal low, summed from Room.totalLow at sync time; editable. */
+  constructionLow?: number | null;
+  /** Construction subtotal high, summed from Room.totalHigh at sync time; editable. */
+  constructionHigh?: number | null;
+  /** Round-to step in dollars (1, 100, 1000, 10000). null = no rounding. */
+  constructionRounding?: number | null;
+  constructionAmountFont?: string | null;
+  constructionAmountSize?: number | null;
+  constructionAmountBold?: boolean | null;
+  constructionAmountItalic?: boolean | null;
+  constructionAmountUnderline?: boolean | null;
+  constructionAmountColor?: string | null;
+  constructionAmountOutline?: string | null;
+
+  // ── Band 3: Total Label ─────────────────────────────────────────────────
+  totalLabelText?: string | null;
+  totalLabelFont?: string | null;
+  totalLabelSize?: number | null;
+  totalLabelBold?: boolean | null;
+  totalLabelItalic?: boolean | null;
+  totalLabelUnderline?: boolean | null;
+  totalLabelColor?: string | null;
+  totalLabelOutline?: string | null;
+
+  // ── Band 3: Total Amount (auto-computed from rounded retainer + rounded construction; styles only) ──
+  totalAmountFont?: string | null;
+  totalAmountSize?: number | null;
+  totalAmountBold?: boolean | null;
+  totalAmountItalic?: boolean | null;
+  totalAmountUnderline?: boolean | null;
+  totalAmountColor?: string | null;
+  totalAmountOutline?: string | null;
 }
 
 /** A single step in a next-steps slide. */
@@ -2047,9 +2079,6 @@ export const COPE_PAGE_LAYOUTS: { key: CopePageLayoutKey; label: string }[] = [
 
 export const DESIGN_RETAINER_LAYOUTS: { key: DesignRetainerLayoutKey; label: string }[] = [
   { key: "three-band-summary", label: "Three-Band Summary" },
-  { key: "centered-hero", label: "Centered Hero" },
-  { key: "framed-card", label: "Framed Card" },
-  { key: "dark-overlay-modal", label: "Dark Overlay" },
 ];
 
 export const NEXT_STEPS_LAYOUTS: { key: NextStepsLayoutKey; label: string }[] = [
@@ -2137,7 +2166,7 @@ export function getLayoutsForType(type: SlideType) {
 export const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
   cover:             "Cover",
   objective:         "Objective",
-  investment:        "Investment",
+  investment:        "Investment by Space",
   "why-us":          "Why Us",
   "scope-overview":  "Scope Overview",
   "before-after":    "Before / After",
@@ -2147,7 +2176,7 @@ export const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
   "core-values":     "Core Values",
   "project-timeline": "Timeline",
   "cope-page":        "COPE",
-  "design-retainer":  "Design Retainer",
+  "design-retainer":  "Overall Investment",
   "next-steps":       "Next Steps",
   "closing-slide":    "Closing",
   "visual-inspiration": "Inspiration",

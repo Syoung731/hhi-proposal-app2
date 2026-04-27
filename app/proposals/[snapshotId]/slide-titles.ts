@@ -25,7 +25,7 @@ export function slideTitle(slide: ProposalSlide, index: number): string {
     "client-testimonials": "Testimonials",
     "cope-page": "Project Execution",
     investment: "Investment",
-    "design-retainer": "Design Retainer",
+    "design-retainer": "Overall Investment",
     "next-steps": "Next Steps",
     "closing-slide": "Thank You",
     "addition-overview": "Overview",
