@@ -63,13 +63,16 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const items = content.lineItems ?? [];
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
-  const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
+  const bodyScale = content.bodyTextScale ?? BODY_SCALE[content.bodySizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const tableHeaderBg = content.tableHeaderBgColor ?? "#1B2A4A";
-  // Phase 8C: tighten default row padding for higher line density (was 0.5em).
-  // compact / spacious presets unchanged.
-  const lineItemPadding = content.lineItemSizePreset === "compact" ? "0.32em 0.9em" : content.lineItemSizePreset === "spacious" ? "0.65em 0.9em" : "0.42em 0.9em";
+  const lineItemPaddingY = content.lineItemPaddingY ??
+    (content.lineItemSizePreset === "compact" ? 0.32 : content.lineItemSizePreset === "spacious" ? 0.65 : 0.42);
+  const lineItemPadding = `${lineItemPaddingY}em 0.9em`;
+  const includesFont = content.includesTextFont ?? bodyFont;
+  const includesScale = content.includesTextScale ?? 0.6;
+  const includesColor = content.includesTextColor ?? "#6B7280";
 
   const hasBg = hasAiBackground || slide.backgroundId != null;
 
@@ -155,7 +158,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
               className="flex-1"
               style={{
                 fontFamily: content.tableHeaderFont ?? bodyFont,
-                fontSize: `${(content.tableHeaderSize ?? 0.72) * bodyScale}em`,
+                fontSize: `${content.tableHeaderSize ?? 0.72}em`,
                 fontWeight: (content.tableHeaderBold !== false) ? 700 : 400,
                 fontStyle: content.tableHeaderItalic ? "italic" : "normal",
                 textDecoration: content.tableHeaderUnderline ? "underline" : "none",
@@ -169,7 +172,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
             <span
               style={{
                 fontFamily: content.tableHeaderFont ?? bodyFont,
-                fontSize: `${(content.tableHeaderSize ?? 0.72) * bodyScale}em`,
+                fontSize: `${content.tableHeaderSize ?? 0.72}em`,
                 fontWeight: (content.tableHeaderBold !== false) ? 700 : 400,
                 fontStyle: content.tableHeaderItalic ? "italic" : "normal",
                 textDecoration: content.tableHeaderUnderline ? "underline" : "none",
@@ -208,14 +211,15 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
               >
                 <span
                   className="flex-1 flex flex-col"
-                  style={{ fontFamily: bodyFont, color: content.bodyColor ?? branding.textColor }}
+                  style={{ fontFamily: bodyFont, color: content.bodyColor ?? "#4A5568" }}
                 >
                   <span style={{ fontSize: `${0.78 * bodyScale}em` }}>{item.label}</span>
                   {item.includesText && (
                     <span
                       style={{
-                        fontSize: `${0.6 * bodyScale}em`,
-                        color: "#6B7280",
+                        fontFamily: includesFont,
+                        fontSize: `${includesScale * bodyScale}em`,
+                        color: includesColor,
                         marginTop: "0.15em",
                         lineHeight: 1.3,
                       }}
@@ -228,7 +232,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
                   style={{
                     fontFamily: bodyFont,
                     fontSize: `${0.78 * bodyScale}em`,
-                    color: content.bodyColor ?? branding.textColor,
+                    color: content.bodyColor ?? "#4A5568",
                     minWidth: "30%",
                     textAlign: "right",
                   }}
