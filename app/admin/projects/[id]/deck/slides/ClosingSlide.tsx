@@ -95,7 +95,7 @@ export function ClosingSlide({ slide, branding, hasAiBackground }: Props) {
   const validityNote = c.validityNote ?? CLOSING_SLIDE_DEFAULTS.validityNote;
   const bgColor = c.backgroundColor ?? CLOSING_SLIDE_DEFAULTS.backgroundColor;
   const bgPhoto = c.backgroundPhoto ?? null;
-  const resolvedAccent = c.accentColor ?? GOLD;
+  const resolvedAccent = c.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const content = c;
 
@@ -348,7 +348,7 @@ function LightLogoCenteredLayout({
   // Per-field styles — light layout defaults (navy/dark text)
   const headlineFont = content.headlineFont2 ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const headlineSize = content.headlineSize ?? 1.4;
-  const headlineColor = content.headlineColor2 ?? NAVY;
+  const headlineColor = content.headlineColor2 ?? branding.textColor;
 
   const taglineFont = content.taglineFont ?? headlineFont;
   const taglineSize = content.taglineSize ?? 0.7;
@@ -517,7 +517,7 @@ function PhotoWhiteCardLayout({
   // Per-field styles — photo-white-card: card is light, so navy text
   const headlineFont = content.headlineFont2 ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const headlineSize = content.headlineSize ?? 1.2;
-  const headlineColor = content.headlineColor2 ?? NAVY;
+  const headlineColor = content.headlineColor2 ?? branding.textColor;
 
   const taglineFont = content.taglineFont ?? headlineFont;
   const taglineSize = content.taglineSize ?? 0.65;

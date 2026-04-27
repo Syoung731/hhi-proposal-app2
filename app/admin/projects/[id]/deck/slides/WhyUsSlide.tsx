@@ -152,7 +152,7 @@ function PillarCard({
 function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
@@ -280,7 +280,7 @@ function PillarsGridLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const cardShadowKey = content.cardShadow ?? "normal";
   const cardShadow = cardShadowKey === "none" ? "none" : (CARD_SHADOWS[cardShadowKey as keyof typeof CARD_SHADOWS] ?? CARD_SHADOWS.normal);
@@ -529,7 +529,7 @@ function EditorialCardsLayout({ slide, branding, hasAiBackground }: LayoutProps)
 function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);
@@ -730,7 +730,7 @@ function StackedListLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 function TestimonialsSplitLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as WhyUsContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const visiblePillars = getVisiblePillars(content);
   const sectionTitle = getSectionTitle(content, slide);

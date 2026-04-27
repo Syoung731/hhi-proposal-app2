@@ -102,7 +102,7 @@ function resolveAddress(content: CoverContent, branding: DeckBranding): string |
 // When slide.textZone is set, positions headline/body content within that zone.
 function SplitEditorialLayout({ slide, branding }: Props) {
   const content = (slide.content ?? {}) as CoverContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const logoPos = defaultLogoPos(slide.layoutKey as CoverLayoutKey);
   const zone: TextZoneSetting | null = slide.textZone ?? null;
@@ -228,7 +228,7 @@ function SplitEditorialLayout({ slide, branding }: Props) {
 // When slide.textZone + slide.backgroundId: suppress the structural panel, render text in zone.
 function RightPanelOverlayLayout({ slide, branding }: Props) {
   const content = (slide.content ?? {}) as CoverContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const panelSide = content.overlayPosition ?? "right";
   const year = new Date().getFullYear();
@@ -415,7 +415,7 @@ function RightPanelOverlayLayout({ slide, branding }: Props) {
 // When slide.textZone + slide.backgroundId: suppress the left dark panel, render text in zone.
 function SplitDarkEditorialLayout({ slide, branding }: Props) {
   const content = (slide.content ?? {}) as CoverContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const logoPos = defaultLogoPos(slide.layoutKey as CoverLayoutKey);
   const zone: TextZoneSetting | null =
@@ -594,7 +594,7 @@ function SplitDarkEditorialLayout({ slide, branding }: Props) {
 // When slide.textZone + slide.backgroundId: suppress the frosted card, render text in zone.
 function BottomCardOverlayLayout({ slide, branding }: Props) {
   const content = (slide.content ?? {}) as CoverContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const cardPos = content.cardPosition ?? "bottom-left";
   const logoPos = defaultLogoPos(slide.layoutKey as CoverLayoutKey, cardPos);

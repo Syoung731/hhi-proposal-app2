@@ -165,7 +165,7 @@ function QuadGridLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
@@ -345,12 +345,12 @@ function CardsRowLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Fallback fonts for per-item
@@ -418,7 +418,7 @@ function CardsRowLayout({
           }}
         >
           {values.map((val) => (
-            <CardsRowCard key={val.id} value={val} accent={resolvedAccent} cardShadow={content.cardShadow ?? undefined} cardBorderStyle={content.cardBorderStyle ?? undefined} cardSpacing={content.cardSpacing ?? undefined} fallbackBodyFont={fallbackBodyFont} fallbackBodyColor={content.bodyColor ?? undefined} />
+            <CardsRowCard key={val.id} value={val} accent={resolvedAccent} cardShadow={content.cardShadow ?? undefined} cardBorderStyle={content.cardBorderStyle ?? undefined} cardSpacing={content.cardSpacing ?? undefined} fallbackBodyFont={fallbackBodyFont} fallbackBodyColor={content.bodyColor ?? undefined} fallbackTextColor={branding.textColor} />
           ))}
         </div>
       </div>
@@ -434,19 +434,19 @@ function CardsRowLayout({
   );
 }
 
-function CardsRowCard({ value, accent, cardShadow, cardBorderStyle, cardSpacing, fallbackBodyFont, fallbackBodyColor }: {
+function CardsRowCard({ value, accent, cardShadow, cardBorderStyle, cardSpacing, fallbackBodyFont, fallbackBodyColor, fallbackTextColor }: {
   value: CoreValue; accent: string; cardShadow?: string; cardBorderStyle?: string; cardSpacing?: string;
-  fallbackBodyFont: string; fallbackBodyColor?: string;
+  fallbackBodyFont: string; fallbackBodyColor?: string; fallbackTextColor: string;
 }) {
   const nameFont = value.nameFont ?? fallbackBodyFont;
   const nameSize = value.nameSize ?? 1.0;
-  const nameColor = value.nameColor ?? NAVY;
+  const nameColor = value.nameColor ?? fallbackTextColor;
   const descriptorFont = value.descriptorFont ?? fallbackBodyFont;
   const descriptorSize = value.descriptorSize ?? 1.0;
   const descriptorColor = value.descriptorColor ?? MUTED_NAVY;
   const descFont = value.descriptionFont ?? fallbackBodyFont;
   const descSize = value.descriptionSize ?? 1.0;
-  const descColor = value.descriptionColor ?? fallbackBodyColor ?? NAVY;
+  const descColor = value.descriptionColor ?? fallbackBodyColor ?? fallbackTextColor;
 
   return (
     <div
@@ -545,12 +545,12 @@ function LabeledListLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Fallback fonts for per-item
@@ -611,7 +611,7 @@ function LabeledListLayout({
           {values.map((val, i) => {
             const nameFont = val.nameFont ?? fallbackBodyFont;
             const nameSize = val.nameSize ?? 1.0;
-            const nameColor = val.nameColor ?? NAVY;
+            const nameColor = val.nameColor ?? branding.textColor;
             const descriptorFont = val.descriptorFont ?? fallbackBodyFont;
             const descriptorSize = val.descriptorSize ?? 1.0;
             const descriptorColor = val.descriptorColor ?? content.bodyColor ?? MUTED_NAVY;
@@ -704,12 +704,12 @@ function IconCardsLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Fallback fonts for per-item
@@ -780,10 +780,10 @@ function IconCardsLayout({
           {values.map((val) => {
             const nameFont = val.nameFont ?? fallbackBodyFont;
             const nameSize = val.nameSize ?? 1.0;
-            const nameColor = val.nameColor ?? NAVY;
+            const nameColor = val.nameColor ?? branding.textColor;
             const descFont = val.descriptionFont ?? fallbackBodyFont;
             const descSize = val.descriptionSize ?? 1.0;
-            const descColor = val.descriptionColor ?? content.bodyColor ?? NAVY;
+            const descColor = val.descriptionColor ?? content.bodyColor ?? branding.textColor;
 
             return (
               <div

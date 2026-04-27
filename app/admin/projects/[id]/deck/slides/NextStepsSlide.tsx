@@ -142,7 +142,7 @@ function NumberedPhotoLayout({
   content,
   branding,
 }: LayoutProps) {
-  const accent = content.accentColor ?? GOLD;
+  const accent = content.accentColor ?? branding.accentColor;
   return (
     <div
       className="relative w-full h-full"
@@ -184,7 +184,7 @@ function NumberedPhotoLayout({
               fontWeight: (content.slideTitleBold ?? true) ? 700 : 400,
               fontStyle: content.slideTitleItalic ? "italic" : "normal",
               textDecoration: content.slideTitleUnderline ? "underline" : "none",
-              color: content.slideTitleColor ?? NAVY,
+              color: content.slideTitleColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: content.slideTitleOutline ? makeOutlineShadow(content.slideTitleOutline) : undefined,
             }}
@@ -222,7 +222,7 @@ function NumberedPhotoLayout({
                       fontWeight: (step.titleBold ?? true) ? 600 : 400,
                       fontStyle: step.titleItalic ? "italic" : "normal",
                       textDecoration: step.titleUnderline ? "underline" : "none",
-                      color: step.titleColor ?? NAVY,
+                      color: step.titleColor ?? branding.textColor,
                       lineHeight: 1.3,
                       marginBottom: "0.15em",
                       textShadow: step.titleOutline ? makeOutlineShadow(step.titleOutline) : undefined,
@@ -292,7 +292,7 @@ function ColumnGridPhotosLayout({
   content,
   branding,
 }: LayoutProps) {
-  const accent = content.accentColor ?? GOLD;
+  const accent = content.accentColor ?? branding.accentColor;
   return (
     <div
       className="relative w-full h-full"
@@ -334,7 +334,7 @@ function ColumnGridPhotosLayout({
               fontWeight: (content.slideTitleBold ?? true) ? 700 : 400,
               fontStyle: content.slideTitleItalic ? "italic" : "normal",
               textDecoration: content.slideTitleUnderline ? "underline" : "none",
-              color: content.slideTitleColor ?? NAVY,
+              color: content.slideTitleColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: content.slideTitleOutline ? makeOutlineShadow(content.slideTitleOutline) : undefined,
             }}
@@ -383,7 +383,7 @@ function ColumnGridPhotosLayout({
                   fontWeight: (step.titleBold ?? true) ? 600 : 400,
                   fontStyle: step.titleItalic ? "italic" : "normal",
                   textDecoration: step.titleUnderline ? "underline" : "none",
-                  color: step.titleColor ?? NAVY,
+                  color: step.titleColor ?? branding.textColor,
                   textAlign: "center",
                   lineHeight: 1.3,
                   marginBottom: "0.3em",
@@ -457,7 +457,7 @@ function TwoByTwoGridLayout({
   content,
   branding,
 }: LayoutProps) {
-  const accent = content.accentColor ?? GOLD;
+  const accent = content.accentColor ?? branding.accentColor;
   return (
     <div
       className="relative w-full h-full"
@@ -499,7 +499,7 @@ function TwoByTwoGridLayout({
               fontWeight: (content.slideTitleBold ?? true) ? 700 : 400,
               fontStyle: content.slideTitleItalic ? "italic" : "normal",
               textDecoration: content.slideTitleUnderline ? "underline" : "none",
-              color: content.slideTitleColor ?? NAVY,
+              color: content.slideTitleColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: content.slideTitleOutline ? makeOutlineShadow(content.slideTitleOutline) : undefined,
             }}
@@ -563,7 +563,7 @@ function TwoByTwoGridLayout({
                     fontWeight: (step.titleBold ?? true) ? 600 : 400,
                     fontStyle: step.titleItalic ? "italic" : "normal",
                     textDecoration: step.titleUnderline ? "underline" : "none",
-                    color: step.titleColor ?? NAVY,
+                    color: step.titleColor ?? branding.textColor,
                     lineHeight: 1.3,
                     marginBottom: "0.15em",
                     textShadow: step.titleOutline ? makeOutlineShadow(step.titleOutline) : undefined,
@@ -619,7 +619,7 @@ function LargeNumberHeroLayout({
   content,
   branding,
 }: LayoutProps) {
-  const accent = content.accentColor ?? GOLD;
+  const accent = content.accentColor ?? branding.accentColor;
   const hasPhoto = !!rightPhoto;
 
   return (
@@ -690,7 +690,7 @@ function LargeNumberHeroLayout({
               fontWeight: (content.slideTitleBold ?? true) ? 700 : 400,
               fontStyle: content.slideTitleItalic ? "italic" : "normal",
               textDecoration: content.slideTitleUnderline ? "underline" : "none",
-              color: content.slideTitleColor ?? NAVY,
+              color: content.slideTitleColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: content.slideTitleOutline ? makeOutlineShadow(content.slideTitleOutline) : undefined,
             }}
@@ -736,7 +736,7 @@ function LargeNumberHeroLayout({
                       fontWeight: (step.titleBold ?? true) ? 600 : 400,
                       fontStyle: step.titleItalic ? "italic" : "normal",
                       textDecoration: step.titleUnderline ? "underline" : "none",
-                      color: step.titleColor ?? NAVY,
+                      color: step.titleColor ?? branding.textColor,
                       lineHeight: 1.3,
                       marginBottom: "0.1em",
                       textShadow: step.titleOutline ? makeOutlineShadow(step.titleOutline) : undefined,

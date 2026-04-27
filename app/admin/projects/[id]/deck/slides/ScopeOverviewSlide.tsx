@@ -102,7 +102,7 @@ function PositionedPhoto({ photo }: { photo: ScopeOverviewSelectedPhoto }) {
 
 function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 2);
   const title = slide.headline ?? "Scope Overview";
@@ -242,7 +242,7 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 
 function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 4);
   const title = slide.headline ?? "Scope Overview";

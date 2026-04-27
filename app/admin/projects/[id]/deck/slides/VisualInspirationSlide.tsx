@@ -389,7 +389,7 @@ function SideBySideBleedLayout({
               fontWeight: (content.headlineBold !== false) ? 600 : 400,
               fontStyle: content.headlineItalic ? "italic" : "normal",
               textDecoration: content.headlineUnderline ? "underline" : "none",
-              color: content.headlineColor ?? NAVY,
+              color: content.headlineColor ?? branding.textColor,
               textAlign: "center",
               lineHeight: 1.2,
               textShadow: makeOutlineShadow(content.headlineOutline),

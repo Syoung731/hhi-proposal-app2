@@ -628,7 +628,7 @@ function makeOutlineShadow(color: string | null | undefined): string | undefined
 
 export function RiskBriefSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as RiskBriefContent;
-  const resolvedAccent = content.accentColor ?? "#B8860B";
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const layoutKey = slide.layoutKey as string;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;

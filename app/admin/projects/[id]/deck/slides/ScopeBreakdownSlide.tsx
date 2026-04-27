@@ -55,8 +55,8 @@ function visibleRoomsOf(content: ScopeBreakdownContent): ScopeBreakdownRoom[] {
   });
 }
 
-function resolveAccent(content: ScopeBreakdownContent): string {
-  return content.accentColor ?? GOLD;
+function resolveAccent(content: ScopeBreakdownContent, branding: DeckBranding): string {
+  return content.accentColor ?? branding.accentColor;
 }
 
 function resolveHeadlineFont(content: ScopeBreakdownContent): string {
@@ -167,7 +167,7 @@ export function ScopeBreakdownSlide({ slide, branding, hasAiBackground }: Props)
 function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const accent = resolveAccent(content);
+  const accent = resolveAccent(content, branding);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
@@ -234,7 +234,7 @@ function TextGridLayout({ slide, branding, hasAiBackground }: Props) {
 function DarkTableLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const accent = resolveAccent(content);
+  const accent = resolveAccent(content, branding);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
@@ -319,7 +319,7 @@ function ScopeIcon({ name, color, size = "2em" }: { name?: string; color: string
 function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const accent = resolveAccent(content);
+  const accent = resolveAccent(content, branding);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
@@ -332,7 +332,7 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header — centered */}
         <div style={{ flexShrink: 0, marginBottom: "4%", textAlign: "center" }}>
-          <h2 style={{ fontSize: `${2.4 * (content.titleSize ?? 1.0)}em`, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontFamily: resolveHeadlineFont(content), color: content.titleColor ?? NAVY, lineHeight: 1.1, textShadow: makeOutlineShadow(content.titleOutline) }}>
+          <h2 style={{ fontSize: `${2.4 * (content.titleSize ?? 1.0)}em`, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontFamily: resolveHeadlineFont(content), color: content.titleColor ?? branding.textColor, lineHeight: 1.1, textShadow: makeOutlineShadow(content.titleOutline) }}>
             {title}
           </h2>
           <div style={{ display: "flex", justifyContent: "center" }}>
@@ -356,7 +356,7 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
                   <ScopeIcon color={accent} />
                 </div>
                 {/* Name */}
-                <p style={{ ...roomTitleStyle(room, content, branding, NAVY), fontSize: `${0.72 * (room.titleSize ?? 1.0)}em`, textAlign: "center" }}>
+                <p style={{ ...roomTitleStyle(room, content, branding, branding.textColor), fontSize: `${0.72 * (room.titleSize ?? 1.0)}em`, textAlign: "center" }}>
                   {room.name}
                 </p>
                 {/* Description */}
@@ -384,7 +384,7 @@ function IconColumnsLayout({ slide, branding, hasAiBackground }: Props) {
 function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const accent = resolveAccent(content);
+  const accent = resolveAccent(content, branding);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
@@ -437,7 +437,7 @@ function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
                   <ScopeIcon color={accent} size="1.8em" />
                 </div>
                 {/* Name */}
-                <p style={{ ...roomTitleStyle(room, content, branding, NAVY), fontSize: `${0.72 * (room.titleSize ?? 1.0)}em` }}>
+                <p style={{ ...roomTitleStyle(room, content, branding, branding.textColor), fontSize: `${0.72 * (room.titleSize ?? 1.0)}em` }}>
                   {room.name}
                 </p>
                 {/* Description */}
@@ -465,7 +465,7 @@ function CardsSplitLayout({ slide, branding, hasAiBackground }: Props) {
 function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const accent = resolveAccent(content);
+  const accent = resolveAccent(content, branding);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
@@ -479,7 +479,7 @@ function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header — centered */}
         <div style={{ flexShrink: 0, marginBottom: "3%", textAlign: "center" }}>
-          <h2 style={{ fontSize: `${2.2 * (content.titleSize ?? 1.0)}em`, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontFamily: resolveHeadlineFont(content), color: content.titleColor ?? NAVY, lineHeight: 1.1, textShadow: makeOutlineShadow(content.titleOutline) }}>
+          <h2 style={{ fontSize: `${2.2 * (content.titleSize ?? 1.0)}em`, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontFamily: resolveHeadlineFont(content), color: content.titleColor ?? branding.textColor, lineHeight: 1.1, textShadow: makeOutlineShadow(content.titleOutline) }}>
             {title}
           </h2>
           <div style={{ display: "flex", justifyContent: "center" }}>
@@ -553,7 +553,7 @@ function PhotoGridLayout({ slide, branding, hasAiBackground }: Props) {
 function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ScopeBreakdownContent;
   const hasBg = hasAiBackground || slide.backgroundId != null;
-  const accent = resolveAccent(content);
+  const accent = resolveAccent(content, branding);
   const title = resolveTitle(content, slide);
   const introText = content.introText ?? "";
   const visibleRooms = visibleRoomsOf(content);
@@ -576,7 +576,7 @@ function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.centered, textAlign: "center" }}>
         {/* Header */}
         <div style={{ flexShrink: 0, marginBottom: "5%" }}>
-          <h2 style={{ fontSize: `${2.6 * (content.titleSize ?? 1.0)}em`, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontFamily: resolveHeadlineFont(content), color: content.titleColor ?? NAVY, lineHeight: 1.1, textShadow: makeOutlineShadow(content.titleOutline) }}>
+          <h2 style={{ fontSize: `${2.6 * (content.titleSize ?? 1.0)}em`, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontFamily: resolveHeadlineFont(content), color: content.titleColor ?? branding.textColor, lineHeight: 1.1, textShadow: makeOutlineShadow(content.titleOutline) }}>
             {title}
           </h2>
           <div style={{ display: "flex", justifyContent: "center" }}>
@@ -599,7 +599,7 @@ function ThreePillarsLayout({ slide, branding, hasAiBackground }: Props) {
                   <ScopeIcon color={accent} size="1.6em" />
                 </div>
                 {/* Name */}
-                <p style={{ ...roomTitleStyle(room, content, branding, NAVY), fontSize: `${0.78 * (room.titleSize ?? 1.0)}em`, textAlign: "center", marginBottom: "0.6em" }}>
+                <p style={{ ...roomTitleStyle(room, content, branding, branding.textColor), fontSize: `${0.78 * (room.titleSize ?? 1.0)}em`, textAlign: "center", marginBottom: "0.6em" }}>
                   {room.name}
                 </p>
                 {/* Description */}

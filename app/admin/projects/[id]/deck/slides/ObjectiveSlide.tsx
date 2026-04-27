@@ -230,12 +230,12 @@ function positionedBlock(
 // ─── 1. Light Statement (renamed from Statement Left) ────────────────────────
 function LightStatementLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
-  const accent = content.accentColor ?? "#B8860B";
+  const accent = content.accentColor ?? branding.accentColor;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   const headlineEm    = content.headlineSize    ?? 1.0;
   // Layout-aware default: Light Statement → navy
-  const headlineColor = content.headlineColor   ?? "#1B2A4A";
+  const headlineColor = content.headlineColor   ?? branding.textColor;
   const headlineShadow = makeOutlineShadow(content.headlineOutline);
   const statementEm   = content.statementSize   ?? 1.05;
   const statementColor = content.statementColor ?? branding.textColor;
@@ -296,7 +296,7 @@ function LightStatementLayout({ slide, branding, hasAiBackground }: Props) {
 // ─── 2. Dark Statement ───────────────────────────────────────────────────────
 function DarkStatementLayout({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
-  const accent = content.accentColor ?? "#B8860B";
+  const accent = content.accentColor ?? branding.accentColor;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
   const proofPoints = (content.bullets ?? []).filter(Boolean);
 
@@ -419,7 +419,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   // app/admin/projects/[id]/deck/page.tsx.
   const bullets = (content.bullets ?? []).filter(Boolean).slice(0, 6);
 
-  const headlineColor = content.headlineColor ?? "#1B2A4A";
+  const headlineColor = content.headlineColor ?? branding.textColor;
   const headlineShadow = makeOutlineShadow(content.headlineOutline);
 
   // Objective opener typography
@@ -429,7 +429,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
 
   // Pillar title + body typography
   const pillarTitleFont = content.pillarTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
-  const pillarTitleColor = content.pillarTitleColor ?? content.headlineColor ?? "#1B2A4A";
+  const pillarTitleColor = content.pillarTitleColor ?? content.headlineColor ?? branding.textColor;
   const pillarTitleEm = (content.pillarTitleSize ?? 1.0) * 1.15;
   const pillarBodyFont = content.pillarBodyFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const pillarBodyColor = content.pillarBodyColor ?? content.supportingColor ?? "#374151";

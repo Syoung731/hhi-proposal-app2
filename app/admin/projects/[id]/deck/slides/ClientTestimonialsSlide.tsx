@@ -59,11 +59,13 @@ function TestimonialCard({
   showStars,
   cardBg = "rgba(255,255,255,1)",
   backdrop = false,
+  fallbackTextColor,
 }: {
   t: SlideTestimonial;
   showStars: boolean;
   cardBg?: string;
   backdrop?: boolean;
+  fallbackTextColor: string;
 }) {
   return (
     <div
@@ -85,7 +87,7 @@ function TestimonialCard({
           fontWeight: t.quoteBold ? 700 : 400,
           fontStyle: t.quoteItalic !== false ? "italic" : "normal",
           textDecoration: t.quoteUnderline ? "underline" : "none",
-          color: t.quoteColor ?? NAVY,
+          color: t.quoteColor ?? fallbackTextColor,
           textShadow: makeOutlineShadow(t.quoteOutline),
           lineHeight: 1.6,
           flex: 1,
@@ -108,7 +110,7 @@ function TestimonialCard({
           fontWeight: (t.clientNameBold !== false) ? 600 : 400,
           fontStyle: t.clientNameItalic ? "italic" : "normal",
           textDecoration: t.clientNameUnderline ? "underline" : "none",
-          color: t.clientNameColor ?? NAVY,
+          color: t.clientNameColor ?? fallbackTextColor,
           textShadow: makeOutlineShadow(t.clientNameOutline),
         }}
       >
@@ -140,11 +142,13 @@ function CardGrid({
   showStars,
   cardBg,
   backdrop,
+  fallbackTextColor,
 }: {
   testimonials: SlideTestimonial[];
   showStars: boolean;
   cardBg?: string;
   backdrop?: boolean;
+  fallbackTextColor: string;
 }) {
   const count = testimonials.length;
   const cols = count <= 1 ? 1 : count <= 3 ? count : 2;
@@ -162,7 +166,7 @@ function CardGrid({
       }}
     >
       {testimonials.map((t) => (
-        <TestimonialCard key={t.id} t={t} showStars={showStars} cardBg={cardBg} backdrop={backdrop} />
+        <TestimonialCard key={t.id} t={t} showStars={showStars} cardBg={cardBg} backdrop={backdrop} fallbackTextColor={fallbackTextColor} />
       ))}
     </div>
   );
@@ -177,7 +181,7 @@ export function ClientTestimonialsSlide({ slide, branding, hasAiBackground }: Pr
   const subheadline = c.subheadline ?? null;
   const showStars = c.showStars ?? TESTIMONIALS_SLIDE_DEFAULTS.showStars;
   const bgPhoto = c.backgroundPhoto ?? null;
-  const accent = c.accentColor ?? GOLD;
+  const accent = c.accentColor ?? branding.accentColor;
   const testimonials = c.testimonials && c.testimonials.length > 0 ? c.testimonials : DEFAULT_TESTIMONIALS;
 
   switch (layoutKey) {
@@ -273,7 +277,7 @@ function QuoteCardsLayout({
       {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content, alignItems: "center" }}>
-        <div style={{ fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? (hasBg ? "#FFFFFF" : NAVY), textShadow: makeOutlineShadow(content.headlineOutline), textAlign: "center", lineHeight: 1.2 }}>
+        <div style={{ fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor), textShadow: makeOutlineShadow(content.headlineOutline), textAlign: "center", lineHeight: 1.2 }}>
           {headline}
         </div>
         <div style={{ display: "flex", justifyContent: "center" }}>
@@ -285,7 +289,7 @@ function QuoteCardsLayout({
           </div>
         )}
         <div style={{ flex: 1, display: "flex", alignItems: "center", width: "100%" }}>
-          <CardGrid testimonials={testimonials.slice(0, 4)} showStars={showStars} />
+          <CardGrid testimonials={testimonials.slice(0, 4)} showStars={showStars} fallbackTextColor={branding.textColor} />
         </div>
       </div>
 
@@ -324,7 +328,7 @@ function SingleFeatureLayout({
 }) {
   const t = testimonials[0] ?? DEFAULT_TESTIMONIALS[0];
   const hasBg = !!bgPhoto;
-  const textColor = hasBg ? "#FFFFFF" : NAVY;
+  const textColor = hasBg ? "#FFFFFF" : branding.textColor;
   const mutedColor = hasBg ? "rgba(255,255,255,0.7)" : MUTED_NAVY;
 
   return (
@@ -427,6 +431,7 @@ function PhotoOverlayLayout({
             showStars={showStars}
             cardBg="rgba(255,255,255,0.9)"
             backdrop
+            fallbackTextColor={branding.textColor}
           />
         </div>
       </div>

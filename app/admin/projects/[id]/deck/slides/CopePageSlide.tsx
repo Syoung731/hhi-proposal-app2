@@ -130,12 +130,12 @@ function IconColumnsLayout({
   sectionLabel: string; headline: string; subheadline: string | null;
   items: CopeItem[]; hasBg?: boolean; content: CopePageContent; branding: DeckBranding;
 }) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Per-field: Subheadline
@@ -192,13 +192,13 @@ function IconColumnsLayout({
           {items.map((item) => {
             const titleFont = item.titleFont ?? fallbackBodyFont;
             const titleSize = item.titleSize ?? 1.0;
-            const titleColor = item.titleColor ?? NAVY;
+            const titleColor = item.titleColor ?? branding.textColor;
             const bulletsFont = item.bulletsFont ?? fallbackBodyFont;
             const bulletsSize = item.bulletsSize ?? 1.0;
-            const bulletsColor = item.bulletsColor ?? content.bodyColor ?? NAVY;
+            const bulletsColor = item.bulletsColor ?? content.bodyColor ?? branding.textColor;
             const descFont = item.descriptionFont ?? fallbackBodyFont;
             const descSize = item.descriptionSize ?? 1.0;
-            const descColor = item.descriptionColor ?? content.bodyColor ?? NAVY;
+            const descColor = item.descriptionColor ?? content.bodyColor ?? branding.textColor;
 
             return (
               <div key={item.id} style={{ display: "flex", flexDirection: "column" }}>
@@ -294,13 +294,13 @@ function QuadPhotosLayout({
   sectionLabel: string; headline: string; subheadline: string | null;
   items: CopeItem[]; hasBg?: boolean; content: CopePageContent; branding: DeckBranding;
 }) {
-  const accent = content.accentColor ?? GOLD;
+  const accent = content.accentColor ?? branding.accentColor;
   const cells = items.slice(0, 4);
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Fallback fonts for per-item
@@ -413,12 +413,12 @@ function AnnotatedDiagramLayout({
   sectionLabel: string; headline: string; subheadline: string | null;
   items: CopeItem[]; heroImageUrl?: string | null; hasBg?: boolean; content: CopePageContent; branding: DeckBranding;
 }) {
-  const accent = content.accentColor ?? GOLD;
+  const accent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Per-field: Subheadline
@@ -477,10 +477,10 @@ function AnnotatedDiagramLayout({
             {items.map((item, i) => {
               const titleFont = item.titleFont ?? fallbackBodyFont;
               const titleSize = item.titleSize ?? 1.0;
-              const titleColor = item.titleColor ?? NAVY;
+              const titleColor = item.titleColor ?? branding.textColor;
               const descFont = item.descriptionFont ?? fallbackBodyFont;
               const descSize = item.descriptionSize ?? 1.0;
-              const descColor = item.descriptionColor ?? NAVY;
+              const descColor = item.descriptionColor ?? branding.textColor;
 
               return (
                 <div key={item.id}>

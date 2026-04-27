@@ -129,7 +129,7 @@ function BulletCard({ content, branding }: { content: AdditionOverviewContent; b
                   fontWeight: (bullet.labelBold !== false && bullet.labelBold !== null) ? 700 : 400,
                   fontStyle: bullet.labelItalic ? "italic" : undefined,
                   textDecoration: bullet.labelUnderline ? "underline" : undefined,
-                  color: bullet.labelColor ?? "#1B2A4A",
+                  color: bullet.labelColor ?? branding.textColor,
                   textShadow: makeOutlineShadow(bullet.labelOutline),
                 }}
               >
@@ -339,7 +339,7 @@ function PhotoBulletCardLayout({ slide, branding, hasAiBackground }: LayoutProps
             fontWeight: content.headlineBold ? 700 : 400,
             fontStyle: content.headlineItalic ? "italic" : undefined,
             textDecoration: content.headlineUnderline ? "underline" : undefined,
-            color: content.headlineColor ?? "#1B2A4A",
+            color: content.headlineColor ?? branding.textColor,
             textShadow: makeOutlineShadow(content.headlineOutline),
             margin: 0,
             lineHeight: 1.2,
@@ -462,7 +462,7 @@ function CombinedLayout({ slide, branding, hasAiBackground }: LayoutProps) {
             fontWeight: content.headlineBold ? 700 : 400,
             fontStyle: content.headlineItalic ? "italic" : undefined,
             textDecoration: content.headlineUnderline ? "underline" : undefined,
-            color: content.headlineColor ?? "#1B2A4A",
+            color: content.headlineColor ?? branding.textColor,
             textShadow: makeOutlineShadow(content.headlineOutline),
             margin: 0,
             lineHeight: 1.2,

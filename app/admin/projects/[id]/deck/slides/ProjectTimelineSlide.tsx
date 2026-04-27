@@ -44,7 +44,7 @@ export function ProjectTimelineSlide({ slide, branding, hasAiBackground }: Props
   const sectionLabel = c.sectionLabel ?? "YOUR PROJECT";
   const headline = slide.headline ?? "Projected Timeline";
   const phases = c.phases && c.phases.length > 0 ? c.phases : DEFAULT_TIMELINE_PHASES;
-  const accent = c.accentColor ?? GOLD;
+  const accent = c.accentColor ?? branding.accentColor;
   const footnote = c.footnoteText ?? null;
   const hasBg = hasAiBackground || slide.backgroundId != null;
 
@@ -109,7 +109,7 @@ interface LayoutProps {
 // right of dot, description below.
 
 function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, hasBg, content, branding }: LayoutProps) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
@@ -155,7 +155,7 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
               fontWeight: (content.headlineBold !== false) ? 700 : 400,
               fontStyle: content.headlineItalic ? "italic" : "normal",
               textDecoration: content.headlineUnderline ? "underline" : "none",
-              color: content.headlineColor ?? NAVY,
+              color: content.headlineColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: makeOutlineShadow(content.headlineOutline),
             }}
@@ -209,7 +209,7 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
                         fontWeight: (phase.nameBold !== false) ? 700 : 400,
                         fontStyle: phase.nameItalic ? "italic" : "normal",
                         textDecoration: phase.nameUnderline ? "underline" : "none",
-                        color: phase.nameColor ?? NAVY,
+                        color: phase.nameColor ?? branding.textColor,
                         textTransform: "uppercase",
                         letterSpacing: "0.06em",
                         textShadow: makeOutlineShadow(phase.nameOutline),
@@ -242,7 +242,7 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
                       fontWeight: phase.descriptionBold ? 700 : 400,
                       fontStyle: phase.descriptionItalic ? "italic" : "normal",
                       textDecoration: phase.descriptionUnderline ? "underline" : "none",
-                      color: phase.descriptionColor ?? (content.bodyColor ?? NAVY),
+                      color: phase.descriptionColor ?? (content.bodyColor ?? branding.textColor),
                       lineHeight: resolvedLineSpacing,
                       opacity: 0.8,
                       textShadow: makeOutlineShadow(phase.descriptionOutline),
@@ -292,7 +292,7 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
 // Center vertical line, phases alternate left/right.
 
 function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, hasBg, content, branding }: LayoutProps) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   return (
@@ -334,7 +334,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
               fontWeight: (content.headlineBold !== false) ? 700 : 400,
               fontStyle: content.headlineItalic ? "italic" : "normal",
               textDecoration: content.headlineUnderline ? "underline" : "none",
-              color: content.headlineColor ?? NAVY,
+              color: content.headlineColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: makeOutlineShadow(content.headlineOutline),
             }}
@@ -383,7 +383,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
                     }}
                   >
                     {isLeft && (
-                      <PhaseBlock phase={phase} accent={accent} align="right" />
+                      <PhaseBlock phase={phase} accent={accent} align="right" fallbackTextColor={branding.textColor} />
                     )}
                   </div>
 
@@ -418,7 +418,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
                     }}
                   >
                     {!isLeft && (
-                      <PhaseBlock phase={phase} accent={accent} align="left" />
+                      <PhaseBlock phase={phase} accent={accent} align="left" fallbackTextColor={branding.textColor} />
                     )}
                   </div>
                 </div>
@@ -460,7 +460,7 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
   );
 }
 
-function PhaseBlock({ phase, accent, align }: { phase: ProjectPhase; accent: string; align: "left" | "right" }) {
+function PhaseBlock({ phase, accent, align, fallbackTextColor }: { phase: ProjectPhase; accent: string; align: "left" | "right"; fallbackTextColor: string }) {
   return (
     <>
       <p
@@ -470,7 +470,7 @@ function PhaseBlock({ phase, accent, align }: { phase: ProjectPhase; accent: str
           fontWeight: (phase.nameBold !== false) ? 700 : 400,
           fontStyle: phase.nameItalic ? "italic" : "normal",
           textDecoration: phase.nameUnderline ? "underline" : "none",
-          color: phase.nameColor ?? NAVY,
+          color: phase.nameColor ?? fallbackTextColor,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
           textAlign: align,
@@ -504,7 +504,7 @@ function PhaseBlock({ phase, accent, align }: { phase: ProjectPhase; accent: str
           fontWeight: phase.descriptionBold ? 700 : 400,
           fontStyle: phase.descriptionItalic ? "italic" : "normal",
           textDecoration: phase.descriptionUnderline ? "underline" : "none",
-          color: phase.descriptionColor ?? NAVY,
+          color: phase.descriptionColor ?? fallbackTextColor,
           lineHeight: 1.65,
           opacity: 0.8,
           textAlign: align,
@@ -521,7 +521,7 @@ function PhaseBlock({ phase, accent, align }: { phase: ProjectPhase; accent: str
 // Each phase indented progressively further right. Minimal, text-heavy.
 
 function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasBg, content, branding }: LayoutProps) {
-  const resolvedAccent = content.accentColor ?? GOLD;
+  const resolvedAccent = content.accentColor ?? branding.accentColor;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const bodyScale = BODY_SCALE[content.bodySizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
@@ -566,7 +566,7 @@ function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasBg
               fontWeight: (content.headlineBold !== false) ? 700 : 400,
               fontStyle: content.headlineItalic ? "italic" : "normal",
               textDecoration: content.headlineUnderline ? "underline" : "none",
-              color: content.headlineColor ?? NAVY,
+              color: content.headlineColor ?? branding.textColor,
               lineHeight: 1.15,
               textShadow: makeOutlineShadow(content.headlineOutline),
             }}
@@ -597,7 +597,7 @@ function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasBg
                     fontWeight: (phase.nameBold !== false) ? 700 : 400,
                     fontStyle: phase.nameItalic ? "italic" : "normal",
                     textDecoration: phase.nameUnderline ? "underline" : "none",
-                    color: phase.nameColor ?? NAVY,
+                    color: phase.nameColor ?? branding.textColor,
                     lineHeight: 1.3,
                     marginBottom: "1.5%",
                     textShadow: makeOutlineShadow(phase.nameOutline),
@@ -632,7 +632,7 @@ function SteppedLayout({ sectionLabel, headline, phases, accent, footnote, hasBg
                     fontWeight: phase.descriptionBold ? 700 : 400,
                     fontStyle: phase.descriptionItalic ? "italic" : "normal",
                     textDecoration: phase.descriptionUnderline ? "underline" : "none",
-                    color: phase.descriptionColor ?? (content.bodyColor ?? NAVY),
+                    color: phase.descriptionColor ?? (content.bodyColor ?? branding.textColor),
                     lineHeight: resolvedLineSpacing,
                     opacity: 0.8,
                     textShadow: makeOutlineShadow(phase.descriptionOutline),

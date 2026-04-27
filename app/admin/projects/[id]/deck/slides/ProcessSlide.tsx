@@ -52,7 +52,7 @@ const DEFAULT_BOTTOM =
 
 export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
   const c = (slide.content ?? {}) as ProcessContent;
-  const resolvedAccent = c.accentColor ?? "#B8860B";
+  const resolvedAccent = c.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const stages = c.stages && c.stages.length > 0 ? c.stages : DEFAULT_STAGES;
   const bottomStatement = c.bottomStatement ?? DEFAULT_BOTTOM;

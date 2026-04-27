@@ -119,7 +119,7 @@ export function DesignBuildAdvantageSlide({ slide, branding, hasAiBackground }: 
   const bgStyle = c.backgroundStyle ?? "dark";
   const bgPhoto = c.backgroundPhoto ?? null;
   const footerNote = c.footerNote ?? null;
-  const accent = c.accentColor ?? GOLD;
+  const accent = c.accentColor ?? branding.accentColor;
   const pillars = c.pillars && c.pillars.length > 0 ? c.pillars : DEFAULT_PILLARS;
   const guarantees = c.guarantees && c.guarantees.length > 0 ? c.guarantees : DEFAULT_GUARANTEES;
   const nodes = c.diagramNodes && c.diagramNodes.length > 0 ? c.diagramNodes : DEFAULT_DIAGRAM_NODES;
@@ -153,7 +153,7 @@ function IconCardsLayout({
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (hasBg ? "#FFFFFF" : NAVY);
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor);
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Per-field: Subheadline
@@ -299,7 +299,7 @@ function BoldGuaranteeLayout({
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (isDark ? "#FFFFFF" : NAVY);
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (isDark ? "#FFFFFF" : branding.textColor);
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Per-field: Subheadline
@@ -447,7 +447,7 @@ function QuadGridLayout({
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (hasBg ? "#FFFFFF" : NAVY);
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor);
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Per-field: Subheadline
@@ -582,7 +582,7 @@ function CycleDiagramLayout({
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
-  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? NAVY;
+  const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
 
   // Fallback fonts for per-item
@@ -610,7 +610,7 @@ function CycleDiagramLayout({
 
         {/* Cycle diagram */}
         <div style={{ flex: "0 0 52%", display: "flex", justifyContent: "center", alignItems: "center" }}>
-          <CycleDiagramSVG nodes={nodes} />
+          <CycleDiagramSVG nodes={nodes} accent={accent} />
         </div>
 
         {/* Support columns */}
@@ -618,7 +618,7 @@ function CycleDiagramLayout({
           {columns.map((col) => {
             const tFont = col.titleFont ?? fallbackBodyFont;
             const tSize = col.titleSize ?? 1.0;
-            const tColor = col.titleColor ?? NAVY;
+            const tColor = col.titleColor ?? branding.textColor;
             const dFont = col.descriptionFont ?? fallbackBodyFont;
             const dSize = col.descriptionSize ?? 1.0;
             const dColor = col.descriptionColor ?? MUTED_NAVY;
@@ -670,7 +670,7 @@ function CycleDiagramLayout({
 
 // ─── Cycle Diagram SVG ──────────────────────────────────────────────────────
 
-function CycleDiagramSVG({ nodes }: { nodes: DesignBuildDiagramNode[] }) {
+function CycleDiagramSVG({ nodes, accent }: { nodes: DesignBuildDiagramNode[]; accent: string }) {
   const cx = 150;
   const cy = 110;
   const r = 75;
@@ -699,7 +699,7 @@ function CycleDiagramSVG({ nodes }: { nodes: DesignBuildDiagramNode[] }) {
     <svg width="300" height="220" viewBox="0 0 300 220" style={{ maxWidth: "100%", height: "auto" }}>
       <defs>
         <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill={GOLD} />
+          <polygon points="0 0, 8 3, 0 6" fill={accent} />
         </marker>
       </defs>
 
@@ -709,7 +709,7 @@ function CycleDiagramSVG({ nodes }: { nodes: DesignBuildDiagramNode[] }) {
           <path
             key={`arrow-${i}`}
             d={arrowPath(pos, next)}
-            stroke={GOLD}
+            stroke={accent}
             strokeWidth={1.5}
             fill="none"
             markerEnd="url(#arrowhead)"
