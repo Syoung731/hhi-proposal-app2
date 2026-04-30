@@ -7,7 +7,7 @@ import type { SerializedDeck, SerializedDeckSlide } from "@/app/lib/snapshot";
  *
  * Read-only: this intentionally does NOT call `getDeckForProject` from app/lib/deck/db.ts —
  * that entry point runs heavy auto-sync logic (writes to before-after / scope-breakdown /
- * investment / project-timeline / retainer slides). Publishing should reflect the current
+ * investment-by-space / timeline / overall-investment slides). Publishing should reflect the current
  * persisted deck state, not trigger further edits.
  *
  * Returns `undefined` if the project has no ProposalDeck row yet — callers should set

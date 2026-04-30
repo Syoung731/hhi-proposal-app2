@@ -3,7 +3,7 @@
 import type {
   ProposalSlide,
   DeckBranding,
-  InvestmentContent,
+  InvestmentBySpaceContent,
   InvestmentLineItem,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
@@ -59,7 +59,7 @@ function effectiveHigh(item: InvestmentLineItem): number | null {
 // the bottom total line (the per-space total label was misleading; the
 // real project total now renders on the next slide).
 function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
-  const content = (slide.content ?? {}) as InvestmentContent;
+  const content = (slide.content ?? {}) as InvestmentBySpaceContent;
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const items = content.lineItems ?? [];
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
@@ -248,7 +248,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
           Phase 8C: the retainer story lives on Slide 10 ("Your Investment"),
           where Band 1 renders the retainer amount, hourly-rate sentence, and
           bullets. Duplicating that here adds noise. The retainerAmount /
-          retainerLabel fields on InvestmentContent remain — still written by
+          retainerLabel fields on InvestmentBySpaceContent remain — still written by
           syncRetainerFromProject — for legacy decks and for the Investment
           layout's future needs. Just not rendered on this layout. */}
 
@@ -287,7 +287,7 @@ function TableCalloutLayout({ slide, branding, hasAiBackground }: Props) {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
-export function InvestmentSlide({ slide, branding, hasAiBackground }: Props) {
+export function InvestmentBySpaceSlide({ slide, branding, hasAiBackground }: Props) {
   switch (slide.layoutKey) {
     case "table-callout":
     default:

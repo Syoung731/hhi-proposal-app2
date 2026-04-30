@@ -3,7 +3,7 @@
 // Phase 1: cover | objective | investment
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type SlideType = "cover" | "objective" | "investment" | "why-us" | "scope-overview" | "before-after" | "scope-breakdown" | "risk-brief" | "process" | "core-values" | "project-timeline" | "cope-page" | "design-retainer" | "next-steps" | "closing-slide" | "visual-inspiration" | "client-testimonials" | "design-build-advantage" | "addition-overview";
+export type SlideType = "cover" | "objective" | "investment-by-space" | "why-us" | "scope-overview" | "before-after" | "scope-breakdown" | "risk-brief" | "our-process" | "core-values" | "timeline" | "cope" | "overall-investment" | "next-steps" | "closing" | "inspiration" | "testimonials" | "design-build" | "addition-overview";
 
 // ─── Text Zone Types ────────────────────────────────────────────────────────
 
@@ -396,7 +396,7 @@ export interface InvestmentLineItem {
   includesText?: string | null;
 }
 
-export interface InvestmentContent extends SharedSlideFields {
+export interface InvestmentBySpaceContent extends SharedSlideFields {
   lineItems?: InvestmentLineItem[];
   // Phase 8C.2 T2: `retainerAmount` and `retainerLabel` were removed here.
   // Phase 8C T2 earlier removed the mid-slide retainer callout that rendered
@@ -890,7 +890,7 @@ export interface ProcessStage {
  * Content shape for process slides.
  * Three sequential stages presented left-to-right.
  */
-export interface ProcessContent extends SharedSlideFields {
+export interface OurProcessContent extends SharedSlideFields {
   /** The three stages of the process. */
   stages?: ProcessStage[];
   /** Full-width closing statement at the bottom. */
@@ -1030,8 +1030,8 @@ export interface ProjectPhase {
   noteOutline?: string | null;
 }
 
-/** Content shape for project-timeline slides. */
-export interface ProjectTimelineContent extends SharedSlideFields {
+/** Content shape for timeline slides. */
+export interface TimelineContent extends SharedSlideFields {
   /** Section label above the headline. Default: "YOUR PROJECT". */
   sectionLabel?: string | null;
   /** Whether to append the project address to the headline. Default: true. */
@@ -1120,8 +1120,8 @@ export interface CopeItem {
   bulletsOutline?: string | null;
 }
 
-/** Content shape for cope-page slides. */
-export interface CopePageContent extends SharedSlideFields {
+/** Content shape for cope slides. */
+export interface CopeContent extends SharedSlideFields {
   /** Section label above the headline. Default: "WHAT'S INCLUDED". */
   sectionLabel?: string | null;
   /** Optional supporting line below headline. */
@@ -1156,7 +1156,7 @@ export interface CopePageContent extends SharedSlideFields {
   subheadlineOutline?: string | null;
 }
 
-/** A single benefit item in a design-retainer slide. */
+/** A single benefit item in an overall-investment slide. */
 export interface DesignRetainerBenefit {
   text: string;
   textFont?: string;
@@ -1168,8 +1168,8 @@ export interface DesignRetainerBenefit {
   textOutline?: string | null;
 }
 
-/** Content shape for design-retainer slides (single layout: three-band-summary). */
-export interface DesignRetainerContent extends SharedSlideFields {
+/** Content shape for overall-investment slides (single layout: three-band-summary). */
+export interface OverallInvestmentContent extends SharedSlideFields {
   /** Section label above the headline. Default: "YOUR INVESTMENT". */
   sectionLabel?: string | null;
   /** Tagline shown below headline. */
@@ -1375,8 +1375,8 @@ export interface NextStepsContent extends SharedSlideFields {
   footerNoteOutline?: string | null;
 }
 
-/** Content shape for closing-slide slides. */
-export interface ClosingSlideContent extends SharedSlideFields {
+/** Content shape for closing slides. */
+export interface ClosingContent extends SharedSlideFields {
   /** Tagline shown below headline. Default: "Design. Build. Remodel." */
   tagline?: string | null;
   /** Optional subheadline shown below tagline. */
@@ -1447,8 +1447,8 @@ export interface ClosingSlideContent extends SharedSlideFields {
   validityOutline?: string | null;
 }
 
-/** Content shape for visual-inspiration slides. */
-export interface VisualInspirationContent extends SharedSlideFields {
+/** Content shape for inspiration slides. */
+export interface InspirationContent extends SharedSlideFields {
   /** Subtitle shown below headline in hero-plus-stacked layout. */
   subtitle?: string | null;
   /** Caption text for masonry-grid and side-by-side-bleed layouts. */
@@ -1527,8 +1527,8 @@ export interface SlideTestimonial {
   projectNameOutline?: string | null;
 }
 
-/** Content shape for client-testimonials slides. */
-export interface ClientTestimonialsContent extends SharedSlideFields {
+/** Content shape for testimonials slides. */
+export interface TestimonialsContent extends SharedSlideFields {
   /** Optional subheadline below headline. */
   subheadline?: string | null;
   /** Background photo URL from photo library. */
@@ -1644,8 +1644,8 @@ export interface DesignBuildSupportColumn {
   descriptionOutline?: string | null;
 }
 
-/** Content shape for design-build-advantage slides. */
-export interface DesignBuildAdvantageContent extends SharedSlideFields {
+/** Content shape for design-build slides. */
+export interface DesignBuildContent extends SharedSlideFields {
   /** Optional subheadline below headline. */
   subheadline?: string | null;
   /** Background style for bold-guarantee layout. Default: "dark". */
@@ -1883,22 +1883,22 @@ export interface AdditionOverviewContent extends SharedSlideFields {
 export type SlideContent =
   | CoverContent
   | ObjectiveContent
-  | InvestmentContent
+  | InvestmentBySpaceContent
   | WhyUsContent
   | ScopeOverviewContent
   | BeforeAfterContent
   | ScopeBreakdownContent
   | RiskBriefContent
-  | ProcessContent
+  | OurProcessContent
   | CoreValuesContent
-  | ProjectTimelineContent
-  | CopePageContent
-  | DesignRetainerContent
+  | TimelineContent
+  | CopeContent
+  | OverallInvestmentContent
   | NextStepsContent
-  | ClosingSlideContent
-  | VisualInspirationContent
-  | ClientTestimonialsContent
-  | DesignBuildAdvantageContent
+  | ClosingContent
+  | InspirationContent
+  | TestimonialsContent
+  | DesignBuildContent
   | AdditionOverviewContent;
 
 // ─── Slide ───────────────────────────────────────────────────────────────────
@@ -2133,7 +2133,7 @@ export function getLayoutsForType(type: SlideType) {
       return COVER_LAYOUTS;
     case "objective":
       return OBJECTIVE_LAYOUTS;
-    case "investment":
+    case "investment-by-space":
       return INVESTMENT_LAYOUTS;
     case "why-us":
       return WHY_US_LAYOUTS;
@@ -2145,25 +2145,25 @@ export function getLayoutsForType(type: SlideType) {
       return SCOPE_BREAKDOWN_LAYOUTS;
     case "risk-brief":
       return RISK_BRIEF_LAYOUTS;
-    case "process":
+    case "our-process":
       return PROCESS_LAYOUTS;
     case "core-values":
       return CORE_VALUES_LAYOUTS;
-    case "project-timeline":
+    case "timeline":
       return PROJECT_TIMELINE_LAYOUTS;
-    case "cope-page":
+    case "cope":
       return COPE_PAGE_LAYOUTS;
-    case "design-retainer":
+    case "overall-investment":
       return DESIGN_RETAINER_LAYOUTS;
     case "next-steps":
       return NEXT_STEPS_LAYOUTS;
-    case "closing-slide":
+    case "closing":
       return CLOSING_SLIDE_LAYOUTS;
-    case "visual-inspiration":
+    case "inspiration":
       return VISUAL_INSPIRATION_LAYOUTS;
-    case "client-testimonials":
+    case "testimonials":
       return CLIENT_TESTIMONIALS_LAYOUTS;
-    case "design-build-advantage":
+    case "design-build":
       return DESIGN_BUILD_ADVANTAGE_LAYOUTS;
     case "addition-overview":
       return ADDITION_OVERVIEW_LAYOUTS;
@@ -2171,23 +2171,23 @@ export function getLayoutsForType(type: SlideType) {
 }
 
 export const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
-  cover:             "Cover",
-  objective:         "Objective",
-  investment:        "Investment by Space",
-  "why-us":          "Why Us",
-  "scope-overview":  "Scope Overview",
-  "before-after":    "Before / After",
-  "scope-breakdown": "Scope Breakdown",
-  "risk-brief":      "Risk Brief",
-  "process":         "Our Process",
-  "core-values":     "Core Values",
-  "project-timeline": "Timeline",
-  "cope-page":        "COPE",
-  "design-retainer":  "Overall Investment",
-  "next-steps":       "Next Steps",
-  "closing-slide":    "Closing",
-  "visual-inspiration": "Inspiration",
-  "client-testimonials": "Testimonials",
-  "design-build-advantage": "Design-Build",
-  "addition-overview": "Addition Overview",
+  cover:                 "Cover",
+  objective:             "Objective",
+  "investment-by-space": "Investment by Space",
+  "why-us":              "Why Us",
+  "scope-overview":      "Scope Overview",
+  "before-after":        "Before / After",
+  "scope-breakdown":     "Scope Breakdown",
+  "risk-brief":          "Risk Brief",
+  "our-process":         "Our Process",
+  "core-values":         "Core Values",
+  timeline:              "Timeline",
+  cope:                  "COPE",
+  "overall-investment":  "Overall Investment",
+  "next-steps":          "Next Steps",
+  closing:               "Closing",
+  inspiration:           "Inspiration",
+  testimonials:          "Testimonials",
+  "design-build":        "Design-Build",
+  "addition-overview":   "Addition Overview",
 };

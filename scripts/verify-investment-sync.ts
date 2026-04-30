@@ -22,7 +22,7 @@ async function main() {
       where: { projectId: PROJECT_ID },
       include: {
         slides: {
-          where: { type: "investment" },
+          where: { type: "investment-by-space" },
           select: { id: true, isUserModified: true, content: true },
         },
       },

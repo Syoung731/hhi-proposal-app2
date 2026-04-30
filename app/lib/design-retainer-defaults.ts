@@ -1,5 +1,3 @@
-import type { DesignRetainerContent } from "@/app/lib/deck/types";
-
 export const DEFAULT_DESIGN_RETAINER_BENEFITS: string[] = [
   "Full architectural design and space planning",
   "HOA / ARB submission and approval management",

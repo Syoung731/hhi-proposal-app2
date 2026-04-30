@@ -17,7 +17,7 @@ async function main() {
   const prisma = new PrismaClient({ adapter });
 
   const slides = await prisma.deckSlide.findMany({
-    where: { type: "investment" },
+    where: { type: "investment-by-space" },
     select: { id: true, deckId: true, content: true },
   });
 

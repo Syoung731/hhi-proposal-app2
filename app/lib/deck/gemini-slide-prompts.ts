@@ -28,7 +28,7 @@ const SLIDE_SUBJECTS: Record<SlideType, string> = {
   objective:
     "Soft watercolor wash blending warm cream into pale gold. Subtle paper grain texture. Abstract, painterly, no objects.",
 
-  investment:
+  "investment-by-space":
     "Clean warm cream paper texture with very subtle horizontal ruled lines. Minimal, financial document feel.",
 
   "why-us":
@@ -46,34 +46,34 @@ const SLIDE_SUBJECTS: Record<SlideType, string> = {
   "risk-brief":
     "Abstract two-tone split. Left half deep navy texture. Right half warm amber texture. Geometric, no objects.",
 
-  process:
+  "our-process":
     "Soft horizontal gradient wash, warm cream to light gray. No objects, no rooms.",
 
   "core-values":
     "Warm linen parchment texture with very faint geometric lattice pattern. Elegant, minimal, no objects.",
 
-  "project-timeline":
+  timeline:
     "Soft vertical gradient wash, warm cream transitioning to pale sand. Subtle paper grain. No objects, no rooms.",
 
-  "cope-page":
+  cope:
     "Warm off-white surface with very faint blueprint grid lines. Construction document feel, minimal, no objects.",
 
-  "design-retainer":
+  "overall-investment":
     "Elegant linen textured background with soft warm lighting, subtle architectural drafting elements at edges. Premium, confident, minimal.",
 
   "next-steps":
     "Clean warm parchment surface with faint directional lines suggesting forward motion. Minimal, professional, no objects.",
 
-  "closing-slide":
+  closing:
     "Dark moody architectural interior with deep navy tones, soft warm light spill from a window. Elegant, quiet, premium closing feel.",
 
-  "visual-inspiration":
+  inspiration:
     "Soft warm linen texture with very subtle watercolor wash, no objects. Gallery wall feel, neutral background for photo overlay.",
 
-  "client-testimonials":
+  testimonials:
     "Warm elegant interior with soft natural light, muted warm tones, slightly out of focus. Luxurious residential feel, perfect testimonial backdrop.",
 
-  "design-build-advantage":
+  "design-build":
     "Clean architectural blueprint overlay on warm linen, very subtle technical drawing lines. Professional, structured, design-forward.",
 
   "addition-overview":

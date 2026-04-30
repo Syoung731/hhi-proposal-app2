@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProposalSlide, DeckBranding, ProcessContent, ProcessStage } from "@/app/lib/deck/types";
+import type { ProposalSlide, DeckBranding, OurProcessContent, ProcessStage } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SECTION_LABEL_SIZE, CARD_SHADOWS, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
@@ -50,8 +50,8 @@ const DEFAULT_BOTTOM =
 
 // ─── Three-stages layout ──────────────────────────────────────────────────────
 
-export function ProcessSlide({ slide, branding, hasAiBackground }: Props) {
-  const c = (slide.content ?? {}) as ProcessContent;
+export function OurProcessSlide({ slide, branding, hasAiBackground }: Props) {
+  const c = (slide.content ?? {}) as OurProcessContent;
   const resolvedAccent = c.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
   const stages = c.stages && c.stages.length > 0 ? c.stages : DEFAULT_STAGES;

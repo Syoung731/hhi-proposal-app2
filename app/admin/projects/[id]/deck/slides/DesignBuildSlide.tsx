@@ -3,7 +3,7 @@
 import type {
   ProposalSlide,
   DeckBranding,
-  DesignBuildAdvantageContent,
+  DesignBuildContent,
   DesignBuildPillar,
   DesignBuildGuarantee,
   DesignBuildDiagramNode,
@@ -111,8 +111,8 @@ function renderIcon(name: string, color: string, size?: string) {
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
-export function DesignBuildAdvantageSlide({ slide, branding, hasAiBackground }: Props) {
-  const c = (slide.content ?? {}) as DesignBuildAdvantageContent;
+export function DesignBuildSlide({ slide, branding, hasAiBackground }: Props) {
+  const c = (slide.content ?? {}) as DesignBuildContent;
   const layoutKey = slide.layoutKey as string;
   const headline = slide.headline ?? "The Design-Build Advantage";
   const subheadline = c.subheadline ?? null;
@@ -146,7 +146,7 @@ function IconCardsLayout({
 }: {
   headline: string; subheadline: string | null; pillars: DesignBuildPillar[];
   bgPhoto: string | null; hasAiBackground?: boolean; branding: DeckBranding;
-  content: DesignBuildAdvantageContent; accent: string;
+  content: DesignBuildContent; accent: string;
 }) {
   const hasBg = !!bgPhoto;
 
@@ -291,7 +291,7 @@ function BoldGuaranteeLayout({
 }: {
   headline: string; subheadline: string | null; guarantees: DesignBuildGuarantee[];
   bgStyle: "light" | "dark"; bgPhoto: string | null; footerNote: string | null;
-  hasAiBackground?: boolean; branding: DeckBranding; content: DesignBuildAdvantageContent; accent: string;
+  hasAiBackground?: boolean; branding: DeckBranding; content: DesignBuildContent; accent: string;
 }) {
   const hasBg = !!bgPhoto;
   const isDark = bgStyle === "dark" || hasBg;
@@ -440,7 +440,7 @@ function QuadGridLayout({
 }: {
   headline: string; subheadline: string | null; pillars: DesignBuildPillar[];
   bgPhoto: string | null; hasAiBackground?: boolean; branding: DeckBranding;
-  content: DesignBuildAdvantageContent; accent: string;
+  content: DesignBuildContent; accent: string;
 }) {
   const hasBg = !!bgPhoto;
 
@@ -577,7 +577,7 @@ function CycleDiagramLayout({
 }: {
   headline: string; nodes: DesignBuildDiagramNode[];
   columns: DesignBuildSupportColumn[]; hasAiBackground?: boolean;
-  branding: DeckBranding; content: DesignBuildAdvantageContent; accent: string;
+  branding: DeckBranding; content: DesignBuildContent; accent: string;
 }) {
   // Per-field: Slide title
   const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;

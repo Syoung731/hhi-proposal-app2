@@ -6,7 +6,7 @@
  * null, the canonical default from `TIMELINE_PHASE_DEFINITIONS` is used.
  *
  * Only the 3 phases with `hasDuration: true` carry a `durationText`; the 2
- * milestones render as headline-only markers on the project-timeline deck
+ * milestones render as headline-only markers on the timeline deck
  * slide.
  */
 
@@ -104,7 +104,7 @@ export function resolvePhaseDescription(
 }
 
 /**
- * Build the full 5-entry ProjectPhase array for a project-timeline slide,
+ * Build the full 5-entry ProjectPhase array for a timeline slide,
  * merging TimelinePhase override fields onto the hardcoded definitions.
  * Milestone entries (hasDuration: false) get an empty `duration` string.
  */

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProposalSlide, DeckBranding, ClientTestimonialsContent, SlideTestimonial } from "@/app/lib/deck/types";
+import type { ProposalSlide, DeckBranding, TestimonialsContent, SlideTestimonial } from "@/app/lib/deck/types";
 import { DEFAULT_TESTIMONIALS, TESTIMONIALS_SLIDE_DEFAULTS } from "@/app/lib/testimonial-defaults";
 import { StarRating } from "./shared/StarRating";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
@@ -174,8 +174,8 @@ function CardGrid({
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
-export function ClientTestimonialsSlide({ slide, branding, hasAiBackground }: Props) {
-  const c = (slide.content ?? {}) as ClientTestimonialsContent;
+export function TestimonialsSlide({ slide, branding, hasAiBackground }: Props) {
+  const c = (slide.content ?? {}) as TestimonialsContent;
   const layoutKey = slide.layoutKey as string;
   const headline = slide.headline ?? TESTIMONIALS_SLIDE_DEFAULTS.headline;
   const subheadline = c.subheadline ?? null;
@@ -263,7 +263,7 @@ function QuoteCardsLayout({
   testimonials: SlideTestimonial[];
   hasAiBackground?: boolean;
   branding: DeckBranding;
-  content: ClientTestimonialsContent;
+  content: TestimonialsContent;
   accent: string;
 }) {
   const hasBg = !!bgPhoto;
@@ -323,7 +323,7 @@ function SingleFeatureLayout({
   testimonials: SlideTestimonial[];
   hasAiBackground?: boolean;
   branding: DeckBranding;
-  content: ClientTestimonialsContent;
+  content: TestimonialsContent;
   accent: string;
 }) {
   const t = testimonials[0] ?? DEFAULT_TESTIMONIALS[0];
@@ -397,7 +397,7 @@ function PhotoOverlayLayout({
   testimonials: SlideTestimonial[];
   hasAiBackground?: boolean;
   branding: DeckBranding;
-  content: ClientTestimonialsContent;
+  content: TestimonialsContent;
   accent: string;
 }) {
   const hasBg = !!bgPhoto;

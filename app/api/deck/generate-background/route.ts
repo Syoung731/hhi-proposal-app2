@@ -32,13 +32,13 @@ import type { SlideType } from "@/app/lib/deck/types";
 const VALID_SLIDE_TYPES: SlideType[] = [
   "cover",
   "objective",
-  "investment",
+  "investment-by-space",
   "why-us",
   "scope-overview",
   "before-after",
   "scope-breakdown",
   "risk-brief",
-  "process",
+  "our-process",
 ];
 
 // ─── Route handler ────────────────────────────────────────────────────────────

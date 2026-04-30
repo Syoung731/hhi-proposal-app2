@@ -3,22 +3,22 @@
 import type { ProposalSlide, DeckBranding } from "@/app/lib/deck/types";
 import { CoverSlide } from "./CoverSlide";
 import { ObjectiveSlide } from "./ObjectiveSlide";
-import { InvestmentSlide } from "./InvestmentSlide";
+import { InvestmentBySpaceSlide } from "./InvestmentBySpaceSlide";
 import { WhyUsSlide } from "./WhyUsSlide";
 import { ScopeOverviewSlide } from "./ScopeOverviewSlide";
 import { BeforeAfterSlide } from "./BeforeAfterSlide";
 import { ScopeBreakdownSlide } from "./ScopeBreakdownSlide";
 import { RiskBriefSlide } from "./RiskBriefSlide";
-import { ProcessSlide } from "./ProcessSlide";
+import { OurProcessSlide } from "./OurProcessSlide";
 import { CoreValuesSlide } from "./CoreValuesSlide";
-import { ProjectTimelineSlide } from "./ProjectTimelineSlide";
-import { CopePageSlide } from "./CopePageSlide";
-import { DesignRetainerSlide } from "./DesignRetainerSlide";
+import { TimelineSlide } from "./TimelineSlide";
+import { CopeSlide } from "./CopeSlide";
+import { OverallInvestmentSlide } from "./OverallInvestmentSlide";
 import { NextStepsSlide } from "./NextStepsSlide";
 import { ClosingSlide } from "./ClosingSlide";
-import { VisualInspirationSlide } from "./VisualInspirationSlide";
-import { ClientTestimonialsSlide } from "./ClientTestimonialsSlide";
-import { DesignBuildAdvantageSlide } from "./DesignBuildAdvantageSlide";
+import { InspirationSlide } from "./InspirationSlide";
+import { TestimonialsSlide } from "./TestimonialsSlide";
+import { DesignBuildSlide } from "./DesignBuildSlide";
 import { AdditionOverviewSlide } from "./AdditionOverviewSlide";
 
 interface Props {
@@ -58,8 +58,8 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false 
       return <CoverSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "objective":
       return <ObjectiveSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "investment":
-      return <InvestmentSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "investment-by-space":
+      return <InvestmentBySpaceSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "why-us":
       return <WhyUsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "scope-overview":
@@ -70,26 +70,26 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false 
       return <ScopeBreakdownSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "risk-brief":
       return <RiskBriefSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "process":
-      return <ProcessSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "our-process":
+      return <OurProcessSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "core-values":
       return <CoreValuesSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "project-timeline":
-      return <ProjectTimelineSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "cope-page":
-      return <CopePageSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "design-retainer":
-      return <DesignRetainerSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "timeline":
+      return <TimelineSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "cope":
+      return <CopeSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "overall-investment":
+      return <OverallInvestmentSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "next-steps":
       return <NextStepsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "closing-slide":
+    case "closing":
       return <ClosingSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "visual-inspiration":
-      return <VisualInspirationSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "client-testimonials":
-      return <ClientTestimonialsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "design-build-advantage":
-      return <DesignBuildAdvantageSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "inspiration":
+      return <InspirationSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "testimonials":
+      return <TestimonialsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "design-build":
+      return <DesignBuildSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "addition-overview":
       return <AdditionOverviewSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     default:

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProposalSlide, DeckBranding, VisualInspirationContent } from "@/app/lib/deck/types";
+import type { ProposalSlide, DeckBranding, InspirationContent } from "@/app/lib/deck/types";
 import { VISUAL_INSPIRATION_DEFAULTS } from "@/app/lib/visual-inspiration-defaults";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, HEADLINE_SCALE, BODY_SCALE, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
@@ -47,8 +47,8 @@ function PhotoCell({ url, style }: { url: string; style?: React.CSSProperties })
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
-export function VisualInspirationSlide({ slide, branding, hasAiBackground }: Props) {
-  const c = (slide.content ?? {}) as VisualInspirationContent;
+export function InspirationSlide({ slide, branding, hasAiBackground }: Props) {
+  const c = (slide.content ?? {}) as InspirationContent;
   const layoutKey = slide.layoutKey as string;
   const headline = slide.headline ?? VISUAL_INSPIRATION_DEFAULTS.headline;
   const subtitle = c.subtitle ?? VISUAL_INSPIRATION_DEFAULTS.subtitle;
@@ -126,7 +126,7 @@ function HeroPlusStackedLayout({
   heroPhoto: string | null;
   photos: string[];
   hasBg?: boolean;
-  content: VisualInspirationContent;
+  content: InspirationContent;
   branding: DeckBranding;
 }) {
   const stackedPhotos = photos.slice(0, 2);
@@ -245,7 +245,7 @@ function MasonryGridLayout({
   caption: string;
   photos: string[];
   hasBg?: boolean;
-  content: VisualInspirationContent;
+  content: InspirationContent;
   branding: DeckBranding;
 }) {
   // Span assignments for natural masonry feel
@@ -358,7 +358,7 @@ function SideBySideBleedLayout({
   caption: string;
   photos: string[];
   hasBg?: boolean;
-  content: VisualInspirationContent;
+  content: InspirationContent;
   branding: DeckBranding;
 }) {
   const leftPhoto = photos[0] ?? null;

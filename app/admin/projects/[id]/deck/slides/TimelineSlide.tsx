@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProposalSlide, DeckBranding, ProjectTimelineContent, ProjectPhase } from "@/app/lib/deck/types";
+import type { ProposalSlide, DeckBranding, TimelineContent, ProjectPhase } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, SECTION_LABEL_SIZE, HEADLINE_SCALE, BODY_SCALE, LINE_SPACING, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
@@ -38,8 +38,8 @@ function makeOutlineShadow(color: string | null | undefined): string | undefined
 
 // ─── Main slide component ────────────────────────────────────────────────────
 
-export function ProjectTimelineSlide({ slide, branding, hasAiBackground }: Props) {
-  const c = (slide.content ?? {}) as ProjectTimelineContent;
+export function TimelineSlide({ slide, branding, hasAiBackground }: Props) {
+  const c = (slide.content ?? {}) as TimelineContent;
   const layoutKey = slide.layoutKey as string;
   const sectionLabel = c.sectionLabel ?? "YOUR PROJECT";
   const headline = slide.headline ?? "Projected Timeline";
@@ -100,7 +100,7 @@ interface LayoutProps {
   accent: string;
   footnote: string | null;
   hasBg?: boolean;
-  content: ProjectTimelineContent;
+  content: TimelineContent;
   branding: DeckBranding;
 }
 

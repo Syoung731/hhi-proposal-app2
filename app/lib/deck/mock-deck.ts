@@ -54,7 +54,7 @@ export function getMockDeck(
       },
       {
         id: "slide-investment",
-        type: "investment",
+        type: "investment-by-space",
         layoutKey: "table-callout",
         order: 3,
         isEnabled: true,
