@@ -116,6 +116,8 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
   const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const resolvedLineSpacing = LINE_SPACING[content.lineSpacing ?? "normal"];
   const textAlign = content.textAlignment ?? "left";
+  const dotScale = content.dotSize ?? 1.0;
+  const dotDiameterEm = 0.55 * dotScale;
   return (
     <div
       className="relative w-full h-full"
@@ -188,8 +190,8 @@ function VerticalDotLayout({ sectionLabel, headline, phases, accent, footnote, h
                     position: "absolute",
                     left: "-2.8%",
                     top: "0.15em",
-                    width: "0.55em",
-                    height: "0.55em",
+                    width: `${dotDiameterEm}em`,
+                    height: `${dotDiameterEm}em`,
                     borderRadius: "50%",
                     background: NAVY,
                     border: `2px solid ${resolvedAccent}`,
@@ -295,6 +297,8 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const headlineScale = HEADLINE_SCALE[content.headlineSizeScale ?? "medium"];
   const headlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const dotScale = content.dotSize ?? 1.0;
+  const dotDiameterEm = 0.5 * dotScale;
   return (
     <div
       className="relative w-full h-full"
@@ -398,8 +402,8 @@ function AlternatingLayout({ sectionLabel, headline, phases, accent, footnote, h
                   >
                     <div
                       style={{
-                        width: "0.5em",
-                        height: "0.5em",
+                        width: `${dotDiameterEm}em`,
+                        height: `${dotDiameterEm}em`,
                         borderRadius: "50%",
                         background: accent,
                         border: `2px solid ${NAVY}`,

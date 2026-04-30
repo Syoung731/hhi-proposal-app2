@@ -366,7 +366,10 @@ export function NewRoomTypesModal({ projectId, unmatchedRooms, onClose }: Props)
       category: quickExterior ? "EXTERIOR" : "INTERIOR",
     };
     setSectionTypes((prev) =>
-      [...prev, newOption].sort((a, b) =>
+      // Replace existing entry with the same ID instead of appending blindly
+      // — strict-mode double-fires or a race with the useEffect refetch can
+      // otherwise produce duplicate keys in the option list.
+      [...prev.filter((x) => x.id !== newOption.id), newOption].sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
       )
     );

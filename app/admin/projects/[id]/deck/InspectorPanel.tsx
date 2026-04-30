@@ -2304,8 +2304,6 @@ function InvestmentInspector({
           style={{ width: "100%", accentColor: accent }}
         />
       </FieldGroup>
-
-      <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
   );
 }
@@ -3608,9 +3606,7 @@ function BeforeAfterInspector({
           </p>
         ) : null
       )}
-      <SharedTypographySection content={content} updateContent={updateContent} branding={branding} />
       {/* Logo section moved to main InspectorPanel */}
-      <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
   );
 }
@@ -3945,7 +3941,6 @@ function ScopeBreakdownInspector({
         projectMedia={projectMediaGroups}
       />
       <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      <SharedTextLayoutSection content={content} updateContent={updateContent} />
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
   );
@@ -4840,6 +4835,23 @@ function ProjectTimelineInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {/* ── TIMELINE DOTS ───────────────────────────── */}
+      {/* Dot size only matters on the two layouts that render dots; the
+          stepped-hierarchy layout uses left-border bars instead. */}
+      {(layoutKey === "vertical-dot" || layoutKey === "vertical-alternating") && (
+        <>
+          <SectionLabel>Timeline Dots</SectionLabel>
+          <FieldGroup label={`Dot Size — ${(content.dotSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider
+              value={content.dotSize ?? 1.0}
+              onChange={(v) => updateContent({ dotSize: v })}
+              accentColor={accent}
+            />
+          </FieldGroup>
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
+
       {/* ── FOOTNOTE ─────────────────────────────────── */}
       <SectionLabel>Footnote</SectionLabel>
       <FieldGroup label="">
@@ -5010,10 +5022,6 @@ function ProjectTimelineInspector({
           )}
         </div>
       ))}
-
-      <SharedTypographySection content={content} updateContent={updateContent} branding={branding} showSizeControls />
-      <SharedTextLayoutSection content={content} updateContent={updateContent} />
-      <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
 
       <Divider />
 
@@ -6750,7 +6758,6 @@ function VisualInspirationInspector({
         includeUnapproved
         projectMedia={projectMediaGroups}
       />
-      <SharedTypographySection content={content} updateContent={updateContent} branding={branding} showSizeControls />
       {(layoutKey === "hero-plus-stacked" || layoutKey === "side-by-side-bleed") && (
         <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={!!content.heroPhoto || photos.length > 0} />
       )}
@@ -7086,7 +7093,6 @@ function ClientTestimonialsInspector({
       >
         Manage Testimonials in Settings
       </a>
-      <SharedTypographySection content={content} updateContent={updateContent} branding={branding} showSizeControls />
       <SharedCardStyleSection content={content} updateContent={updateContent} />
       <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={!!content.backgroundPhoto} />
       {/* Logo section moved to main InspectorPanel */}
@@ -8819,7 +8825,7 @@ export function InspectorPanel({
             brandBackgrounds={brandBackgrounds}
             onBackgroundChange={onBackgroundChange}
             onTextZoneChange={onTextZoneChange}
-            showTextZone={slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && slide.type !== "objective" && slide.type !== "investment"}
+            showTextZone={slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && slide.type !== "objective" && slide.type !== "investment" && slide.type !== "project-timeline"}
           />
           <Divider />
         </>

@@ -1065,6 +1065,13 @@ export interface ProjectTimelineContent extends SharedSlideFields {
 
   /** When true, all phases mirror the first phase's style values. */
   lockItemStyles?: boolean | null;
+
+  /**
+   * Multiplier applied to the dot size on layouts that render dots
+   * (vertical-dot, vertical-alternating). 1.0 = baseline. Range: 0.5–4.0
+   * to match the other size sliders. Ignored on stepped-hierarchy.
+   */
+  dotSize?: number | null;
 }
 
 /** A single COPE (Cost of Project Execution) item. */

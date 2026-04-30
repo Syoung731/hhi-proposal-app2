@@ -70,20 +70,25 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
     },
   ];
 
+  // Before/After slides come first (auto-sync expands one per rendered room),
+  // followed by Scope Breakdown for any rooms that don't have a render yet.
+  // Sync layer mirrors this with anchor+0.2 (before-after) → anchor+0.3
+  // (scope-breakdown), so spec order and runtime order agree.
+  specs.push({
+    type: "before-after",
+    order: 400,
+    layoutKey: "after-emphasis",
+  });
+
   if (project.rooms.length >= 2) {
     specs.push({
       type: "scope-breakdown",
-      order: 400,
+      order: 500,
       layoutKey: "text-grid",
     });
   }
 
   specs.push(
-    {
-      type: "before-after",
-      order: 500,
-      layoutKey: "after-emphasis",
-    },
     {
       type: "cope-page",
       order: 600,
