@@ -43,7 +43,7 @@ export default async function AdminLayout({
       : Promise.resolve(null),
   ]);
   const displayName = employee
-    ? `${employee.firstName} ${employee.lastName}`.trim() || identity.email
+    ? `${employee.firstName} ${employee.lastName}`.trim() || identity.email || ""
     : identity.email ?? "";
   const primaryColorHex = isValidHex(settings?.primaryColorHex)
     ? settings.primaryColorHex
