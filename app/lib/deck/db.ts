@@ -12,22 +12,21 @@
  *   scope-overview    300
  *   scope-breakdown   400                       (auto, if rooms.length >= 2)
  *   before-after      500 + roomIndex * 10      (auto, per room)
- *   cope-page         600
- *   visual-inspir     700
- *   why-us            800
- *   project-timeline  900
- *   investment       1000
- *   design-retainer  1100
- *   next-steps       1200
- *   addition-overview 1300  (only if project.hasAddition === true)
- *   closing-slide    1400   (locked last)
+ *   cope                 600
+ *   inspiration          700
+ *   why-us               800
+ *   timeline             900
+ *   investment-by-space 1000
+ *   overall-investment  1100
+ *   next-steps          1200
+ *   addition-overview   1300  (only if project.hasAddition === true)
+ *   closing             1400   (locked last)
  *
  * Composition is defined in `default-spec.ts` — seed + backfill both call
  * `buildDefaultDeckSpec(project)`. Never hardcode a slide list here.
  *
  * Optional slides (not in default spec; added manually via + Add Slide):
- *   risk-brief, process, core-values, design-build-advantage,
- *   client-testimonials.
+ *   risk-brief, our-process, core-values, design-build, testimonials.
  */
 
 import { prisma } from "@/app/lib/prisma";
@@ -44,10 +43,10 @@ import type {
   BeforeAfterContent,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
-  InvestmentContent,
-  ProjectTimelineContent,
+  InvestmentBySpaceContent,
+  TimelineContent,
   ProjectPhase,
-  DesignRetainerContent,
+  OverallInvestmentContent,
   BeforeAfterBullet,
 } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
@@ -216,10 +215,10 @@ function buildSlideDataFromSpec(
         content: { description: null, selectedPhotos: [] },
       };
 
-    case "cope-page":
+    case "cope":
       return {
         ...base,
-        type: "cope-page",
+        type: "cope",
         layoutKey: ctx.copeDefaults?.defaultLayout ?? spec.layoutKey,
         headline: ctx.copeDefaults?.defaultHeadline ?? "The Cost of Project Execution",
         content: {
@@ -229,10 +228,10 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "visual-inspiration":
+    case "inspiration":
       return {
         ...base,
-        type: "visual-inspiration",
+        type: "inspiration",
         layoutKey: spec.layoutKey,
         headline: "Design Inspiration",
         content: {
@@ -250,10 +249,10 @@ function buildSlideDataFromSpec(
         content: { sectionTitle: null, pillars: [], selectedPillarIds: [] },
       };
 
-    case "project-timeline":
+    case "timeline":
       return {
         ...base,
-        type: "project-timeline",
+        type: "timeline",
         layoutKey: spec.layoutKey,
         headline: "Projected Timeline",
         content: {
@@ -262,14 +261,14 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "investment":
+    case "investment-by-space":
       // Phase 8C T2 renamed the slide to "Investment by Space". Phase 8C.1
       // caught that T2 missed the seed path — only the component fallback
       // was updated in T2. Setting headline explicitly here so "Generate
       // Default Deck → Replace Everything" produces the new title.
       return {
         ...base,
-        type: "investment",
+        type: "investment-by-space",
         layoutKey: spec.layoutKey,
         headline: "Investment by Space",
         content: {
@@ -279,13 +278,13 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "design-retainer":
+    case "overall-investment":
       // Seed values are placeholders — syncRetainerFromProject computes
       // retainerLow/High and constructionLow/High on first deck load.
       // Benefits match DEFAULT_DESIGN_RETAINER_BENEFITS verbatim.
       return {
         ...base,
-        type: "design-retainer",
+        type: "overall-investment",
         layoutKey: spec.layoutKey,
         headline: "Your investment",
         content: {
@@ -330,14 +329,13 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "closing-slide":
+    case "closing":
       return {
         ...base,
-        type: "closing-slide",
+        type: "closing",
         layoutKey: spec.layoutKey,
-        headline: "Let\u2019s Build Something Extraordinary",
+        headline: null,
         content: {
-          tagline: "Design. Build. Remodel.",
           validityNote: "This proposal is valid for 30 days.",
         },
       };
@@ -370,10 +368,10 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "process":
+    case "our-process":
       return {
         ...base,
-        type: "process",
+        type: "our-process",
         layoutKey: spec.layoutKey,
         headline: "Our Process: From Vision to Finished Home",
         content: {
@@ -420,10 +418,10 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "design-build-advantage":
+    case "design-build":
       return {
         ...base,
-        type: "design-build-advantage",
+        type: "design-build",
         layoutKey: ctx.designBuildDefaults?.defaultLayout ?? spec.layoutKey,
         headline:
           ctx.designBuildDefaults?.defaultHeadline ?? "The Design-Build Advantage",
@@ -435,10 +433,10 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "client-testimonials":
+    case "testimonials":
       return {
         ...base,
-        type: "client-testimonials",
+        type: "testimonials",
         layoutKey: spec.layoutKey,
         headline: "What Our Clients Say",
         content: {
@@ -788,12 +786,23 @@ async function syncScopeBreakdownSlide(
       // create-new for those pages.
       if (existingRow.isUserModified || existingRow.isUserHidden) continue;
 
+      // Re-anchor stale orders only. SlideRail reorders renumber every slide
+      // with integer indices (0, 1, 2, …) and don't flag isUserModified, so
+      // we must NOT clobber those values — otherwise scope-breakdown jumps
+      // back to anchor+0.3 (just past scope-overview) on every load and
+      // lands above the before/after slides. Only pull rows back to the
+      // freshly-computed anchor when their order is far above it (legacy
+      // 410+ fallback range), matching the threshold used by
+      // syncBeforeAfterSlides.
+      const shouldReAnchor =
+        anchor != null && existingRow.order > anchor + 50;
+
       await prisma.deckSlide.update({
         where: { id: existingRow.id },
         data: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           content: content as any,
-          order: desiredOrder,
+          ...(shouldReAnchor ? { order: desiredOrder } : {}),
           headline,
         },
       });
@@ -845,7 +854,7 @@ async function syncScopeBreakdownSlide(
  * User-edited slides (isUserModified=true) remain immune — short-circuit.
  * InvestmentLineItem rows stay live (still consumed by the publish snapshot).
  *
- * Write scope: DeckSlide type "investment" only. Registered in
+ * Write scope: DeckSlide type "investment-by-space" only. Registered in
  * SYNC_WRITE_SCOPES below.
  */
 async function syncInvestmentSlide(
@@ -854,7 +863,7 @@ async function syncInvestmentSlide(
   existing: DbRow[]
 ): Promise<void> {
   // Find the investment slide — skip if the user has manually edited it.
-  const investmentRow = existing.find((r) => r.type === "investment");
+  const investmentRow = existing.find((r) => r.type === "investment-by-space");
   if (!investmentRow || investmentRow.isUserModified) return;
 
   // 1. Rooms with pricing + grouping metadata.
@@ -961,8 +970,8 @@ async function syncInvestmentSlide(
     }];
   });
 
-  const currentContent = (investmentRow.content ?? {}) as InvestmentContent;
-  const updatedContent: InvestmentContent = {
+  const currentContent = (investmentRow.content ?? {}) as InvestmentBySpaceContent;
+  const updatedContent: InvestmentBySpaceContent = {
     ...currentContent,
     lineItems,
   };
@@ -1065,14 +1074,14 @@ function buildGroupIncludesText(members: { name: string }[]): string | null {
 }
 
 /**
- * Keeps the project-timeline slide's `content.phases` in sync with the project's
+ * Keeps the timeline slide's `content.phases` in sync with the project's
  * `TimelinePhase` records. Phase names/descriptions are hardcoded in
  * `TIMELINE_PHASE_DEFINITIONS`; only durations flow from the Timeline tab.
  *
  * Per-item style fields (nameFont, nameColor, etc.) on existing phases are
  * preserved — they are merged by id onto the canonical phase entries.
  *
- * Write scope: DeckSlide type "project-timeline" only. Registered in
+ * Write scope: DeckSlide type "timeline" only. Registered in
  * SYNC_WRITE_SCOPES below.
  */
 async function syncProjectTimelineSlide(
@@ -1080,7 +1089,7 @@ async function syncProjectTimelineSlide(
   projectId: string,
   existing: DbRow[]
 ): Promise<void> {
-  const row = existing.find((r) => r.type === "project-timeline");
+  const row = existing.find((r) => r.type === "timeline");
   if (!row) return;
 
   const timelinePhases = await prisma.timelinePhase.findMany({
@@ -1095,7 +1104,7 @@ async function syncProjectTimelineSlide(
   });
 
   const canonical = buildProjectPhases(timelinePhases);
-  const currentContent = (row.content ?? {}) as ProjectTimelineContent;
+  const currentContent = (row.content ?? {}) as TimelineContent;
   const existingById = new Map(
     (currentContent.phases ?? []).map((p) => [p.id, p])
   );
@@ -1112,7 +1121,7 @@ async function syncProjectTimelineSlide(
     };
   });
 
-  const updatedContent: ProjectTimelineContent = {
+  const updatedContent: TimelineContent = {
     ...currentContent,
     phases: mergedPhases,
   };
@@ -1125,7 +1134,7 @@ async function syncProjectTimelineSlide(
 }
 
 /**
- * Syncs the project-level retainer settings onto the `design-retainer` slide
+ * Syncs the project-level retainer settings onto the `overall-investment` slide
  * content (amount, constructionLow/High, designHourlyRate, retainerEnabled).
  *
  * User-modified slides are skipped (same convention as other sync fns), so
@@ -1141,12 +1150,12 @@ async function syncProjectTimelineSlide(
  * The previously-written retainerAmount / retainerLabel fields on the
  * Investment slide are dead data — Phase 8C T2 removed the mid-slide
  * retainer callout that rendered them. Phase 8C.2 T2 removed them from
- * InvestmentContent entirely.
+ * InvestmentBySpaceContent entirely.
  *
- * Write scope: DeckSlide type "design-retainer" only. Registered in
+ * Write scope: DeckSlide type "overall-investment" only. Registered in
  * SYNC_WRITE_SCOPES below. The Phase 8C.2 T1 fix is what made this
  * single-writer guarantee true — before then, this sync also wrote to
- * the "investment" slide, which caused the race.
+ * the "investment-by-space" slide, which caused the race.
  */
 async function syncRetainerFromProject(
   _deckId: string,
@@ -1187,11 +1196,11 @@ async function syncRetainerFromProject(
   });
   const designHourlyRate = companySettings?.designHourlyRate ?? null;
 
-  // design-retainer slide — numeric ranges for retainer + construction
-  const retainerRow = existing.find((r) => r.type === "design-retainer");
+  // overall-investment slide — numeric ranges for retainer + construction
+  const retainerRow = existing.find((r) => r.type === "overall-investment");
   if (retainerRow && !retainerRow.isUserModified) {
-    const c = (retainerRow.content ?? {}) as DesignRetainerContent;
-    const next: DesignRetainerContent = {
+    const c = (retainerRow.content ?? {}) as OverallInvestmentContent;
+    const next: OverallInvestmentContent = {
       ...c,
       retainerAmount: project.retainerEnabled ? amount : null,
       retainerEnabled: project.retainerEnabled,
@@ -1238,9 +1247,9 @@ type SlideSyncRegistration = {
 const SYNC_WRITE_SCOPES: readonly SlideSyncRegistration[] = [
   { name: "syncBeforeAfterSlides", writesToSlideTypes: ["before-after"] },
   { name: "syncScopeBreakdownSlide", writesToSlideTypes: ["scope-breakdown"] },
-  { name: "syncInvestmentSlide", writesToSlideTypes: ["investment"] },
-  { name: "syncProjectTimelineSlide", writesToSlideTypes: ["project-timeline"] },
-  { name: "syncRetainerFromProject", writesToSlideTypes: ["design-retainer"] },
+  { name: "syncInvestmentSlide", writesToSlideTypes: ["investment-by-space"] },
+  { name: "syncProjectTimelineSlide", writesToSlideTypes: ["timeline"] },
+  { name: "syncRetainerFromProject", writesToSlideTypes: ["overall-investment"] },
 ];
 
 // Module-load assertion. Throws on duplicate ownership so the dev server
@@ -1275,7 +1284,7 @@ const SYNC_WRITE_SCOPES: readonly SlideSyncRegistration[] = [
  * Only creates slides that are completely absent — never overwrites existing
  * rows. Auto-synced types (before-after, scope-breakdown) are skipped; their
  * sync functions own them. Reclassified slides (risk-brief, process,
- * core-values, design-build-advantage, client-testimonials) are NOT in the
+ * core-values, design-build, testimonials) are NOT in the
  * spec, so backfill will not resurrect them if a user removes them.
  */
 async function backfillMissingDefaults(
@@ -1506,7 +1515,7 @@ export async function regenerateDefaultDeck({
     // user set it to false on a prior slide, we honor it by removing the
     // seeded slide post-seed.
     const priorViz = await prisma.deckSlide.findFirst({
-      where: { deckId: deck.id, type: "visual-inspiration" },
+      where: { deckId: deck.id, type: "inspiration" },
       select: { content: true },
     });
     const vizShowByDefault =
@@ -1518,7 +1527,7 @@ export async function regenerateDefaultDeck({
 
     if (vizShowByDefault === false) {
       await prisma.deckSlide.deleteMany({
-        where: { deckId: deck.id, type: "visual-inspiration" },
+        where: { deckId: deck.id, type: "inspiration" },
       });
     }
   } else {
