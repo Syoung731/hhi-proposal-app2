@@ -8,6 +8,7 @@ import {
   createMediaAction,
   deleteMediaAction,
   updateMediaRoomAction,
+  linkRenderingToBeforePhotoAction,
   startRoomRenderAction,
   setSelectedRenderAction,
   clearSelectedRenderAction,
@@ -1109,6 +1110,24 @@ export function MediaTab({
   const filteredRenders = conceptVersionsForSelectedBefore;
   const renderGroups = buildRenderGroups(renderingsForActive, effectiveSourceMediaId ?? null);
   const conceptGroups = buildConceptGroups(renderGroups);
+
+  // Room-orphan concepts: rendering is linked to the room but its Before-photo
+  // binding is broken — either sourceMediaId is null (typical when an orphan
+  // is restored via "Assign to section", which only sets roomId) OR
+  // sourceMediaId points to a photo that no longer lives in this room
+  // (dangling reference, e.g. the original Before was deleted). Either way,
+  // the per-photo render panel can never surface them, so we show them here
+  // with a "Link to selected Before" rescue button.
+  const existingPhotoIdsInRoom = new Set(existingForActive.map((m) => m.id));
+  const unlinkedRoomConcepts =
+    activeRoomId != null
+      ? renderingsForActive.filter(
+          (r) =>
+            r.roomId === activeRoomId &&
+            r.parentMediaId == null &&
+            (r.sourceMediaId == null || !existingPhotoIdsInRoom.has(r.sourceMediaId)),
+        )
+      : [];
   const latestDoneInFiltered = latestDone(filteredRenders);
 
   // Priority: 1) viewing (clicked thumb), 2) selected (if DONE and in filtered), 3) latest DONE
@@ -1355,6 +1374,13 @@ export function MediaTab({
     if (!confirm("Delete this rendering?")) return;
     await deleteMediaAction(projectId, mediaId);
     router.refresh();
+  }
+
+  async function handleLinkRenderingToBefore(renderingId: string) {
+    if (!effectiveSourceMediaId) return;
+    const result = await linkRenderingToBeforePhotoAction(projectId, renderingId, effectiveSourceMediaId);
+    if (result.error) setRenderError(result.error);
+    else router.refresh();
   }
 
   function openUpdateModal(renderId: string) {
@@ -2706,6 +2732,75 @@ export function MediaTab({
                         </div>
                       );
                     })}
+                  </div>
+                )}
+                {unlinkedRoomConcepts.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                          Concepts in this section not linked to a Before photo
+                        </p>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400/80">
+                          Likely restored from Orphaned Renderings. Click &quot;Link to selected Before&quot; to attach a concept to the photo currently selected in the Existing Photos strip below.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {unlinkedRoomConcepts.map((m) => {
+                        const status = getNormalizedRenderStatus(m);
+                        const usePlainImg = isLegacyBlobUrl(m.url) || !isAllowedHostForNextImage(m.url);
+                        return (
+                          <div
+                            key={m.id}
+                            className="flex w-[156px] flex-col rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+                          >
+                            <div className="relative aspect-[4/3] overflow-hidden rounded-t-lg bg-zinc-100 dark:bg-zinc-800">
+                              {status === "DONE" && !isBadPlaceholderUrl(m.url) ? (
+                                usePlainImg ? (
+                                  <img src={m.url} alt="" className="h-full w-full object-cover" />
+                                ) : (
+                                  <Image
+                                    src={m.url}
+                                    alt=""
+                                    fill
+                                    className="object-cover"
+                                    sizes="156px"
+                                    unoptimized={m.url.startsWith("blob:") || !m.url.startsWith("http")}
+                                  />
+                                )
+                              ) : status === "FAILED" ? (
+                                <span className="flex h-full w-full items-center justify-center text-xs text-red-600 dark:text-red-400">Failed</span>
+                              ) : (
+                                <span className="flex h-full w-full items-center justify-center text-xs text-zinc-500">{status}</span>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-1.5 p-2">
+                              <button
+                                type="button"
+                                onClick={() => handleLinkRenderingToBefore(m.id)}
+                                disabled={!effectiveSourceMediaId}
+                                title={
+                                  !effectiveSourceMediaId
+                                    ? "Select a Before photo first"
+                                    : "Attach this concept to the currently-selected Before photo"
+                                }
+                                className="rounded border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/60"
+                              >
+                                Link to selected Before
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRender(m.id)}
+                                className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>

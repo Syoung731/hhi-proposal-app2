@@ -275,6 +275,39 @@ export async function updateMediaRoomAction(
 }
 
 /**
+ * Link a RENDERING-type media to a "Before" photo by setting sourceMediaId.
+ * Used to repair room-orphan concepts (room-linked but with no Before-photo
+ * binding) so they show up under that photo in the per-photo render panel
+ * and on the Before/After deck slide. Both records must be in the same
+ * project; the Before photo must already be in the same room as the
+ * rendering.
+ */
+export async function linkRenderingToBeforePhotoAction(
+  projectId: string,
+  renderingMediaId: string,
+  beforeMediaId: string,
+): Promise<{ error?: string }> {
+  await requireAdmin();
+  const [rendering, beforePhoto] = await Promise.all([
+    prisma.media.findFirst({ where: { id: renderingMediaId, projectId } }),
+    prisma.media.findFirst({ where: { id: beforeMediaId, projectId } }),
+  ]);
+  if (!rendering) return { error: "Rendering not found" };
+  if (rendering.type !== MediaType.RENDERING) return { error: "Media is not a rendering" };
+  if (!beforePhoto) return { error: "Before photo not found" };
+  if (beforePhoto.type === MediaType.RENDERING) return { error: "Cannot link a rendering to another rendering" };
+  if (rendering.roomId == null) return { error: "Rendering is not assigned to a section" };
+  if (beforePhoto.roomId !== rendering.roomId) return { error: "Before photo and rendering must be in the same section" };
+  await prisma.media.update({
+    where: { id: renderingMediaId },
+    data: { sourceMediaId: beforeMediaId },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+  revalidatePath(`/admin/projects/${projectId}/preview`);
+  return {};
+}
+
+/**
  * Import selected Rendr photos into the project as EXISTING Media records.
  * Each imported photo is tagged with "rendr" and "rendr-photo:<photoId>" so we can
  * detect re-imports and filter the Rendr Photos view.
