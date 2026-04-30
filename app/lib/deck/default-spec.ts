@@ -44,8 +44,8 @@ export const AUTO_SYNCED_SLIDE_TYPES: ReadonlySet<SlideType> = new Set([
  *   - addition-overview: project.hasAddition === true
  *
  * Slides moved to the optional library (available via + Add Slide dropdown,
- * not included here): risk-brief, design-build-advantage, process,
- * core-values, client-testimonials.
+ * not included here): risk-brief, design-build, our-process,
+ * core-values, testimonials.
  *
  * Order values are spaced 100 apart for insertion headroom.
  */
@@ -90,12 +90,12 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
 
   specs.push(
     {
-      type: "cope-page",
+      type: "cope",
       order: 600,
       layoutKey: "icon-columns",
     },
     {
-      type: "visual-inspiration",
+      type: "inspiration",
       order: 700,
       layoutKey: "hero-plus-stacked",
     },
@@ -105,17 +105,17 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
       layoutKey: "pillars-grid",
     },
     {
-      type: "project-timeline",
+      type: "timeline",
       order: 900,
       layoutKey: "vertical-dot",
     },
     {
-      type: "investment",
+      type: "investment-by-space",
       order: 1000,
       layoutKey: "table-callout",
     },
     {
-      type: "design-retainer",
+      type: "overall-investment",
       order: 1100,
       layoutKey: "three-band-summary",
     },
@@ -135,7 +135,7 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
   }
 
   specs.push({
-    type: "closing-slide",
+    type: "closing",
     order: 1400,
     layoutKey: "dark-centered",
     isLocked: true,
@@ -152,3 +152,28 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
 export function getDefaultDeckSlideTypes(project: ProjectForDeckSpec): Set<SlideType> {
   return new Set(buildDefaultDeckSpec(project).map((s) => s.type));
 }
+
+/**
+ * Every slide type that the default-spec might emit, ignoring per-project
+ * conditional gates. Used by the editor to decide whether removing a slide
+ * should hard-delete or soft-hide: spec types must soft-hide so the load-time
+ * backfill in `getDeckForProject` doesn't resurrect them. Optional types
+ * (risk-brief, our-process, core-values, design-build, testimonials) are
+ * NOT in this set, so removing them hard-deletes.
+ */
+export const DEFAULT_SPEC_SLIDE_TYPES: ReadonlySet<SlideType> = new Set([
+  "cover",
+  "objective",
+  "scope-overview",
+  "before-after",
+  "scope-breakdown",
+  "cope",
+  "inspiration",
+  "why-us",
+  "timeline",
+  "investment-by-space",
+  "overall-investment",
+  "next-steps",
+  "addition-overview",
+  "closing",
+]);

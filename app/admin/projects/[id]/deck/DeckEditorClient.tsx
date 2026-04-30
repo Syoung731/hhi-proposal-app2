@@ -14,6 +14,7 @@ import type {
   TextZoneSetting,
 } from "@/app/lib/deck/types";
 import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction } from "./actions";
+import { DEFAULT_SPEC_SLIDE_TYPES } from "@/app/lib/deck/default-spec";
 import { SlideRail } from "./SlideRail";
 import { SlideCanvas } from "./SlideCanvas";
 import { InspectorPanel } from "./InspectorPanel";
@@ -66,27 +67,27 @@ const ADD_SLIDE_GROUPS: AddSlideGroup[] = [
       { type: "cover",              label: "+ Cover" },
       { type: "objective",          label: "+ Objective" },
       { type: "scope-overview",     label: "+ Scope Overview" },
-      { type: "scope-breakdown",    label: "+ Scope Breakdown" },
-      { type: "before-after",       label: "+ Before / After" },
-      { type: "cope-page",          label: "+ COPE" },
-      { type: "visual-inspiration", label: "+ Inspiration" },
-      { type: "why-us",             label: "+ Why Us" },
-      { type: "project-timeline",   label: "+ Project Timeline" },
-      { type: "investment",         label: "+ Investment" },
-      { type: "design-retainer",    label: "+ Design Retainer" },
-      { type: "next-steps",         label: "+ Next Steps" },
-      { type: "addition-overview",  label: "+ Addition Overview" },
-      { type: "closing-slide",      label: "+ Closing" },
+      { type: "scope-breakdown",     label: "+ Scope Breakdown" },
+      { type: "before-after",        label: "+ Before / After" },
+      { type: "cope",                label: "+ COPE" },
+      { type: "inspiration",         label: "+ Inspiration" },
+      { type: "why-us",              label: "+ Why Us" },
+      { type: "timeline",            label: "+ Timeline" },
+      { type: "investment-by-space", label: "+ Investment by Space" },
+      { type: "overall-investment",  label: "+ Overall Investment" },
+      { type: "next-steps",          label: "+ Next Steps" },
+      { type: "addition-overview",   label: "+ Addition Overview" },
+      { type: "closing",             label: "+ Closing" },
     ],
   },
   {
     heading: "Optional",
     options: [
-      { type: "risk-brief",              label: "+ Risk Brief" },
-      { type: "process",                 label: "+ Our Process" },
-      { type: "core-values",             label: "+ Core Values" },
-      { type: "design-build-advantage",  label: "+ Design-Build Advantage" },
-      { type: "client-testimonials",     label: "+ Testimonials" },
+      { type: "risk-brief",     label: "+ Risk Brief" },
+      { type: "our-process",    label: "+ Our Process" },
+      { type: "core-values",    label: "+ Core Values" },
+      { type: "design-build",   label: "+ Design-Build" },
+      { type: "testimonials",   label: "+ Testimonials" },
     ],
   },
 ];
@@ -532,7 +533,12 @@ export function DeckEditorClient({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slides]);
 
-  const activeSlide = slides.find((s) => s.id === activeSlideId) ?? null;
+  // Slides that have been "removed" from a default-spec type are kept in DB
+  // with isUserHidden=true so backfill on next load won't resurrect them.
+  // The editor surfaces only the visible subset; auto-save still operates on
+  // the full `slides` array so the hidden flag persists.
+  const visibleSlides = slides.filter((s) => !s.isUserHidden);
+  const activeSlide = visibleSlides.find((s) => s.id === activeSlideId) ?? null;
 
   // ── Slide operations ──────────────────────────────────────────────────────
 
@@ -556,8 +562,15 @@ export function DeckEditorClient({
     );
   }, []);
 
-  const reorderSlides = useCallback((updated: ProposalSlide[]) => {
-    setSlides(updated);
+  const reorderSlides = useCallback((updatedVisible: ProposalSlide[]) => {
+    setSlides((prev) => {
+      // SlideRail returns only the visible slides with their new orders 0..N.
+      // Preserve hidden slides by appending them with their existing orders —
+      // they're filtered out of the editor view but must persist in DB so
+      // backfill on next load still sees their type.
+      const hidden = prev.filter((s) => s.isUserHidden);
+      return [...updatedVisible, ...hidden];
+    });
   }, []);
 
   // ── Background + Text Zone operations ────────────────────────────────────
@@ -628,9 +641,27 @@ export function DeckEditorClient({
 
   const removeSlide = useCallback((id: string) => {
     setSlides((prev) => {
-      // Locked slides cannot be removed
       const target = prev.find((s) => s.id === id);
-      if (target?.isLocked) return prev;
+      if (!target || target.isLocked) return prev;
+
+      // Default-spec types must soft-hide instead of hard-delete. Otherwise
+      // backfillMissingDefaults resurrects them at the spec's hardcoded order
+      // (e.g. 300 / 600) on the next page load — which lands them BELOW the
+      // closing slide once siblings have been renumbered to integer orders
+      // by a manual reorder. Hidden rows are filtered from the editor view
+      // but stay in DB so backfill sees the type and skips it.
+      if (DEFAULT_SPEC_SLIDE_TYPES.has(target.type)) {
+        const updated = prev.map((s) =>
+          s.id === id ? { ...s, isUserHidden: true } : s,
+        );
+        if (activeSlideId === id) {
+          const nextActive = updated.find((s) => !s.isUserHidden);
+          setActiveSlideId(nextActive?.id ?? "");
+        }
+        return updated;
+      }
+
+      // Optional / manually-added slide types — hard-remove and renumber.
       const filtered = prev.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }));
       if (activeSlideId === id) {
         setActiveSlideId(filtered[0]?.id ?? "");
@@ -641,40 +672,40 @@ export function DeckEditorClient({
 
   const addSlide = useCallback((type: SlideType) => {
     const layoutKey =
-      type === "cover"            ? "hero-image"     :
-      type === "objective"        ? "light-statement" :
-      type === "investment"       ? "table-callout"  :
-      type === "why-us"           ? "pillars-grid"   :
-      type === "scope-overview"   ? "split-panel"    :
-      type === "scope-breakdown"  ? "text-grid"      :
-      type === "risk-brief"       ? "two-column"        :
-      type === "process"          ? "three-stages"      :
-      type === "design-retainer"  ? "three-band-summary" :
-      type === "next-steps"       ? "numbered-photo"    :
-      type === "closing-slide"    ? "dark-centered"     :
-      type === "visual-inspiration" ? "hero-plus-stacked" :
-      type === "client-testimonials" ? "quote-cards"     :
-      type === "design-build-advantage" ? designBuildDefaults.defaultLayout :
-      type === "addition-overview" ? "combined" :
-      /* before-after */            "after-emphasis";
+      type === "cover"               ? "hero-image"          :
+      type === "objective"           ? "light-statement"     :
+      type === "investment-by-space" ? "table-callout"       :
+      type === "why-us"              ? "pillars-grid"        :
+      type === "scope-overview"      ? "split-panel"         :
+      type === "scope-breakdown"     ? "text-grid"           :
+      type === "risk-brief"          ? "two-column"          :
+      type === "our-process"         ? "three-stages"        :
+      type === "overall-investment"  ? "three-band-summary"  :
+      type === "next-steps"          ? "numbered-photo"      :
+      type === "closing"             ? "dark-centered"       :
+      type === "inspiration"         ? "hero-plus-stacked"   :
+      type === "testimonials"        ? "quote-cards"         :
+      type === "design-build"        ? designBuildDefaults.defaultLayout :
+      type === "addition-overview"   ? "combined"            :
+      /* before-after */               "after-emphasis";
 
     const headline =
-      type === "cover"            ? "New Cover"                  :
-      type === "objective"        ? "Project Objective"          :
-      type === "investment"       ? "Investment by Space"        :
-      type === "why-us"           ? "The HHI Difference"         :
-      type === "scope-overview"   ? "Project Scope"              :
-      type === "scope-breakdown"  ? "Additional Areas Included"  :
-      type === "risk-brief"       ? "The Stress-Free Remodel: How We Eliminate Common Risks" :
-      type === "process"          ? "Our Process: From Vision to Finished Home" :
-      type === "design-retainer"  ? "Your Investment" :
-      type === "next-steps"       ? "Your Path Forward"   :
-      type === "closing-slide"    ? "Let\u2019s Build Something Extraordinary" :
-      type === "visual-inspiration" ? "Design Inspiration" :
-      type === "client-testimonials" ? "What Our Clients Say" :
-      type === "design-build-advantage" ? designBuildDefaults.defaultHeadline :
-      type === "addition-overview" ? "The Vision: Expanding the Footprint" :
-      /* before-after */            "Before & After";
+      type === "cover"               ? "New Cover"                  :
+      type === "objective"           ? "Project Objective"          :
+      type === "investment-by-space" ? "Investment by Space"        :
+      type === "why-us"              ? "The HHI Difference"         :
+      type === "scope-overview"      ? "Project Scope"              :
+      type === "scope-breakdown"     ? "Additional Areas Included"  :
+      type === "risk-brief"          ? "The Stress-Free Remodel: How We Eliminate Common Risks" :
+      type === "our-process"         ? "Our Process: From Vision to Finished Home" :
+      type === "overall-investment"  ? "Your Investment"            :
+      type === "next-steps"          ? "Your Path Forward"          :
+      type === "closing"             ? "Let\u2019s Build Something Extraordinary" :
+      type === "inspiration"         ? "Design Inspiration"         :
+      type === "testimonials"        ? "What Our Clients Say"       :
+      type === "design-build"        ? designBuildDefaults.defaultHeadline :
+      type === "addition-overview"   ? "The Vision: Expanding the Footprint" :
+      /* before-after */               "Before & After";
 
     // Seed content per type
     const content =
@@ -713,7 +744,7 @@ export function DeckEditorClient({
             bottomStatement:
               "You'll know exactly what's being built, what it costs, and what to expect — before construction starts.",
           }
-        : type === "process"
+        : type === "our-process"
         ? {
             stages: [
               {
@@ -744,7 +775,7 @@ export function DeckEditorClient({
             bottomStatement:
               "Every detail is planned before we break ground—so the build stays on schedule, on budget, and free of surprises.",
           }
-        : type === "design-retainer"
+        : type === "overall-investment"
         ? {
             sectionLabel: "DESIGN RETAINER",
             tagline: "Your investment in certainty before construction begins.",
@@ -766,22 +797,22 @@ export function DeckEditorClient({
               { id: "proposed-plan", number: 4, title: "Receive Your Proposed Plan", description: "We present your full architectural design, material selections, and fixed-price build contract for your approval." },
             ],
           }
-        : type === "closing-slide"
+        : type === "closing"
         ? {
             tagline: "Design. Build. Remodel.",
             validityNote: "This proposal is valid for 30 days.",
           }
-        : type === "visual-inspiration"
+        : type === "inspiration"
         ? {
             subtitle: "A curated vision for your space.",
             photos: [],
           }
-        : type === "client-testimonials"
+        : type === "testimonials"
         ? {
             showStars: true,
             testimonials: [],
           }
-        : type === "design-build-advantage"
+        : type === "design-build"
         ? {
             pillars: designBuildDefaults.defaultPillars,
             guarantees: designBuildDefaults.defaultGuarantees,
@@ -926,7 +957,7 @@ export function DeckEditorClient({
   const handleResyncInvestment = useCallback(async () => {
     // Build updated slide list with isUserModified cleared on the investment slide.
     const updatedSlides = slides.map((s) =>
-      s.type === "investment" ? { ...s, isUserModified: false } : s
+      s.type === "investment-by-space" ? { ...s, isUserModified: false } : s
     );
     setSlides(updatedSlides);
     setSaveStatus("saving");
@@ -989,7 +1020,7 @@ export function DeckEditorClient({
         for (let i = prev.length - 1; i >= 0; i--) {
           if (prev[i].type === "before-after") return i;
         }
-        const investIdx = prev.findIndex((s) => s.type === "investment");
+        const investIdx = prev.findIndex((s) => s.type === "investment-by-space");
         if (investIdx > 0) return investIdx - 1;
         return prev.length - 1;
       })();
@@ -1168,7 +1199,7 @@ export function DeckEditorClient({
         >
           {/* Left — slide rail */}
           <SlideRail
-            slides={slides}
+            slides={visibleSlides}
             activeSlideId={activeSlideId}
             branding={branding}
             onSelect={setActiveSlideId}
