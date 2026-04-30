@@ -208,6 +208,29 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       const overData = over.data.current as AnyDragData | RootZoneData | undefined;
       if (!activeData) return;
 
+      // Group dragged to a root drop-zone → pure reorder via groupOrder.
+      // Without this, two single-member rows can ONLY merge (they hit the
+      // group→group branch below and trigger the merge popup) — there was
+      // no way to slot a standalone between two others. The between-zones
+      // give the user an explicit "reorder, do not merge" target.
+      if (activeData.type === "group" && overData?.type === "root-zone" && overData.kind === "promote") {
+        const insertIdx = overData.insertBeforeIndex ?? 0;
+        const currentRendered = nodes.filter((n) => !n.isLocked).map((n) => n.slug);
+        const stripped = currentRendered.filter((s) => s !== activeData.slug);
+        const cappedIdx = Math.max(0, Math.min(insertIdx, stripped.length));
+        const newOrder = [...stripped];
+        newOrder.splice(cappedIdx, 0, activeData.slug);
+        setLocalGroupOrder(newOrder);
+        startTransition(async () => {
+          const result = await updateProjectDisplayGroupOrder(projectId, newOrder);
+          if (result.error) {
+            console.error("updateProjectDisplayGroupOrder (group→zone):", result.error);
+            router.refresh();
+          }
+        });
+        return;
+      }
+
       // Parent-header drag: reorder groups.
       // Phase 8C.2: COPE is now reorderable like any other group (it used
       // to be locked at the bottom). The room-drop guard at line ~327 still
@@ -549,7 +572,11 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
           (() => {
             const nonCope = nodes.filter((n) => !n.isLocked);
             const cope = nodes.find((n) => n.isLocked);
-            const showRootZones = activeDrag?.type === "room";
+            // Render between-zones for both room AND group drags. Room drags
+            // use them to promote-out-of-group; group drags use them as an
+            // explicit reorder target so single-member rows can slot between
+            // others without triggering the merge popup.
+            const showRootZones = activeDrag?.type === "room" || activeDrag?.type === "group";
             const pendingArr = Array.from(pendingEmptySlugs);
             return (
               <>
@@ -586,6 +613,7 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
                         kind="promote"
                         insertBeforeIndex={i}
                         visible={showRootZones}
+                        activeKind={activeDrag?.type ?? null}
                       />
                       <GroupRow
                         node={node}
@@ -594,7 +622,12 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
                       />
                     </Fragment>
                   ))}
-                  <DropZone id={UNGROUP_ZONE_ID} kind="ungroup" visible={showRootZones} />
+                  <DropZone
+                    id={UNGROUP_ZONE_ID}
+                    kind="ungroup"
+                    visible={showRootZones && activeDrag?.type === "room"}
+                    activeKind={activeDrag?.type ?? null}
+                  />
                   {cope && (
                     <GroupRow
                       node={cope}
@@ -916,11 +949,13 @@ function DropZone({
   kind,
   insertBeforeIndex,
   visible,
+  activeKind,
 }: {
   id: string;
   kind: "promote" | "ungroup";
   insertBeforeIndex?: number;
   visible: boolean;
+  activeKind: "room" | "group" | null;
 }) {
   const data: RootZoneData = { type: "root-zone", kind, insertBeforeIndex };
   const { isOver, setNodeRef } = useDroppable({ id, data });
@@ -939,7 +974,9 @@ function DropZone({
       : "bg-zinc-500 text-white";
   const label =
     kind === "promote"
-      ? "Drop here to make standalone"
+      ? activeKind === "group"
+        ? "Drop here to reorder"
+        : "Drop here to make standalone"
       : "Drop here to ungroup";
 
   return (
