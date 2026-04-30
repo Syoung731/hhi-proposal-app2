@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/app/lib/auth";
 
 export async function GET() {
+  await requireAdmin();
+
   const keys = [
     "R2_ACCOUNT_ID",
     "R2_ACCESS_KEY_ID",
