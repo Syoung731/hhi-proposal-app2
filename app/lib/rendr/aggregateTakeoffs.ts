@@ -6,8 +6,14 @@
 
 import type { ImperialRoomTakeoff } from "./types";
 
+// Rendr returns measurements at 0.1 precision; summing as raw floats produces
+// IEEE-754 drift (e.g. 30.4 + 28.0 → 58.400000000000006). Round summed
+// continuous values back to 1 decimal so downstream display/math stays clean.
+// Applied to single-takeoff path too — guards against any drift originating
+// from Rendr's API itself.
 function sumField(arr: ImperialRoomTakeoff[], fn: (t: ImperialRoomTakeoff) => number): number {
-  return arr.reduce((total, item) => total + (fn(item) || 0), 0);
+  const total = arr.reduce((acc, item) => acc + (fn(item) || 0), 0);
+  return Math.round(total * 10) / 10;
 }
 
 export function aggregateRendrTakeoffs(
@@ -16,12 +22,9 @@ export function aggregateRendrTakeoffs(
   if (takeoffs.length === 0) {
     throw new Error("Cannot aggregate zero takeoffs");
   }
-  if (takeoffs.length === 1) {
-    return takeoffs[0];
-  }
 
   return {
-    // Area measurements: SUM
+    // Area measurements: SUM (rounded to 0.1 precision via sumField)
     floorSF: sumField(takeoffs, (t) => t.floorSF),
     wallsSF: sumField(takeoffs, (t) => t.wallsSF),
     ceilingSF: sumField(takeoffs, (t) => t.ceilingSF),
@@ -33,7 +36,7 @@ export function aggregateRendrTakeoffs(
     countertopsSF: sumField(takeoffs, (t) => t.countertopsSF),
     backsplashSF: sumField(takeoffs, (t) => t.backsplashSF),
 
-    // Linear measurements: SUM
+    // Linear measurements: SUM (rounded to 0.1 precision via sumField)
     perimeterLF: sumField(takeoffs, (t) => t.perimeterLF),
     exteriorPerimeterLF: sumField(takeoffs, (t) => t.exteriorPerimeterLF),
     baseCabinetsLF: sumField(takeoffs, (t) => t.baseCabinetsLF),

@@ -7,13 +7,14 @@ import type { ImperialTakeoffData } from "@/app/lib/rendr/types";
 type AppRoom = { id: string; name: string };
 type SectionTypeOption = { id: string; name: string; category: string };
 
-/** Extended mapping: maps a Rendr room to either an existing section OR a section type (creates new). */
+/** Extended mapping: maps a Rendr room to either an existing section OR a section type (creates new).
+ *  When two or more mappings share the same `pendingKey`, the server folds them into a single new section. */
 export type ExtendedMapping = {
   rendrRoomIndex: number;
   floorSF: number;
 } & (
-  | { appRoomId: string; sectionTypeId?: undefined; sectionTypeName?: undefined }
-  | { appRoomId?: undefined; sectionTypeId: string; sectionTypeName: string }
+  | { appRoomId: string; sectionTypeId?: undefined; sectionTypeName?: undefined; pendingKey?: undefined }
+  | { appRoomId?: undefined; sectionTypeId: string; sectionTypeName: string; pendingKey: string }
 );
 
 type Props = {
@@ -30,7 +31,19 @@ type ExtendedMatch = RoomMatch & {
   /** When mapped to a section type instead of an existing room */
   sectionTypeId?: string | null;
   sectionTypeName?: string | null;
+  /** Identifies a pending-section bucket. Multiple matches sharing this key
+   *  fold into one new section on import. Always set together with sectionTypeId. */
+  pendingKey?: string | null;
 };
+
+/** Generate a fresh pendingKey. Browsers ≥ ~2022 expose crypto.randomUUID;
+ *  fall back to a Math.random hex for older runtimes (jsdom, etc). */
+function freshPendingKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `pk-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
 
 export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projectId, onConfirm, onCancel }: Props) {
   const [matches, setMatches] = useState<ExtendedMatch[]>([]);
@@ -105,15 +118,40 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
     }
   };
 
-  // Handle dropdown selection — supports both existing rooms and section types
+  // Handle dropdown selection — supports existing rooms, fresh pending sections, and combining into a pending bucket
   const handleRoomSelect = (rendrIdx: number, value: string | null) => {
-    setMatches((prev) =>
-      prev.map((m) => {
+    setMatches((prev) => {
+      // bucket: lookup needs the prior state to find the bucket's section type info
+      if (value && value.startsWith("bucket:")) {
+        const key = value.slice(7);
+        const bucketMember = prev.find((other) => other.pendingKey === key && other.rendrRoomIndex !== rendrIdx);
+        if (!bucketMember || !bucketMember.sectionTypeId || !bucketMember.sectionTypeName) {
+          // Bucket vanished between render and click — no-op rather than crash.
+          return prev;
+        }
+        const typeId = bucketMember.sectionTypeId;
+        const typeName = bucketMember.sectionTypeName;
+        return prev.map((m) =>
+          m.rendrRoomIndex !== rendrIdx
+            ? m
+            : {
+                ...m,
+                appRoomId: null,
+                appRoomName: typeName,
+                sectionTypeId: typeId,
+                sectionTypeName: typeName,
+                pendingKey: key,
+                confidence: "high" as const,
+                matchMethod: "manual" as const,
+              },
+        );
+      }
+
+      return prev.map((m) => {
         if (m.rendrRoomIndex !== rendrIdx) return m;
         if (!value) {
-          return { ...m, appRoomId: null, appRoomName: null, sectionTypeId: null, sectionTypeName: null, confidence: "unmatched", matchMethod: "manual" };
+          return { ...m, appRoomId: null, appRoomName: null, sectionTypeId: null, sectionTypeName: null, pendingKey: null, confidence: "unmatched", matchMethod: "manual" };
         }
-        // Parse prefixed value
         if (value.startsWith("type:")) {
           const rest = value.slice(5);
           const sepIdx = rest.indexOf(":");
@@ -125,6 +163,7 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
             appRoomName: typeName,
             sectionTypeId: typeId,
             sectionTypeName: typeName,
+            pendingKey: freshPendingKey(),
             confidence: "high" as const,
             matchMethod: "manual" as const,
           };
@@ -138,11 +177,12 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
           appRoomName: room?.name ?? null,
           sectionTypeId: null,
           sectionTypeName: null,
+          pendingKey: null,
           confidence: "high" as const,
           matchMethod: "manual" as const,
         };
-      }),
-    );
+      });
+    });
   };
 
   const handleConfirm = async () => {
@@ -156,7 +196,10 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
           floorSF: takeoffData.rooms[m.rendrRoomIndex]?.takeoff?.floorSF ?? 0,
         };
         if (m.sectionTypeId) {
-          return { ...base, sectionTypeId: m.sectionTypeId, sectionTypeName: m.sectionTypeName! };
+          // Should always be set when sectionTypeId is set, but defensively
+          // generate one so the server can still bucket correctly.
+          const pendingKey = m.pendingKey ?? freshPendingKey();
+          return { ...base, sectionTypeId: m.sectionTypeId, sectionTypeName: m.sectionTypeName!, pendingKey };
         }
         return { ...base, appRoomId: m.appRoomId! };
       });
@@ -164,28 +207,75 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
     setImporting(false);
   };
 
-  // Count how many Rendr rooms map to each target
-  const targetMappingCounts = new Map<string, number>();
+  // Count how many Rendr rooms map to each existing room (for the "(N mapped)" hint)
+  const existingRoomCounts = new Map<string, number>();
   for (const m of matches) {
-    const key = m.sectionTypeId ? `type:${m.sectionTypeId}` : m.appRoomId ? `room:${m.appRoomId}` : null;
-    if (key) targetMappingCounts.set(key, (targetMappingCounts.get(key) || 0) + 1);
+    if (m.appRoomId) {
+      existingRoomCounts.set(m.appRoomId, (existingRoomCounts.get(m.appRoomId) || 0) + 1);
+    }
   }
 
-  // Get the labels of other Rendr rooms mapped to the same target
+  // Build pending-section buckets: pendingKey → { sectionTypeId/Name, member labels }
+  type BucketInfo = { sectionTypeId: string; sectionTypeName: string; rendrLabels: string[] };
+  const pendingBuckets = new Map<string, BucketInfo>();
+  for (const m of matches) {
+    if (m.pendingKey && m.sectionTypeId && m.sectionTypeName) {
+      const existing = pendingBuckets.get(m.pendingKey);
+      if (existing) {
+        existing.rendrLabels.push(m.rendrLabel);
+      } else {
+        pendingBuckets.set(m.pendingKey, {
+          sectionTypeId: m.sectionTypeId,
+          sectionTypeName: m.sectionTypeName,
+          rendrLabels: [m.rendrLabel],
+        });
+      }
+    }
+  }
+
+  // Number pending buckets per section type so two "+ Bathroom" picks render
+  // as "Bathroom 1" and "Bathroom 2" (only when 2+ exist of the same type).
+  const bucketNumberByKey = new Map<string, number>();
+  const totalBucketsBySectionType = new Map<string, number>();
+  {
+    const counter = new Map<string, number>();
+    for (const [key, b] of pendingBuckets) {
+      const next = (counter.get(b.sectionTypeId) ?? 0) + 1;
+      counter.set(b.sectionTypeId, next);
+      bucketNumberByKey.set(key, next);
+      totalBucketsBySectionType.set(b.sectionTypeId, next);
+    }
+  }
+  const bucketDisplayName = (key: string): string => {
+    const b = pendingBuckets.get(key);
+    if (!b) return "";
+    const total = totalBucketsBySectionType.get(b.sectionTypeId) ?? 1;
+    if (total <= 1) return b.sectionTypeName;
+    const n = bucketNumberByKey.get(key);
+    return n ? `${b.sectionTypeName} ${n}` : b.sectionTypeName;
+  };
+
+  // Get the labels of other Rendr rooms mapped to the same target (existing room or pending bucket)
   const getOtherMappedLabels = (rendrIdx: number, m: ExtendedMatch): string[] => {
-    if (!m.appRoomId && !m.sectionTypeId) return [];
     return matches
       .filter((other) => {
         if (other.rendrRoomIndex === rendrIdx) return false;
-        if (m.sectionTypeId) return other.sectionTypeId === m.sectionTypeId;
-        return other.appRoomId === m.appRoomId;
+        if (m.pendingKey) return other.pendingKey === m.pendingKey;
+        if (m.appRoomId) return other.appRoomId === m.appRoomId;
+        return false;
       })
       .map((other) => other.rendrLabel);
   };
 
-  // Build the current select value for a match
+  // Build the current select value for a match.
+  // Multi-member buckets show as `bucket:` so the user sees the "combined" option as selected.
+  // Single-member buckets show as `type:` so they read as "+ Bathroom" until another row joins.
   const selectValue = (m: ExtendedMatch): string => {
-    if (m.sectionTypeId) return `type:${m.sectionTypeId}:${m.sectionTypeName}`;
+    if (m.pendingKey && m.sectionTypeId && m.sectionTypeName) {
+      const bucket = pendingBuckets.get(m.pendingKey);
+      if (bucket && bucket.rendrLabels.length >= 2) return `bucket:${m.pendingKey}`;
+      return `type:${m.sectionTypeId}:${m.sectionTypeName}`;
+    }
     if (m.appRoomId) return `room:${m.appRoomId}`;
     return "";
   };
@@ -207,7 +297,7 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
       </div>
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        Multiple Rendr rooms can be mapped to the same section (e.g., &quot;Primary Bathroom&quot; + &quot;Toilet Room&quot; → &quot;Primary Bath&quot;). Measurements will be combined automatically.
+        Multiple Rendr rooms can be combined into one section (e.g. &quot;Primary Bathroom&quot; + &quot;Toilet Room&quot; → one &quot;Primary Bath&quot;). Pick a target for the first row, then on later rows use &quot;Combine with another Rendr room&quot; to fold them into the same section. Measurements and fixture counts are summed automatically.
         {appRooms.length === 0 && sectionTypes.length > 0 && (
           <> No sections exist yet — select a section type to create one with Rendr measurements.</>
         )}
@@ -259,32 +349,72 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
                     >
                       <option value="">— Select Section —</option>
                       {appRooms.length > 0 && appRooms.map((r) => {
-                        const key = `room:${r.id}`;
-                        const count = targetMappingCounts.get(key) ?? 0;
-                        const isMappedElsewhere = count > 0 && selectValue(m) !== `room:${r.id}`;
+                        const count = existingRoomCounts.get(r.id) ?? 0;
+                        const isMappedElsewhere = count > 0 && m.appRoomId !== r.id;
                         return (
                           <option key={r.id} value={`room:${r.id}`}>
                             {r.name}{isMappedElsewhere ? ` (${count} mapped)` : ""}
                           </option>
                         );
                       })}
+                      {/* Combine with another Rendr room — surfaces existing sections AND pending buckets that already have ≥1 other Rendr row mapped to them */}
+                      {(() => {
+                        const existingTargets = appRooms.filter((r) => {
+                          const count = existingRoomCounts.get(r.id) ?? 0;
+                          const otherCount = m.appRoomId === r.id ? count - 1 : count;
+                          return otherCount >= 1;
+                        });
+                        const pendingTargets = Array.from(pendingBuckets.entries()).filter(([key, b]) => {
+                          const otherCount = key === m.pendingKey ? b.rendrLabels.length - 1 : b.rendrLabels.length;
+                          return otherCount >= 1;
+                        });
+                        if (existingTargets.length === 0 && pendingTargets.length === 0) return null;
+                        return (
+                          <optgroup label="Combine with another Rendr room">
+                            {existingTargets.map((r) => {
+                              const otherLabels = matches
+                                .filter((other) => other.appRoomId === r.id && other.rendrRoomIndex !== m.rendrRoomIndex)
+                                .map((other) => other.rendrLabel);
+                              return (
+                                <option key={`combine-room-${r.id}`} value={`room:${r.id}`}>
+                                  → {r.name} ({otherLabels.join(" + ")})
+                                </option>
+                              );
+                            })}
+                            {pendingTargets.map(([key]) => {
+                              const otherLabels = matches
+                                .filter((other) => other.pendingKey === key && other.rendrRoomIndex !== m.rendrRoomIndex)
+                                .map((other) => other.rendrLabel);
+                              return (
+                                <option key={`combine-bucket-${key}`} value={`bucket:${key}`}>
+                                  → {bucketDisplayName(key)} ({otherLabels.join(" + ")})
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        );
+                      })()}
                       {sectionTypes.length > 0 && (
-                        <option disabled value="">— Create new section —</option>
+                        <optgroup label="Create new section">
+                          {sectionTypes.map((st) => (
+                            <option key={`type-${st.id}`} value={`type:${st.id}:${st.name}`}>
+                              + {st.name}
+                            </option>
+                          ))}
+                        </optgroup>
                       )}
-                      {sectionTypes.map((st) => (
-                        <option key={`type-${st.id}`} value={`type:${st.id}:${st.name}`}>
-                          + {st.name}
-                        </option>
-                      ))}
                     </select>
-                    {m.sectionTypeId && (
+                    {m.sectionTypeId && !isCombined && (
                       <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
-                        Creates new section
+                        Creates new section{m.pendingKey ? `: ${bucketDisplayName(m.pendingKey)}` : ""}
                       </p>
                     )}
                     {isCombined && (
                       <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">
-                        Combined with: {otherLabels.join(", ")}
+                        {m.pendingKey
+                          ? `Combining into ${bucketDisplayName(m.pendingKey)} with: `
+                          : "Combined with: "}
+                        {otherLabels.join(", ")}
                       </p>
                     )}
                   </td>

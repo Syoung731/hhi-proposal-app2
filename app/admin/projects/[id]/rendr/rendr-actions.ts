@@ -10,7 +10,7 @@ import { classifyRoomForDetail, type RoomDetail } from "@/app/lib/room-classific
 import { extractCeilingHeightForMappedRooms } from "@/app/lib/rendr/extractCeilingHeight";
 import { computeUnitQuantity } from "@/app/lib/section-unit-quantity";
 import { computeSectionTotals } from "@/app/lib/section-totals";
-import { assignDisplayGroupForRoom } from "@/app/lib/investment/assign-display-group";
+import { dissolveSingleMemberGroups } from "@/app/lib/investment/assign-display-group";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,8 +25,8 @@ type ImportMapping = {
   rendrRoomIndex: number;
   floorSF: number;
 } & (
-  | { appRoomId: string; sectionTypeId?: undefined; sectionTypeName?: undefined }
-  | { appRoomId?: undefined; sectionTypeId: string; sectionTypeName: string }
+  | { appRoomId: string; sectionTypeId?: undefined; sectionTypeName?: undefined; pendingKey?: undefined }
+  | { appRoomId?: undefined; sectionTypeId: string; sectionTypeName: string; pendingKey: string }
 );
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,9 @@ export async function importRendrMeasurements(
     if (process.env.NODE_ENV === "development") console.error("[Rendr Import] Geometry fetch error:", e);
   }
 
-  // Create new rooms for section-type mappings (those without appRoomId)
+  // Resolve mappings — existing-section mappings pass through; section-type
+  // mappings are grouped by pendingKey so multiple Rendr rooms targeted at the
+  // same pending bucket converge into a single newly-created Room.
   const resolvedMappings: (ImportMapping & { appRoomId: string })[] = [];
   const { _max: sortMax } = await prisma.room.aggregate({
     where: { projectId: appProjectId },
@@ -126,85 +128,130 @@ export async function importRendrMeasurements(
   });
   let nextSortOrder = (sortMax.sortOrder ?? -1) + 1;
 
+  // Pass 1: existing-section mappings go through unchanged; pending-section
+  // mappings get bucketed by pendingKey.
+  type PendingBucket = {
+    sectionTypeId: string;
+    sectionTypeName: string;
+    members: ImportMapping[];
+  };
+  const pendingBucketsMap = new Map<string, PendingBucket>();
   for (const m of mappings) {
-    if (m.appRoomId) {
+    if (m.appRoomId !== undefined) {
       resolvedMappings.push(m as ImportMapping & { appRoomId: string });
-    } else if (m.sectionTypeId) {
-      // Look up section type for pricing and defaults
-      const sectionType = await prisma.sectionType.findUnique({
-        where: { id: m.sectionTypeId },
-        select: {
-          defaultMeasurementMode: true,
-          defaultEstimateUnit: true,
-          pricingBasis: true,
-          priceLow: true,
-          priceTarget: true,
-          priceHigh: true,
-        },
+      continue;
+    }
+    const sectionTypeId = m.sectionTypeId;
+    const sectionTypeName = m.sectionTypeName;
+    if (!sectionTypeId || !sectionTypeName) continue;
+    // Fall back to a per-mapping unique key if pendingKey is missing (older
+    // clients) so behavior matches the legacy "one new room per pick".
+    const key = m.pendingKey || `auto-${m.rendrRoomIndex}`;
+    const bucket = pendingBucketsMap.get(key);
+    if (bucket) {
+      bucket.members.push(m);
+    } else {
+      pendingBucketsMap.set(key, {
+        sectionTypeId,
+        sectionTypeName,
+        members: [m],
       });
+    }
+  }
 
-      // Compute unit quantity from areaSqFt
-      const areaSqFt = m.floorSF;
-      const unitQuantity = computeUnitQuantity(
-        { measurementMode: "AREA", areaSqFt },
-        sectionType?.defaultMeasurementMode ?? null,
-      );
+  // Number buckets per section type so two "+ Bathroom" picks land as
+  // "Bathroom 1" and "Bathroom 2" instead of two same-named rooms.
+  const totalBySectionType = new Map<string, number>();
+  for (const bucket of pendingBucketsMap.values()) {
+    totalBySectionType.set(
+      bucket.sectionTypeId,
+      (totalBySectionType.get(bucket.sectionTypeId) ?? 0) + 1,
+    );
+  }
+  const seenIndexBySectionType = new Map<string, number>();
 
-      // Compute unit rates from section type pricing
-      let unitRateLow: number | null = null;
-      let unitRateTarget: number | null = null;
-      let unitRateHigh: number | null = null;
-      let forceQtyOne = false;
-      const basis = sectionType?.pricingBasis ?? "NONE";
-      if (basis === "PER_SF" || basis === "PER_EACH") {
-        unitRateLow = sectionType?.priceLow ?? null;
-        unitRateTarget = sectionType?.priceTarget ?? null;
-        unitRateHigh = sectionType?.priceHigh ?? null;
-      } else if (basis === "PER_JOB") {
-        unitRateLow = sectionType?.priceLow ?? null;
-        unitRateTarget = sectionType?.priceTarget ?? null;
-        unitRateHigh = sectionType?.priceHigh ?? null;
-        forceQtyOne = true;
-      }
+  // Pass 2: create one Room per pending bucket, using aggregated floor SF for
+  // pricing (totals are not recomputed by the later groupedBySection update).
+  for (const bucket of pendingBucketsMap.values()) {
+    const sectionType = await prisma.sectionType.findUnique({
+      where: { id: bucket.sectionTypeId },
+      select: {
+        defaultMeasurementMode: true,
+        defaultEstimateUnit: true,
+        pricingBasis: true,
+        priceLow: true,
+        priceTarget: true,
+        priceHigh: true,
+      },
+    });
 
-      const effectiveQty = forceQtyOne ? 1 : unitQuantity;
+    // Compute the room's display name: append "1", "2", ... only when 2+ buckets share a section type
+    const totalForType = totalBySectionType.get(bucket.sectionTypeId) ?? 1;
+    const idxForType = (seenIndexBySectionType.get(bucket.sectionTypeId) ?? 0) + 1;
+    seenIndexBySectionType.set(bucket.sectionTypeId, idxForType);
+    const roomName = totalForType > 1 ? `${bucket.sectionTypeName} ${idxForType}` : bucket.sectionTypeName;
 
-      // Compute totals
-      const totals = computeSectionTotals(
-        {
-          estimateUnit: sectionType?.defaultEstimateUnit ?? null,
-          unitQuantity: effectiveQty,
-          unitRateLow,
-          unitRateTarget,
-          unitRateHigh,
-        },
-        sectionType ? { defaultEstimateUnit: sectionType.defaultEstimateUnit } : null,
-      );
+    const aggregateFloorSF = bucket.members.reduce((sum, m) => sum + (m.floorSF || 0), 0);
+    const unitQuantity = computeUnitQuantity(
+      { measurementMode: "AREA", areaSqFt: aggregateFloorSF },
+      sectionType?.defaultMeasurementMode ?? null,
+    );
 
-      // Create the room with pricing fields populated
-      const newRoom = await prisma.room.create({
-        data: {
-          projectId: appProjectId,
-          name: m.sectionTypeName,
-          sectionTypeId: m.sectionTypeId,
-          scopeNarrative: "",
-          scopeSource: "RENDR",
-          sortOrder: nextSortOrder++,
-          origin: "IMPORTED",
-          measurementSource: "rendr",
-          measurementMode: "AREA",
-          areaSqFt,
-          estimateUnit: sectionType?.defaultEstimateUnit ?? undefined,
-          unitQuantity: effectiveQty,
-          unitRateLow,
-          unitRateTarget,
-          unitRateHigh,
-          totalLow: totals.totalLow,
-          totalTarget: totals.totalTarget,
-          totalHigh: totals.totalHigh,
-        },
-      });
-      await assignDisplayGroupForRoom(newRoom.id);
+    let unitRateLow: number | null = null;
+    let unitRateTarget: number | null = null;
+    let unitRateHigh: number | null = null;
+    let forceQtyOne = false;
+    const basis = sectionType?.pricingBasis ?? "NONE";
+    if (basis === "PER_SF" || basis === "PER_EACH") {
+      unitRateLow = sectionType?.priceLow ?? null;
+      unitRateTarget = sectionType?.priceTarget ?? null;
+      unitRateHigh = sectionType?.priceHigh ?? null;
+    } else if (basis === "PER_JOB") {
+      unitRateLow = sectionType?.priceLow ?? null;
+      unitRateTarget = sectionType?.priceTarget ?? null;
+      unitRateHigh = sectionType?.priceHigh ?? null;
+      forceQtyOne = true;
+    }
+
+    const effectiveQty = forceQtyOne ? 1 : unitQuantity;
+
+    const totals = computeSectionTotals(
+      {
+        estimateUnit: sectionType?.defaultEstimateUnit ?? null,
+        unitQuantity: effectiveQty,
+        unitRateLow,
+        unitRateTarget,
+        unitRateHigh,
+      },
+      sectionType ? { defaultEstimateUnit: sectionType.defaultEstimateUnit } : null,
+    );
+
+    const newRoom = await prisma.room.create({
+      data: {
+        projectId: appProjectId,
+        name: roomName,
+        sectionTypeId: bucket.sectionTypeId,
+        scopeNarrative: "",
+        scopeSource: "RENDR",
+        sortOrder: nextSortOrder++,
+        origin: "IMPORTED",
+        measurementSource: "rendr",
+        measurementMode: "AREA",
+        areaSqFt: aggregateFloorSF,
+        estimateUnit: sectionType?.defaultEstimateUnit ?? undefined,
+        unitQuantity: effectiveQty,
+        unitRateLow,
+        unitRateTarget,
+        unitRateHigh,
+        totalLow: totals.totalLow,
+        totalTarget: totals.totalTarget,
+        totalHigh: totals.totalHigh,
+      },
+    });
+    // New rooms start ungrouped — user opts into a group via the drag-merge
+    // popup in the Investment tab.
+
+    for (const m of bucket.members) {
       resolvedMappings.push({
         rendrRoomIndex: m.rendrRoomIndex,
         floorSF: m.floorSF,
@@ -252,11 +299,9 @@ export async function importRendrMeasurements(
     }
     if (rendrRooms.length === 0) continue;
 
-    // Aggregate if multiple, use directly if single
-    const t =
-      rendrRooms.length === 1
-        ? rendrRooms[0].takeoff
-        : aggregateRendrTakeoffs(rendrRooms.map((r) => r.takeoff));
+    // Always go through the aggregator so single-room takeoffs also get
+    // rounded to 0.1 precision (Rendr's API can return drifted floats too).
+    const t = aggregateRendrTakeoffs(rendrRooms.map((r) => r.takeoff));
 
     // Build the mapping array for persistence
     const rendrRoomMappings: RendrRoomMapping[] = rendrRooms.map((r) => ({
@@ -382,6 +427,9 @@ export async function importRendrMeasurements(
     where: { id: appProjectId },
     data: { rendrImportedAt: new Date() },
   });
+
+  // Normalize new rooms to standalone-{id} slugs.
+  await dissolveSingleMemberGroups(appProjectId);
 
   revalidatePath(`/admin/projects/${appProjectId}`);
   return { importedCount: groupedBySection.size };
