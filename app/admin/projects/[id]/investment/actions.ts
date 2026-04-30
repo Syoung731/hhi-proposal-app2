@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
+import { dissolveSingleMemberGroups } from "@/app/lib/investment/assign-display-group";
 
 /**
  * Pure DB helper — no revalidatePath, safe to call from server components
@@ -245,6 +246,16 @@ export type DisplayGroupMove = {
 export async function updateRoomDisplayGroup(
   projectId: string,
   moves: DisplayGroupMove[],
+  /**
+   * Optional custom label for the group slug being targeted by these moves.
+   * When set, persists into Project.displayGroupNames so the Investment tree
+   * and the deck Investment-by-Space slide can render the user's label
+   * everywhere. Use null to clear a previously-set custom label.
+   * The (slug, label) pair is keyed off the FIRST move's displayGroupId — all
+   * moves in a single call must target the same slug for the label to apply
+   * consistently.
+   */
+  customGroupLabel?: { slug: string; label: string | null } | null,
 ): Promise<{ error?: string }> {
   await requireAdmin();
   if (moves.length === 0) return {};
@@ -287,6 +298,31 @@ export async function updateRoomDisplayGroup(
   } catch (err) {
     return { error: String(err) };
   }
+
+  // Persist (or clear) the custom label for the targeted slug. Read-modify-
+  // write on the JSON map; safe under concurrency since this action is
+  // serialized per project by the user's input cadence.
+  if (customGroupLabel) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { displayGroupNames: true },
+    });
+    const labels = (project?.displayGroupNames as Record<string, string> | null) ?? {};
+    if (customGroupLabel.label && customGroupLabel.label.trim() !== "") {
+      labels[customGroupLabel.slug] = customGroupLabel.label.trim();
+    } else {
+      delete labels[customGroupLabel.slug];
+    }
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { displayGroupNames: labels },
+    });
+  }
+
+  // Auto-degroup any group whose membership dropped below 2 as a result of
+  // this move (e.g., the source group lost its last sibling). Also prunes
+  // displayGroupNames entries for slugs that no longer have any members.
+  await dissolveSingleMemberGroups(projectId);
 
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);

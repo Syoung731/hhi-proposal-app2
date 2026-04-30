@@ -873,14 +873,16 @@ async function syncInvestmentSlide(
     },
   });
 
-  // 2. Project's saved group order.
+  // 2. Project's saved group order + user-defined group labels.
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { displayGroupOrder: true },
+    select: { displayGroupOrder: true, displayGroupNames: true },
   });
   const savedOrder: string[] = Array.isArray(project?.displayGroupOrder)
     ? (project!.displayGroupOrder as string[])
     : [];
+  const customLabels: Record<string, string> =
+    (project?.displayGroupNames as Record<string, string> | null) ?? {};
 
   // 3. Filter rooms: drop any where both totalLow and totalHigh are null.
   const priced = rooms.filter((r) => r.totalLow != null || r.totalHigh != null);
@@ -938,7 +940,7 @@ async function syncInvestmentSlide(
     // Skip groups whose summed range is zero (they'd render "—").
     if (sumLow === 0 && sumHigh === 0) return [];
 
-    const label = groupLabelFor(slug, members);
+    const label = groupLabelFor(slug, members, customLabels);
     const includesText = buildGroupIncludesText(members);
     const bucket = String(members[0].bucket ?? "BASE");
 
@@ -1009,13 +1011,33 @@ function defaultSlugPriority(slug: string): number {
  * carolina-room-xxx, standalone-xxx) use the first member's name. Otherwise
  * use a fixed human label.
  */
-function groupLabelFor(slug: string, members: { name: string }[]): string {
+function groupLabelFor(
+  slug: string,
+  members: { name: string }[],
+  customLabels: Record<string, string> = {},
+): string {
+  // 1. User-defined custom label (from drag-merge popup) wins everything.
+  const custom = customLabels[slug];
+  if (custom && custom.trim() !== "") return custom;
+
   if (
     slug.startsWith("bedroom-") ||
     slug.startsWith("bathroom-") ||
     slug.startsWith("carolina-room-") ||
     slug.startsWith("standalone-")
   ) {
+    return members[0]?.name ?? "(Unnamed)";
+  }
+  // Fixed-group fallback: when only one room sits in a fixed group
+  // (primary-suite, outdoor, etc.), show that room's name instead of the
+  // generic group label. With auto-degroup running on every group mutation
+  // this should rarely fire — but it remains as a safety net.
+  if (members.length === 1) {
+    return members[0]?.name ?? "(Unnamed)";
+  }
+  // 2. Custom slugs (e.g. "custom-<nanoid>" created via the drag-merge popup)
+  //    that lack a label entry fall through to a sensible default.
+  if (slug.startsWith("custom-")) {
     return members[0]?.name ?? "(Unnamed)";
   }
   switch (slug) {

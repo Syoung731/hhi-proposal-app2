@@ -37,6 +37,12 @@ import {
   updateProjectDisplayGroupOrder,
 } from "./actions";
 import { InvestmentAddGroupDropdown } from "./investment-add-group-dropdown";
+import {
+  InvestmentMergeRoomsPopup,
+  type MergeRoomsPopupExistingGroup,
+  type MergeRoomsPopupResolution,
+  type MergeRoomsPopupRoom,
+} from "./investment-merge-rooms-popup";
 import { FIXED_GROUPS, type FixedGroupSlug } from "@/app/lib/investment/display-group-classifier";
 import {
   BUCKET_LABELS,
@@ -141,6 +147,13 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
   const [pendingEmptySlugs, setPendingEmptySlugs] = useState<Set<FixedGroupSlug>>(
     () => new Set(),
   );
+  // Drag-merge popup state. Set when user drops one room onto another and
+  // the two rooms aren't already in the same group — caller picks which
+  // group to assign both rooms to (existing, fixed, or custom-named).
+  const [mergePending, setMergePending] = useState<{
+    draggedRoomId: string;
+    targetRoomId: string;
+  } | null>(null);
 
   useSyncProps(sections, setLocalSections);
   useSyncProps(groupOrder, setLocalGroupOrder);
@@ -201,6 +214,27 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       // prevents dropping individual rooms INTO the COPE bucket — COPE is
       // a project-overhead accounting bucket, not a renovation space.
       if (activeData.type === "group" && overData?.type === "group") {
+        // Both groups single-member (= each is a solo room rendered flat) →
+        // treat as room-merge, not group-reorder. Otherwise dragging two
+        // ungrouped rooms onto each other would just shuffle the tree
+        // order without ever opening the merge popup.
+        const activeNode = nodes.find((n) => n.slug === activeData.slug);
+        const overNode = nodes.find((n) => n.slug === overData.slug);
+        if (
+          activeNode &&
+          overNode &&
+          !activeNode.isLocked &&
+          !overNode.isLocked &&
+          activeNode.members.length === 1 &&
+          overNode.members.length === 1 &&
+          activeNode.members[0].id !== overNode.members[0].id
+        ) {
+          setMergePending({
+            draggedRoomId: activeNode.members[0].id,
+            targetRoomId: overNode.members[0].id,
+          });
+          return;
+        }
         const newSlugOrder = moveGroup(nodes, activeData.slug, overData.slug);
         setLocalGroupOrder(newSlugOrder);
         startTransition(async () => {
@@ -319,6 +353,26 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
           return;
         }
 
+        // ── Drop-room-on-room → open merge popup if they're in different
+        //    groups (or either is ungrouped). Same-group drops keep the
+        //    existing reorder behavior below.
+        if (overData?.type === "room") {
+          const draggedSlug = activeData.slug || null;
+          const targetSlug = overData.slug || null;
+          const sameRealGroup =
+            draggedSlug != null &&
+            targetSlug != null &&
+            draggedSlug === targetSlug &&
+            draggedSlug !== "ungrouped";
+          if (!sameRealGroup && overData.roomId !== activeData.roomId) {
+            setMergePending({
+              draggedRoomId: activeData.roomId,
+              targetRoomId: overData.roomId,
+            });
+            return;
+          }
+        }
+
         // ── Default: reparent into / reorder within an existing group ─────
         const targetGroupSlug =
           overData?.type === "group"
@@ -366,6 +420,105 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       }
     },
     [projectId, nodes, localSections, router, startTransition],
+  );
+
+  // Resolve the merge popup: assign both the dragged and target rooms to the
+  // chosen slug. Appends to the end of the target group (or starts a fresh
+  // group if the slug is empty / brand-new). Calls updateRoomDisplayGroup
+  // once with both moves + the optional custom label.
+  const handleMergeResolve = useCallback(
+    (resolution: MergeRoomsPopupResolution) => {
+      if (!mergePending) return;
+      const { draggedRoomId, targetRoomId } = mergePending;
+      const { slug, label } = resolution;
+
+      const existingMembers = localSections.filter((s) => s.displayGroupId === slug);
+      const baseOrder = existingMembers.reduce(
+        (max, s) => Math.max(max, s.displayGroupOrder ?? 0),
+        -1,
+      );
+      const moves = [
+        { id: targetRoomId, displayGroupId: slug, displayGroupOrder: baseOrder + 1 },
+        { id: draggedRoomId, displayGroupId: slug, displayGroupOrder: baseOrder + 2 },
+      ];
+
+      // Optimistic update.
+      setLocalSections((prev) => {
+        const map = new Map(prev.map((s) => [s.id, s]));
+        for (const m of moves) {
+          const row = map.get(m.id);
+          if (row) {
+            map.set(m.id, {
+              ...row,
+              displayGroupId: m.displayGroupId,
+              displayGroupOrder: m.displayGroupOrder,
+            });
+          }
+        }
+        return Array.from(map.values());
+      });
+      setExpanded((prev) => new Set(prev).add(slug));
+      setMergePending(null);
+
+      startTransition(async () => {
+        const result = await updateRoomDisplayGroup(
+          projectId,
+          moves,
+          label != null ? { slug, label } : null,
+        );
+        if (result.error) {
+          console.error("updateRoomDisplayGroup (merge):", result.error);
+          router.refresh();
+        }
+      });
+    },
+    [mergePending, localSections, projectId, router, startTransition],
+  );
+
+  // Build the popup-friendly view of existing groups: only multi-member
+  // groups (single-member ones don't really exist post-degroup) and not the
+  // groups currently containing the two rooms being merged.
+  const popupExistingGroups = useMemo<MergeRoomsPopupExistingGroup[]>(() => {
+    if (!mergePending) return [];
+    const result: MergeRoomsPopupExistingGroup[] = [];
+    for (const node of nodes) {
+      if (node.isLocked) continue; // skip COPE
+      if (node.members.length < 2) continue;
+      result.push({
+        slug: node.slug,
+        label: node.label,
+        memberCount: node.members.length,
+      });
+    }
+    return result;
+  }, [mergePending, nodes]);
+
+  // Predefined fixed groups that aren't currently populated and aren't COPE.
+  const popupFixedSlugs = useMemo<readonly FixedGroupSlug[]>(() => {
+    const populated = new Set(
+      localSections
+        .map((s) => s.displayGroupId)
+        .filter((s): s is string => !!s),
+    );
+    const candidates: FixedGroupSlug[] = [
+      "primary-suite",
+      "kitchen-dining",
+      "living-spaces",
+      "utility",
+      "outdoor",
+      "storage",
+    ];
+    return candidates.filter((slug) => !populated.has(slug));
+  }, [localSections]);
+
+  const popupRooms = useMemo<MergeRoomsPopupRoom[]>(
+    () =>
+      localSections.map((s) => ({
+        id: s.id,
+        name: s.name,
+        isProjectOverhead: s.isProjectOverhead,
+      })),
+    [localSections],
   );
 
   return (
@@ -417,7 +570,14 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
 
                 <SortableContext
                   items={nonCope.map((n) => groupSortableId(n.slug))}
-                  strategy={verticalListSortingStrategy}
+                  /* No strategy: keep top-level rows static during drag.
+                     verticalListSortingStrategy auto-shifts siblings to
+                     preview an insertion position, which is helpful for
+                     reorder but turns "drop ON another row to merge" into
+                     a moving target. Drops still fire correctly without
+                     the strategy — just no live-shift animation on the
+                     non-dragged rows. Inner group children keep their
+                     own SortableContext below for in-group reorder. */
                 >
                   {nonCope.map((node, i) => (
                     <Fragment key={node.slug}>
@@ -450,6 +610,26 @@ export function InvestmentGroupTree({ projectId, sections, groupOrder }: Props) 
       </div>
 
       <DragOverlay>{activeDrag ? <DragPreview data={activeDrag} /> : null}</DragOverlay>
+
+      {mergePending && (() => {
+        const dragged = popupRooms.find((r) => r.id === mergePending.draggedRoomId);
+        const target = popupRooms.find((r) => r.id === mergePending.targetRoomId);
+        // Drag state went stale (e.g. data refresh between dragend and render).
+        // Bail rather than render a half-formed popup. Don't call setState
+        // during render — the next data refresh will reset mergePending.
+        if (!dragged || !target) return null;
+        return (
+          <InvestmentMergeRoomsPopup
+            draggedRoom={dragged}
+            targetRoom={target}
+            allRooms={popupRooms}
+            existingGroups={popupExistingGroups}
+            fixedGroupSlugs={popupFixedSlugs}
+            onResolve={handleMergeResolve}
+            onCancel={() => setMergePending(null)}
+          />
+        );
+      })()}
     </DndContext>
   );
 }

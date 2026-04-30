@@ -104,6 +104,17 @@ model Project {
   // last server-side regardless of what's stored here.
   displayGroupOrder Json @default("[]")
 
+  // User-defined labels for display-group slugs. Map of slug → label.
+  // Two purposes:
+  //   1. Restored fixed groups can be relabeled (rare but supported).
+  //   2. Custom slugs created via the drag-merge popup ("custom-<nanoid>")
+  //      use this map to resolve their human-readable label everywhere
+  //      (Investment tree, deck Investment-by-Space slide).
+  // Slugs not present here fall back to the fixed-group default labels in
+  // app/lib/deck/db.ts groupLabelFor or to the room name for individualized
+  // / single-member groups.
+  displayGroupNames Json @default("{}")
+
   // Project Overhead (COPE) generation state (Phase 8C).
   // Doubles as an idempotency lock — writers acquire GENERATING via a
   // conditional updateMany() so simultaneous triggers can't race.

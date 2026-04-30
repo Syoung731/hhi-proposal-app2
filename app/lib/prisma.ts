@@ -59,7 +59,7 @@ function hasAllExpectedFields(
  */
 const REQUIRED_RECENT_FIELDS: Record<string, string[]> = {
   Room: ["displayGroupId", "displayGroupOrder", "scopeOverviewShort"], // Phase 8A.1; scopeOverviewShort added for paginated Scope Breakdown
-  Project: ["displayGroupOrder"], // Phase 8A.1
+  Project: ["displayGroupOrder", "displayGroupNames"], // Phase 8A.1; displayGroupNames added for user-driven group labels
   Media: ["thumbnailUrl"], // Phase 9
   CompanySettings: ["designHourlyRate", "brandTagline", "closingHeadline"], // Phase 8C T1, Phase 11 Pass 2A T9
   RoomRenderCheck: ["id", "roomId", "itemText"], // Phase 10
