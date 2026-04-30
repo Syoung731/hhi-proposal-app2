@@ -9,7 +9,7 @@ import type {
   CoverContent,
   CoverLayoutKey,
   ObjectiveContent,
-  InvestmentContent,
+  InvestmentBySpaceContent,
   WhyUsContent,
   WhyUsPillarItem,
   WhyUsTestimonial,
@@ -21,23 +21,23 @@ import type {
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
   RiskBriefContent,
-  ProcessContent,
+  OurProcessContent,
   ProcessStage,
   CoreValuesContent,
   CoreValue,
-  ProjectTimelineContent,
+  TimelineContent,
   ProjectPhase,
-  CopePageContent,
+  CopeContent,
   CopeItem,
-  DesignRetainerContent,
+  OverallInvestmentContent,
   DesignRetainerBenefit,
   NextStepsContent,
   NextStep,
-  ClosingSlideContent,
-  VisualInspirationContent,
-  ClientTestimonialsContent,
+  ClosingContent,
+  InspirationContent,
+  TestimonialsContent,
   SlideTestimonial,
-  DesignBuildAdvantageContent,
+  DesignBuildContent,
   DesignBuildPillar,
   DesignBuildGuarantee,
   DesignBuildDiagramNode,
@@ -402,6 +402,7 @@ function SharedLogoSection({
   defaultShow,
   defaultX,
   defaultY,
+  defaultSize,
   hidePosSliders,
 }: {
   content: SharedSlideFields;
@@ -409,12 +410,13 @@ function SharedLogoSection({
   defaultShow: boolean;
   defaultX?: number;
   defaultY?: number;
+  defaultSize?: number;
   hidePosSliders?: boolean;
 }) {
   const logoOn = content.showLogo ?? defaultShow;
   const curX = content.logoX ?? (defaultX ?? 85);
   const curY = content.logoY ?? (defaultY ?? 88);
-  const curSize = content.logoSize ?? 1.0;
+  const curSize = content.logoSize ?? defaultSize ?? 1.0;
 
   return (
     <>
@@ -2136,16 +2138,16 @@ function InvestmentInspector({
   onUpdate: (s: ProposalSlide) => void;
   onResyncInvestment?: () => void;
 }) {
-  const content = (slide.content ?? {}) as InvestmentContent;
+  const content = (slide.content ?? {}) as InvestmentBySpaceContent;
   const itemCount = (content.lineItems ?? []).length;
   const accent = content.accentColor ?? branding.accentColor;
 
-  function updateContent(patch: Partial<InvestmentContent>) {
+  function updateContent(patch: Partial<InvestmentBySpaceContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch }, isUserModified: true });
   }
 
   // Phase 8C.2 T2: `retainerAmount` + `retainerLabel` inputs removed from
-  // the Investment inspector. Those fields no longer exist on InvestmentContent
+  // the Investment inspector. Those fields no longer exist on InvestmentBySpaceContent
   // (the mid-slide retainer callout was removed in Phase 8C T2 and the
   // write-side race was fixed in Phase 8C.2 T1). The retainer story lives
   // entirely on Slide 10 (Your Investment) now.
@@ -4224,14 +4226,14 @@ function ProcessInspector({
   branding: DeckBranding;
   onUpdate: (s: ProposalSlide) => void;
 }) {
-  const content = ((slide.content ?? {}) as ProcessContent);
+  const content = ((slide.content ?? {}) as OurProcessContent);
   const stages = content.stages ?? [
     { name: "Discovery & Design", bullets: ["", "", ""] },
     { name: "Plan & Select",      bullets: ["", "", ""] },
     { name: "Build & Deliver",    bullets: ["", "", ""] },
   ];
 
-  function updateContent(patch: Partial<ProcessContent>) {
+  function updateContent(patch: Partial<OurProcessContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -4730,7 +4732,7 @@ function ProjectTimelineInspector({
   branding: DeckBranding;
   onUpdate: (s: ProposalSlide) => void;
 }) {
-  const content = (slide.content ?? {}) as ProjectTimelineContent;
+  const content = (slide.content ?? {}) as TimelineContent;
   const phases = content.phases ?? DEFAULT_TL_PHASES;
   const accent = content.accentColor ?? branding.accentColor;
   const layoutKey = slide.layoutKey as string;
@@ -4743,7 +4745,7 @@ function ProjectTimelineInspector({
     "noteFont", "noteSize", "noteBold", "noteItalic", "noteUnderline", "noteColor", "noteOutline",
   ];
 
-  function updateContent(patch: Partial<ProjectTimelineContent>) {
+  function updateContent(patch: Partial<TimelineContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -5049,7 +5051,7 @@ function CopePageInspector({
   branding: DeckBranding;
   onUpdate: (s: ProposalSlide) => void;
 }) {
-  const content = (slide.content ?? {}) as CopePageContent;
+  const content = (slide.content ?? {}) as CopeContent;
   const items = content.items ?? DEFAULT_COPE;
   const [brandIcons, setBrandIcons] = useState<TemplateCIcon[]>([]);
   const [iconsLoaded, setIconsLoaded] = useState(false);
@@ -5064,11 +5066,14 @@ function CopePageInspector({
     });
   }, [iconsLoaded]);
 
-  function updateContent(patch: Partial<CopePageContent>) {
+  function updateContent(patch: Partial<CopeContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
-  const locked = !!content.lockItemStyles;
+  // Default ON for COPE: items should match the first item's styling unless
+  // the user explicitly toggles it off (stored as `false`). Undefined / null
+  // = never set = use the new default.
+  const locked = content.lockItemStyles ?? true;
 
   const COPE_STYLE_KEYS: (keyof CopeItem)[] = [
     "titleFont", "titleSize", "titleBold", "titleItalic", "titleUnderline", "titleColor", "titleOutline",
@@ -5212,7 +5217,8 @@ function CopePageInspector({
           const synced = items.map((it, i) => i === 0 ? it : { ...it, ...stylePatch });
           updateContent({ lockItemStyles: true, items: synced });
         } else {
-          updateContent({ lockItemStyles: v || null });
+          // Explicit false (not null) — null/undefined now means "use default ON".
+          updateContent({ lockItemStyles: false });
         }
       }} />
 
@@ -5238,8 +5244,8 @@ function CopePageInspector({
               <FieldGroup label={`Title Font${locked ? " (all)" : ""}`}>
                 <PFontSelect value={item.titleFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateItem(ii, { titleFont: v })} />
               </FieldGroup>
-              <FieldGroup label={`Title Size — ${(item.titleSize ?? 1.0).toFixed(1)}×`}>
-                <PSizeSlider value={item.titleSize ?? 1.0} onChange={(v) => updateItem(ii, { titleSize: v })} accentColor={accent} />
+              <FieldGroup label={`Title Size — ${(item.titleSize ?? 1.6).toFixed(1)}×`}>
+                <PSizeSlider value={item.titleSize ?? 1.6} onChange={(v) => updateItem(ii, { titleSize: v })} accentColor={accent} />
               </FieldGroup>
               <FieldGroup label="Title Style">
                 <PStyleButtons bold={item.titleBold ?? true} italic={item.titleItalic} underline={item.titleUnderline}
@@ -5266,8 +5272,8 @@ function CopePageInspector({
               <FieldGroup label={`Desc Font${locked ? " (all)" : ""}`}>
                 <PFontSelect value={item.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateItem(ii, { descriptionFont: v })} />
               </FieldGroup>
-              <FieldGroup label={`Desc Size — ${(item.descriptionSize ?? 1.0).toFixed(1)}×`}>
-                <PSizeSlider value={item.descriptionSize ?? 1.0} onChange={(v) => updateItem(ii, { descriptionSize: v })} accentColor={accent} />
+              <FieldGroup label={`Desc Size — ${(item.descriptionSize ?? 2.5).toFixed(1)}×`}>
+                <PSizeSlider value={item.descriptionSize ?? 2.5} onChange={(v) => updateItem(ii, { descriptionSize: v })} accentColor={accent} />
               </FieldGroup>
               <FieldGroup label="Desc Style">
                 <PStyleButtons bold={item.descriptionBold} italic={item.descriptionItalic} underline={item.descriptionUnderline}
@@ -5325,8 +5331,8 @@ function CopePageInspector({
               <FieldGroup label={`Bullets Font${locked ? " (all)" : ""}`}>
                 <PFontSelect value={item.bulletsFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateItem(ii, { bulletsFont: v })} />
               </FieldGroup>
-              <FieldGroup label={`Bullets Size — ${(item.bulletsSize ?? 1.0).toFixed(1)}×`}>
-                <PSizeSlider value={item.bulletsSize ?? 1.0} onChange={(v) => updateItem(ii, { bulletsSize: v })} accentColor={accent} />
+              <FieldGroup label={`Bullets Size — ${(item.bulletsSize ?? 2.0).toFixed(1)}×`}>
+                <PSizeSlider value={item.bulletsSize ?? 2.0} onChange={(v) => updateItem(ii, { bulletsSize: v })} accentColor={accent} />
               </FieldGroup>
               <FieldGroup label="Bullets Style">
                 <PStyleButtons bold={item.bulletsBold} italic={item.bulletsItalic} underline={item.bulletsUnderline}
@@ -5367,19 +5373,22 @@ function DesignRetainerInspector({
   branding: DeckBranding;
   onUpdate: (s: ProposalSlide) => void;
 }) {
-  const content = (slide.content ?? {}) as DesignRetainerContent;
+  const content = (slide.content ?? {}) as OverallInvestmentContent;
   const rawBenefits = content.benefits ?? DEFAULT_DESIGN_RETAINER_BENEFITS;
   const benefits: DesignRetainerBenefit[] = rawBenefits.map((b) =>
     typeof b === "string" ? { text: b } : b
   );
   const resolvedAccent = content.accentColor ?? branding.accentColor;
-  const locked = !!content.lockItemStyles;
+  // Default ON for retainer bullets — matches the COPE pattern. The "off"
+  // path stores explicit `false` (not null) so the new default actually
+  // flips when the user unchecks.
+  const locked = content.lockItemStyles ?? true;
 
   const BENEFIT_STYLE_KEYS: (keyof DesignRetainerBenefit)[] = [
     "textFont", "textSize", "textBold", "textItalic", "textUnderline", "textColor", "textOutline",
   ];
 
-  function updateContent(patch: Partial<DesignRetainerContent>) {
+  function updateContent(patch: Partial<OverallInvestmentContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -5462,8 +5471,8 @@ function DesignRetainerInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.headlineFont2 ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ headlineFont2: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.headlineSize ?? 2.0).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.headlineSize ?? 2.0} onChange={(v) => updateContent({ headlineSize: v })} />
+      <FieldGroup label={`Size — ${(content.headlineSize ?? 2.7).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.headlineSize ?? 2.7} onChange={(v) => updateContent({ headlineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.headlineBold ?? true} italic={content.headlineItalic} underline={content.headlineUnderline}
         onBold={(v) => updateContent({ headlineBold: v })} onItalic={(v) => updateContent({ headlineItalic: v })} onUnderline={(v) => updateContent({ headlineUnderline: v })} />
@@ -5487,8 +5496,8 @@ function DesignRetainerInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.taglineFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ taglineFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.taglineSize ?? 0.75).toFixed(2)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.taglineSize ?? 0.75} onChange={(v) => updateContent({ taglineSize: v })} />
+      <FieldGroup label={`Size — ${(content.taglineSize ?? 0.80).toFixed(2)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.taglineSize ?? 0.80} onChange={(v) => updateContent({ taglineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.taglineBold} italic={content.taglineItalic ?? true} underline={content.taglineUnderline}
         onBold={(v) => updateContent({ taglineBold: v })} onItalic={(v) => updateContent({ taglineItalic: v })} onUnderline={(v) => updateContent({ taglineUnderline: v })} />
@@ -5507,13 +5516,13 @@ function DesignRetainerInspector({
       {/* ── RETAINER LABEL (Band 1 row 1, left) ───────────────── */}
       <SectionLabel>Retainer Label</SectionLabel>
       <FieldGroup label="Text">
-        <TextInput value={content.retainerLabelText ?? ""} onChange={(v) => updateContent({ retainerLabelText: v || null })} placeholder="Design / Feasibility Retainer" />
+        <TextInput value={content.retainerLabelText ?? ""} onChange={(v) => updateContent({ retainerLabelText: v || null })} placeholder="Design & Feasibility Retainer" />
       </FieldGroup>
       <FieldGroup label="Font">
         <PFontSelect value={content.retainerLabelFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ retainerLabelFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.retainerLabelSize ?? 2.10).toFixed(2)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.retainerLabelSize ?? 2.10} onChange={(v) => updateContent({ retainerLabelSize: v })} />
+      <FieldGroup label={`Size — ${(content.retainerLabelSize ?? 2.00).toFixed(2)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.retainerLabelSize ?? 2.00} onChange={(v) => updateContent({ retainerLabelSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.retainerLabelBold ?? true} italic={content.retainerLabelItalic} underline={content.retainerLabelUnderline}
         onBold={(v) => updateContent({ retainerLabelBold: v })} onItalic={(v) => updateContent({ retainerLabelItalic: v })} onUnderline={(v) => updateContent({ retainerLabelUnderline: v })} />
@@ -5563,13 +5572,13 @@ function DesignRetainerInspector({
         Optional sentence shown beneath the retainer amount. Leave blank to hide.
       </p>
       <FieldGroup label="Text">
-        <TextArea value={content.retainerDescText ?? ""} onChange={(v) => updateContent({ retainerDescText: v || null })} placeholder="Design work billed at our published rate of $X/hour. Third-party services included." rows={3} />
+        <TextArea value={content.retainerDescText ?? ""} onChange={(v) => updateContent({ retainerDescText: v || null })} placeholder="Design work billed at our published rate of $200.00 per hour. 3rd Party Services (Survey, Engineering, Architect, etc...) included within the design retainer." rows={3} />
       </FieldGroup>
       <FieldGroup label="Font">
         <PFontSelect value={content.retainerDescFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ retainerDescFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.retainerDescSize ?? 0.55).toFixed(2)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.retainerDescSize ?? 0.55} onChange={(v) => updateContent({ retainerDescSize: v })} />
+      <FieldGroup label={`Size — ${(content.retainerDescSize ?? 0.90).toFixed(2)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.retainerDescSize ?? 0.90} onChange={(v) => updateContent({ retainerDescSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.retainerDescBold} italic={content.retainerDescItalic} underline={content.retainerDescUnderline}
         onBold={(v) => updateContent({ retainerDescBold: v })} onItalic={(v) => updateContent({ retainerDescItalic: v })} onUnderline={(v) => updateContent({ retainerDescUnderline: v })} />
@@ -5602,7 +5611,8 @@ function DesignRetainerInspector({
           const synced = benefits.map((b, i) => (i === 0 ? b : { ...b, ...stylePatch }));
           updateContent({ lockItemStyles: true, benefits: synced });
         } else {
-          updateContent({ lockItemStyles: v || null });
+          // Explicit false (not null) — null/undefined now means "use default ON".
+          updateContent({ lockItemStyles: false });
         }
       }} />
 
@@ -5624,8 +5634,8 @@ function DesignRetainerInspector({
               <FieldGroup label={`Font${locked ? " (all)" : ""}`}>
                 <PFontSelect value={b.textFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateBenefitStyle(bi, { textFont: v })} />
               </FieldGroup>
-              <FieldGroup label={`Size — ${(b.textSize ?? 0.56).toFixed(2)}×${locked ? " (all)" : ""}`}>
-                <PSizeSlider accentColor={branding.accentColor} value={b.textSize ?? 0.56} onChange={(v) => updateBenefitStyle(bi, { textSize: v })} />
+              <FieldGroup label={`Size — ${(b.textSize ?? 1.3).toFixed(2)}×${locked ? " (all)" : ""}`}>
+                <PSizeSlider accentColor={branding.accentColor} value={b.textSize ?? 1.3} onChange={(v) => updateBenefitStyle(bi, { textSize: v })} />
               </FieldGroup>
               <PStyleButtons bold={b.textBold} italic={b.textItalic} underline={b.textUnderline}
                 onBold={(v) => updateBenefitStyle(bi, { textBold: v })} onItalic={(v) => updateBenefitStyle(bi, { textItalic: v })} onUnderline={(v) => updateBenefitStyle(bi, { textUnderline: v })} />
@@ -5653,8 +5663,8 @@ function DesignRetainerInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.constructionLabelFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ constructionLabelFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.constructionLabelSize ?? 0.85).toFixed(2)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.constructionLabelSize ?? 0.85} onChange={(v) => updateContent({ constructionLabelSize: v })} />
+      <FieldGroup label={`Size — ${(content.constructionLabelSize ?? 1.60).toFixed(2)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.constructionLabelSize ?? 1.60} onChange={(v) => updateContent({ constructionLabelSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.constructionLabelBold ?? true} italic={content.constructionLabelItalic} underline={content.constructionLabelUnderline}
         onBold={(v) => updateContent({ constructionLabelBold: v })} onItalic={(v) => updateContent({ constructionLabelItalic: v })} onUnderline={(v) => updateContent({ constructionLabelUnderline: v })} />
@@ -5687,8 +5697,8 @@ function DesignRetainerInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.constructionAmountFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ constructionAmountFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.constructionAmountSize ?? 1.35).toFixed(2)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.constructionAmountSize ?? 1.35} onChange={(v) => updateContent({ constructionAmountSize: v })} />
+      <FieldGroup label={`Size — ${(content.constructionAmountSize ?? 1.60).toFixed(2)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.constructionAmountSize ?? 1.60} onChange={(v) => updateContent({ constructionAmountSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.constructionAmountBold ?? true} italic={content.constructionAmountItalic} underline={content.constructionAmountUnderline}
         onBold={(v) => updateContent({ constructionAmountBold: v })} onItalic={(v) => updateContent({ constructionAmountItalic: v })} onUnderline={(v) => updateContent({ constructionAmountUnderline: v })} />
@@ -5712,8 +5722,8 @@ function DesignRetainerInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.totalLabelFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ totalLabelFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.totalLabelSize ?? 0.95).toFixed(2)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.totalLabelSize ?? 0.95} onChange={(v) => updateContent({ totalLabelSize: v })} />
+      <FieldGroup label={`Size — ${(content.totalLabelSize ?? 1.40).toFixed(2)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.totalLabelSize ?? 1.40} onChange={(v) => updateContent({ totalLabelSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.totalLabelBold ?? true} italic={content.totalLabelItalic} underline={content.totalLabelUnderline}
         onBold={(v) => updateContent({ totalLabelBold: v })} onItalic={(v) => updateContent({ totalLabelItalic: v })} onUnderline={(v) => updateContent({ totalLabelUnderline: v })} />
@@ -6232,11 +6242,11 @@ function ClosingSlideInspector({
   projectRoomsWithMedia?: RoomWithMedia[];
   projectLevelMedia?: RoomMediaItem[];
 }) {
-  const content = (slide.content ?? {}) as ClosingSlideContent;
+  const content = (slide.content ?? {}) as ClosingContent;
   const layoutKey = slide.layoutKey as string;
   const [bgPhotoPickerOpen, setBgPhotoPickerOpen] = useState(false);
 
-  function updateContent(patch: Partial<ClosingSlideContent>) {
+  function updateContent(patch: Partial<ClosingContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -6293,8 +6303,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.taglineFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ taglineFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.taglineSize ?? 0.75).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.taglineSize ?? 0.75} onChange={(v) => updateContent({ taglineSize: v })} />
+      <FieldGroup label={`Size — ${(content.taglineSize ?? 1.4).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.taglineSize ?? 1.4} onChange={(v) => updateContent({ taglineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.taglineBold} italic={content.taglineItalic} underline={content.taglineUnderline}
         onBold={(v) => updateContent({ taglineBold: v })} onItalic={(v) => updateContent({ taglineItalic: v })} onUnderline={(v) => updateContent({ taglineUnderline: v })} />
@@ -6318,8 +6328,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.subheadlineFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ subheadlineFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.subheadlineSize ?? 0.52).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.subheadlineSize ?? 0.52} onChange={(v) => updateContent({ subheadlineSize: v })} />
+      <FieldGroup label={`Size — ${(content.subheadlineSize ?? 0.5).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.subheadlineSize ?? 0.5} onChange={(v) => updateContent({ subheadlineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.subheadlineBold} italic={content.subheadlineItalic} underline={content.subheadlineUnderline}
         onBold={(v) => updateContent({ subheadlineBold: v })} onItalic={(v) => updateContent({ subheadlineItalic: v })} onUnderline={(v) => updateContent({ subheadlineUnderline: v })} />
@@ -6349,8 +6359,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.contactFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ contactFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.contactSize ?? 0.48).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.contactSize ?? 0.48} onChange={(v) => updateContent({ contactSize: v })} />
+      <FieldGroup label={`Size — ${(content.contactSize ?? 1.3).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.contactSize ?? 1.3} onChange={(v) => updateContent({ contactSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.contactBold} italic={content.contactItalic} underline={content.contactUnderline}
         onBold={(v) => updateContent({ contactBold: v })} onItalic={(v) => updateContent({ contactItalic: v })} onUnderline={(v) => updateContent({ contactUnderline: v })} />
@@ -6374,8 +6384,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.validityFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ validityFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.validitySize ?? 0.75).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.validitySize ?? 0.75} onChange={(v) => updateContent({ validitySize: v })} />
+      <FieldGroup label={`Size — ${(content.validitySize ?? 2.0).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.validitySize ?? 2.0} onChange={(v) => updateContent({ validitySize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.validityBold} italic={content.validityItalic} underline={content.validityUnderline}
         onBold={(v) => updateContent({ validityBold: v })} onItalic={(v) => updateContent({ validityItalic: v })} onUnderline={(v) => updateContent({ validityUnderline: v })} />
@@ -6473,7 +6483,7 @@ function VisualInspirationInspector({
   projectRoomsWithMedia?: RoomWithMedia[];
   projectLevelMedia?: RoomMediaItem[];
 }) {
-  const content = (slide.content ?? {}) as VisualInspirationContent;
+  const content = (slide.content ?? {}) as InspirationContent;
   const layoutKey = slide.layoutKey as string;
   const photos = content.photos ?? [];
   const accent = content.accentColor ?? branding.accentColor;
@@ -6481,7 +6491,7 @@ function VisualInspirationInspector({
   const [photosPickerOpen, setPhotosPickerOpen] = useState(false);
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
 
-  function updateContent(patch: Partial<VisualInspirationContent>) {
+  function updateContent(patch: Partial<InspirationContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -6782,7 +6792,7 @@ function ClientTestimonialsInspector({
   projectRoomsWithMedia?: RoomWithMedia[];
   projectLevelMedia?: RoomMediaItem[];
 }) {
-  const content = (slide.content ?? {}) as ClientTestimonialsContent;
+  const content = (slide.content ?? {}) as TestimonialsContent;
   const testimonials = content.testimonials ?? [];
   const accent = content.accentColor ?? branding.accentColor;
   const [bgPickerOpen, setBgPickerOpen] = useState(false);
@@ -6790,7 +6800,7 @@ function ClientTestimonialsInspector({
   const [libraryLoaded, setLibraryLoaded] = useState(false);
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
 
-  function updateContent(patch: Partial<ClientTestimonialsContent>) {
+  function updateContent(patch: Partial<TestimonialsContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -7116,7 +7126,7 @@ function DesignBuildAdvantageInspector({
   projectRoomsWithMedia?: RoomWithMedia[];
   projectLevelMedia?: RoomMediaItem[];
 }) {
-  const content = (slide.content ?? {}) as DesignBuildAdvantageContent;
+  const content = (slide.content ?? {}) as DesignBuildContent;
   const layoutKey = slide.layoutKey as string;
   const pillars = content.pillars && content.pillars.length > 0 ? content.pillars : DEFAULT_PILLARS;
   const guarantees = content.guarantees && content.guarantees.length > 0 ? content.guarantees : DEFAULT_GUARANTEES;
@@ -7137,7 +7147,7 @@ function DesignBuildAdvantageInspector({
     });
   }, [dbIconsLoaded]);
 
-  function updateContent(patch: Partial<DesignBuildAdvantageContent>) {
+  function updateContent(patch: Partial<DesignBuildContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
@@ -7180,8 +7190,8 @@ function DesignBuildAdvantageInspector({
   }
   function addPillar() {
     // Empty title + description so an unedited pillar won't render on the
-    // slide (the DesignBuildAdvantageSlide filters pillars where both are
-    // blank). Prevents the "New Pillar" orphan from leaking into published decks.
+    // slide (DesignBuildSlide filters pillars where both are blank).
+    // Prevents the "New Pillar" orphan from leaking into published decks.
     updateContent({ pillars: [...pillars, { id: `p-${Date.now()}`, icon: "Shield", title: "", description: "" }] });
   }
   function removePillar(idx: number) {
@@ -7351,7 +7361,7 @@ function DesignBuildAdvantageInspector({
       {/* Lock toggle for all item types */}
       <PLockItemStylesToggle checked={locked} onChange={(v) => {
         if (v) {
-          const patch: Partial<DesignBuildAdvantageContent> = { lockItemStyles: true };
+          const patch: Partial<DesignBuildContent> = { lockItemStyles: true };
           // Sync active item list from first item
           if ((layoutKey === "icon-cards" || layoutKey === "quad-grid") && pillars.length > 1) {
             const src = pillars[0]; const sp: Record<string, unknown> = {};
@@ -8755,11 +8765,12 @@ export function InspectorPanel({
         const logoUpdate = (patch: Partial<SharedSlideFields>) => {
           onUpdate({ ...slide, content: { ...logoContent, ...patch } });
         };
-        const logoDefaults: Record<string, { show: boolean; x: number; y: number; hidePos?: boolean }> = {
+        const logoDefaults: Record<string, { show: boolean; x: number; y: number; hidePos?: boolean; size?: number }> = {
           "cover":                  { show: true,  x: 5,  y: 5 },
           "before-after":           { show: true,  x: 85, y: 88 },
-          "closing-slide":          { show: true,  x: 50, y: 50, hidePos: true },
-          "design-retainer":        { show: false, x: 50, y: 88 },
+          cope:                     { show: true,  x: 85, y: 88 },
+          closing:                  { show: true,  x: 50, y: 50, hidePos: true, size: 2.0 },
+          "overall-investment":     { show: true,  x: 81, y: 3 },
           "next-steps":             { show: false, x: 50, y: 88 },
         };
         const def = logoDefaults[slide.type] ?? { show: false, x: 85, y: 88 };
@@ -8770,6 +8781,7 @@ export function InspectorPanel({
             defaultShow={def.show}
             defaultX={def.x}
             defaultY={def.y}
+            defaultSize={def.size}
             hidePosSliders={def.hidePos}
           />
         );
@@ -8825,7 +8837,7 @@ export function InspectorPanel({
             brandBackgrounds={brandBackgrounds}
             onBackgroundChange={onBackgroundChange}
             onTextZoneChange={onTextZoneChange}
-            showTextZone={slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && slide.type !== "objective" && slide.type !== "investment" && slide.type !== "project-timeline"}
+            showTextZone={slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && slide.type !== "objective" && slide.type !== "investment-by-space" && slide.type !== "timeline"}
           />
           <Divider />
         </>
@@ -8838,7 +8850,7 @@ export function InspectorPanel({
       {slide.type === "objective" && (
         <ObjectiveInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
-      {slide.type === "investment" && (
+      {slide.type === "investment-by-space" && (
         <InvestmentInspector slide={slide} branding={branding} onUpdate={onUpdate} onResyncInvestment={onResyncInvestment} />
       )}
       {slide.type === "why-us" && (
@@ -8861,34 +8873,34 @@ export function InspectorPanel({
       {slide.type === "risk-brief" && (
         <RiskBriefInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
-      {slide.type === "process" && (
+      {slide.type === "our-process" && (
         <ProcessInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
       {slide.type === "core-values" && (
         <CoreValuesInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
-      {slide.type === "project-timeline" && (
+      {slide.type === "timeline" && (
         <ProjectTimelineInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
-      {slide.type === "cope-page" && (
+      {slide.type === "cope" && (
         <CopePageInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
-      {slide.type === "design-retainer" && (
+      {slide.type === "overall-investment" && (
         <DesignRetainerInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
       {slide.type === "next-steps" && (
         <NextStepsInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
-      {slide.type === "closing-slide" && (
+      {slide.type === "closing" && (
         <ClosingSlideInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
-      {slide.type === "visual-inspiration" && (
+      {slide.type === "inspiration" && (
         <VisualInspirationInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
-      {slide.type === "client-testimonials" && (
+      {slide.type === "testimonials" && (
         <ClientTestimonialsInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
-      {slide.type === "design-build-advantage" && (
+      {slide.type === "design-build" && (
         <DesignBuildAdvantageInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
       {slide.type === "addition-overview" && (

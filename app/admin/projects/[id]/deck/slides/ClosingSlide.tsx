@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProposalSlide, DeckBranding, ClosingSlideContent } from "@/app/lib/deck/types";
+import type { ProposalSlide, DeckBranding, ClosingContent } from "@/app/lib/deck/types";
 import { CLOSING_SLIDE_DEFAULTS } from "@/app/lib/closing-slide-defaults";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
@@ -82,7 +82,7 @@ function ContactBlock({
 // ─── Main slide component ────────────────────────────────────────────────────
 
 export function ClosingSlide({ slide, branding, hasAiBackground }: Props) {
-  const c = (slide.content ?? {}) as ClosingSlideContent;
+  const c = (slide.content ?? {}) as ClosingContent;
   const layoutKey = slide.layoutKey as string;
   // Headline + tagline pull from CompanySettings via DeckBranding. Per-slide
   // overrides win; if both slide and settings are blank, render nothing.
@@ -142,7 +142,7 @@ interface LayoutProps {
   branding: DeckBranding;
   hasAiBackground?: boolean;
   accent: string;
-  content: ClosingSlideContent;
+  content: ClosingContent;
 }
 
 // ─── Layout A: Dark Centered ────────────────────────────────────────────────
@@ -171,20 +171,20 @@ function DarkCenteredLayout({
   const headlineColor = content.headlineColor2 ?? "#FFFFFF";
 
   const taglineFont = content.taglineFont ?? headlineFont;
-  const taglineSize = content.taglineSize ?? 0.75;
+  const taglineSize = content.taglineSize ?? 1.4;
   const taglineColor = content.taglineColor ?? accent;
 
   const subFont = content.subheadlineFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
-  const subSize = content.subheadlineSize ?? 0.52;
+  const subSize = content.subheadlineSize ?? 0.5;
   const subColor = content.subheadlineColor ?? "rgba(255,255,255,0.7)";
 
   const contactFont = content.contactFont ?? SLIDE_FONTS.defaults.body;
-  const contactSize = content.contactSize ?? 0.48;
+  const contactSize = content.contactSize ?? 1.3;
   const contactColor = content.contactColor ?? "rgba(255,255,255,0.75)";
 
   const validityFont = content.validityFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
-  const validitySize = content.validitySize ?? 0.38;
-  const validityColor = content.validityColor ?? MUTED;
+  const validitySize = content.validitySize ?? 2.0;
+  const validityColor = content.validityColor ?? "#9CA3AF";
 
   return (
     <div className="relative w-full h-full" style={{ overflow: "hidden" }}>
@@ -228,7 +228,7 @@ function DarkCenteredLayout({
             variant="dark"
             xPercent={50}
             yPercent={50}
-            scale={content.logoSize ?? 1.5}
+            scale={content.logoSize ?? 2.0}
             centered={true}
             branding={branding}
           />
@@ -239,7 +239,7 @@ function DarkCenteredLayout({
           style={{
             fontFamily: headlineFont,
             fontSize: `${headlineSize}em`,
-            fontWeight: (content.headlineBold2 ?? true) ? 700 : 400,
+            fontWeight: content.headlineBold2 ? 700 : 400,
             fontStyle: content.headlineItalic ? "italic" : undefined,
             textDecoration: content.headlineUnderline ? "underline" : undefined,
             color: headlineColor,
@@ -259,7 +259,7 @@ function DarkCenteredLayout({
             fontFamily: taglineFont,
             fontSize: `${taglineSize}em`,
             fontWeight: content.taglineBold ? 700 : 400,
-            fontStyle: (content.taglineItalic ?? true) ? "italic" : undefined,
+            fontStyle: content.taglineItalic ? "italic" : undefined,
             textDecoration: content.taglineUnderline ? "underline" : undefined,
             color: taglineColor,
             lineHeight: 1.5,
