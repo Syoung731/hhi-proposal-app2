@@ -13,10 +13,7 @@ import {
 import { computeSectionTotals } from "@/app/lib/section-totals";
 import { recomputeInvestmentRollups } from "@/app/lib/investment-rollup";
 import { ensureCopeRoom } from "@/app/lib/ensure-cope-room";
-import {
-  assignDisplayGroupForRoom,
-  assignDisplayGroupsForRooms,
-} from "@/app/lib/investment/assign-display-group";
+import { dissolveSingleMemberGroups } from "@/app/lib/investment/assign-display-group";
 import {
   extractRoomsFromTranscript,
   rewriteRoomScopeNarrative,
@@ -204,7 +201,12 @@ export async function createRoomAction(projectId: string, formData: FormData): P
     },
     select: { id: true },
   });
-  await assignDisplayGroupForRoom(created.id);
+  // New rooms start as their own standalone group. The user explicitly
+  // groups rooms via the drag-merge popup in the Investment tab; running
+  // dissolveSingleMemberGroups here normalizes the new room's slug to
+  // `standalone-{id}` so it renders as its own line item everywhere
+  // (not bucketed into a generic "Ungrouped" lump on the deck slide).
+  await dissolveSingleMemberGroups(projectId);
   await recomputeInvestmentRollups(projectId);
   revalidatePath(`/admin/projects/${projectId}`);
   revalidatePath(`/admin/projects/${projectId}/preview`);
@@ -309,6 +311,13 @@ export async function updateRoomAction(
   const bucket = ["BASE", "ALTERNATE", "ALLOWANCE"].includes(bucketRaw ?? "")
     ? (bucketRaw as "BASE" | "ALTERNATE" | "ALLOWANCE")
     : room.bucket;
+  // Optional explicit source toggle (sent by the Rendr/Transcript radio).
+  // When provided, takes priority over the dimsChanged heuristic below.
+  const measurementSourceRaw = (formData.get("measurementSource") as string)?.trim();
+  const measurementSourceOverride =
+    measurementSourceRaw === "rendr" || measurementSourceRaw === "manual" || measurementSourceRaw === "transcript"
+      ? measurementSourceRaw
+      : null;
   const unitRateLowRaw = (formData.get("unitRateLow") as string)?.trim();
   const unitRateTargetRaw = (formData.get("unitRateTarget") as string)?.trim();
   const unitRateHighRaw = (formData.get("unitRateHigh") as string)?.trim();
@@ -448,14 +457,19 @@ export async function updateRoomAction(
     bucket,
   };
 
-  // Track measurement source: if user changed dimensions, mark as manual
-  const dimsChanged =
-    lengthIn !== room.lengthIn ||
-    widthIn !== room.widthIn ||
-    ceilingHeightIn !== room.ceilingHeightIn ||
-    (resolvedAreaSqFt !== room.areaSqFt && resolvedAreaSqFt !== null);
-  if (dimsChanged && (lengthIn != null || widthIn != null || resolvedAreaSqFt != null)) {
-    data.measurementSource = "manual";
+  // Track measurement source: explicit toggle wins; otherwise fall back to
+  // the heuristic that flips to "manual" when the user edits dimensions.
+  if (measurementSourceOverride) {
+    data.measurementSource = measurementSourceOverride;
+  } else {
+    const dimsChanged =
+      lengthIn !== room.lengthIn ||
+      widthIn !== room.widthIn ||
+      ceilingHeightIn !== room.ceilingHeightIn ||
+      (resolvedAreaSqFt !== room.areaSqFt && resolvedAreaSqFt !== null);
+    if (dimsChanged && (lengthIn != null || widthIn != null || resolvedAreaSqFt != null)) {
+      data.measurementSource = "manual";
+    }
   }
 
   if (!unitQuantityManualOverride && !forceUnitQuantityOne) {
@@ -988,7 +1002,9 @@ export async function generateRoomsFromTranscriptAction(
       })),
     });
     createdRooms = created.map((r) => ({ id: r.id, name: r.name, sectionTypeId: r.sectionTypeId }));
-    await assignDisplayGroupsForRooms(created.map((r) => r.id));
+    // Normalize new rooms to standalone-{id} slugs so each renders as its
+    // own line item. User opts into a real group via the drag-merge popup.
+    await dissolveSingleMemberGroups(projectId);
     const byName = new Map<string, string[]>();
     for (const room of created) {
       if (!room.sectionTypeId) {
@@ -1324,7 +1340,16 @@ async function autoLinkRendrToSections(
   }
 }
 
-export async function updateRoomScopesFromTranscriptAction(projectId: string): Promise<{
+export async function updateRoomScopesFromTranscriptAction(
+  projectId: string,
+  /**
+   * Optional filter — when provided, only existing rooms whose IDs appear in
+   * this list are updated. New-room creation is skipped entirely. The AI
+   * still scans the full transcript so it can place context appropriately;
+   * only the persistence step is narrowed.
+   */
+  targetRoomIds?: string[],
+): Promise<{
   created: number;
   updated: number;
   skipped: number;
@@ -1456,6 +1481,9 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
   let skipped = 0;
   const seenCanonicals = new Set<string>();
 
+  // When a target filter is set, narrow persistence to those rooms only.
+  const targetSet = targetRoomIds && targetRoomIds.length > 0 ? new Set(targetRoomIds) : null;
+
   for (const r of roomsFromAi) {
     const rawName = (r.name ?? "").trim();
     const scopeNarrative = (r.scopeNarrative ?? "").trim();
@@ -1475,6 +1503,11 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
     const existingRoom = existingRooms.find((x) => x.id === canonicalToExisting.get(canonicalName)?.id);
     const existing = canonicalToExisting.get(canonicalName);
     if (existing) {
+      // Honor the optional filter — skip rooms not in targetRoomIds.
+      if (targetSet && !targetSet.has(existing.id)) {
+        skipped++;
+        continue;
+      }
       const lengthIn = r.lengthIn != null && existingRoom?.lengthIn == null ? r.lengthIn : existingRoom?.lengthIn ?? null;
       const widthIn = r.widthIn != null && existingRoom?.widthIn == null ? r.widthIn : existingRoom?.widthIn ?? null;
       const ceilingHeightIn = r.ceilingHeightIn != null && existingRoom?.ceilingHeightIn == null ? r.ceilingHeightIn : existingRoom?.ceilingHeightIn ?? null;
@@ -1486,6 +1519,10 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
         ceilingHeightIn,
       });
       updated++;
+    } else if (targetSet) {
+      // Filter active — never create new rooms; just skip unmatched AI sections.
+      skipped++;
+      continue;
     } else {
       const name = displayNameForCanonical(canonicalName);
       const normalizedForMatch = normalizeRoomName(name);
@@ -1532,7 +1569,8 @@ export async function updateRoomScopesFromTranscriptAction(projectId: string): P
         measurementSource: (row.lengthIn != null || row.widthIn != null) ? "transcript" : null,
       })),
     });
-    await assignDisplayGroupsForRooms(created.map((r) => r.id));
+    // Normalize new rooms to standalone-{id} slugs.
+    await dissolveSingleMemberGroups(projectId);
     const byName = new Map<string, string[]>();
     for (const room of created) {
       if (!room.sectionTypeId) {

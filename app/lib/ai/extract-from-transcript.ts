@@ -227,20 +227,25 @@ The "appliances" array should only include appliances that are explicitly discus
     systemContent += `
 
 If RENDR LIDAR SCAN DATA is provided alongside the transcript:
-- Use the Rendr room measurements as the source of truth for dimensions.
-  Set lengthIn/widthIn to null (Rendr provides area, not L×W) but note
-  the Rendr area in the scope narrative naturally (e.g., "The 195-square-foot kitchen...").
+- Rendr is the source of truth for AREA. Reference Rendr's area in the
+  scope narrative naturally (e.g., "The 195-square-foot kitchen...").
+- However, if the transcript explicitly states length × width dimensions
+  for a space (e.g. "10 by 12", "12'6\\" by 14 feet", "measuring 10 feet
+  10 inches by 8 feet wide"), DO extract them as lengthIn/widthIn so the
+  user can verify the transcript values against Rendr's measurement.
+  If the transcript does not state explicit L × W, leave lengthIn/widthIn null.
+- For ceiling heights: prefer the transcript value when explicitly stated;
+  otherwise set ceilingHeightIn from Rendr's value converted to inches
+  (e.g., 8.0 ft = 96 inches).
 - The Rendr room names represent physical spaces. The transcript may refer
   to these spaces by different names or discuss scope that spans multiple
   Rendr rooms. Create sections based on the TRANSCRIPT discussion, not
   the Rendr room list. But use Rendr measurements to inform the details.
 - If the transcript discusses a space that matches a Rendr room, incorporate
-  the Rendr measurements (area, ceiling height, fixture counts) into the
-  scope narrative naturally.
+  the Rendr measurements (area, fixture counts) into the scope narrative
+  naturally.
 - If the transcript discusses a space not found in Rendr data, create the
   section from transcript only (no Rendr measurements).
-- For ceiling heights from Rendr, set ceilingHeightIn to the Rendr value
-  converted to inches (e.g., 8.0 ft = 96 inches).
 - For Kitchen/Bath rooms with Rendr fixture data, include the fixtures
   field with counts from Rendr (override any conflicting transcript mentions
   with the more accurate Rendr LiDAR data).`;

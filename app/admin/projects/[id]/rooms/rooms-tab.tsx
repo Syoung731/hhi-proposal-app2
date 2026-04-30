@@ -782,13 +782,13 @@ function RendrDataGrid({ room, projectId }: { room: Room; projectId: string }) {
         {saving && <span className="text-orange-500 normal-case font-normal">saving...</span>}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-zinc-600 dark:text-zinc-400">
-        {room.areaSqFt ? <span>Floor: {room.areaSqFt} SF</span> : null}
-        {room.wallsSF ? <span>Walls: {room.wallsSF} SF</span> : null}
-        {room.ceilingSF ? <span>Ceiling: {room.ceilingSF} SF</span> : null}
-        {room.perimeterLF ? <span>Perimeter: {room.perimeterLF} LF</span> : null}
-        {room.paintableSF ? <span>Paintable: {room.paintableSF} SF</span> : null}
-        {room.windowCount ? <span>Windows: {room.windowCount}{room.windowsSF ? ` (${room.windowsSF} SF)` : ""}</span> : null}
-        {room.doorCount ? <span>Doors: {room.doorCount}{room.doorsSF ? ` (${room.doorsSF} SF)` : ""}</span> : null}
+        {room.areaSqFt ? <span>Floor: {room.areaSqFt.toFixed(1)} SF</span> : null}
+        {room.wallsSF ? <span>Walls: {room.wallsSF.toFixed(1)} SF</span> : null}
+        {room.ceilingSF ? <span>Ceiling: {room.ceilingSF.toFixed(1)} SF</span> : null}
+        {room.perimeterLF ? <span>Perimeter: {room.perimeterLF.toFixed(1)} LF</span> : null}
+        {room.paintableSF ? <span>Paintable: {room.paintableSF.toFixed(1)} SF</span> : null}
+        {room.windowCount ? <span>Windows: {room.windowCount}{room.windowsSF ? ` (${room.windowsSF.toFixed(1)} SF)` : ""}</span> : null}
+        {room.doorCount ? <span>Doors: {room.doorCount}{room.doorsSF ? ` (${room.doorsSF.toFixed(1)} SF)` : ""}</span> : null}
         {rendrCeilingFt ? <span>Ceiling Ht: {rendrCeilingFt.toFixed(1)} ft</span> : null}
       </div>
       {roomType && detail && (
@@ -1053,6 +1053,9 @@ function RoomDimensionsRow({
     formData.set("bucket", room.bucket ?? "BASE");
     formData.set("measurementMode", room.measurementMode ?? "");
     formData.set("areaSqFt", useRendr && room.areaSqFt != null ? String(room.areaSqFt) : "");
+    // Explicit source toggle — without this the server's dimsChanged heuristic
+    // can't distinguish "switch back to Rendr" (no field changes) from "no-op".
+    formData.set("measurementSource", useRendr ? "rendr" : "manual");
     formData.set("quantity", room.quantity != null ? String(room.quantity) : "");
     formData.set("estimateUnit", room.estimateUnit ?? "");
     formData.set("customUnitLabel", room.customUnitLabel ?? "");
@@ -1127,7 +1130,7 @@ function RoomDimensionsRow({
             <div>
               <label className="mb-0.5 block text-xs font-medium text-zinc-400 dark:text-zinc-500">Area</label>
               <div className="flex h-[30px] w-24 items-center rounded border border-zinc-200 bg-zinc-50 px-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                {room.areaSqFt ? `${room.areaSqFt} SF` : "—"}
+                {room.areaSqFt ? `${room.areaSqFt.toFixed(1)} SF` : "—"}
               </div>
             </div>
             <div>
@@ -1139,7 +1142,7 @@ function RoomDimensionsRow({
             <div>
               <label className="mb-0.5 block text-xs font-medium text-zinc-400 dark:text-zinc-500">Perimeter</label>
               <div className="flex h-[30px] w-24 items-center rounded border border-zinc-200 bg-zinc-50 px-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                {room.perimeterLF ? `${room.perimeterLF} LF` : "—"}
+                {room.perimeterLF ? `${room.perimeterLF.toFixed(1)} LF` : "—"}
               </div>
             </div>
           </div>
@@ -1398,6 +1401,8 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [updating, setUpdating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showUpdateScopesConfirm, setShowUpdateScopesConfirm] = useState(false);
+  const [updateScopesSelectedIds, setUpdateScopesSelectedIds] = useState<Set<string>>(new Set());
+  const [updatingScopeRoomId, setUpdatingScopeRoomId] = useState<string | null>(null);
   const [showRendrModal, setShowRendrModal] = useState(false);
   const [rendrRoomCount, setRendrRoomCount] = useState(0);
   const [includeRendr, setIncludeRendr] = useState(true);
@@ -1598,6 +1603,10 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   }
 
   function openUpdateScopesConfirm() {
+    // Default selection: all non-overhead rooms checked.
+    setUpdateScopesSelectedIds(
+      new Set(rooms.filter((r) => !r.isProjectOverhead).map((r) => r.id)),
+    );
     setShowUpdateScopesConfirm(true);
   }
 
@@ -1606,8 +1615,16 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
     setUpdating(true);
     setStatusMessage(null);
     setUnmatchedRooms(null);
+    const allNonOverheadIds = rooms.filter((r) => !r.isProjectOverhead).map((r) => r.id);
+    const allSelected =
+      updateScopesSelectedIds.size === allNonOverheadIds.length &&
+      allNonOverheadIds.every((id) => updateScopesSelectedIds.has(id));
+    // Only pass a filter when the selection is a strict subset of all rooms.
+    // When everything is selected, omit the filter so the legacy behavior
+    // (which can also create new sections from the transcript) is preserved.
+    const targetIds = allSelected ? undefined : Array.from(updateScopesSelectedIds);
     try {
-      const result = await updateRoomScopesFromTranscriptAction(projectId);
+      const result = await updateRoomScopesFromTranscriptAction(projectId, targetIds);
       router.refresh();
       if (result.error) {
         setStatusMessage(result.error);
@@ -1621,6 +1638,27 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       }
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function handleUpdateRoomScopeFromTranscript(roomId: string) {
+    setUpdatingScopeRoomId(roomId);
+    setStatusMessage(null);
+    setUnmatchedRooms(null);
+    try {
+      const result = await updateRoomScopesFromTranscriptAction(projectId, [roomId]);
+      router.refresh();
+      if (result.error) {
+        setStatusMessage(result.error);
+      } else if (result.updated === 0) {
+        setStatusMessage(
+          `No transcript content matched this section. Try the bulk Update scopes flow if the section name was renamed.`,
+        );
+      } else {
+        setStatusMessage(`Section scope updated from transcript.`);
+      }
+    } finally {
+      setUpdatingScopeRoomId(null);
     }
   }
 
@@ -1845,42 +1883,100 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           </div>
         </div>
       )}
-      {showUpdateScopesConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="update-scopes-confirm-title"
-        >
-          <div className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            <h2
-              id="update-scopes-confirm-title"
-              className="text-sm font-medium text-zinc-900 dark:text-zinc-100"
-            >
-              Update scopes from transcript
-            </h2>
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              This will overwrite scope paragraphs for existing sections. Continue?
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowUpdateScopesConfirm(false)}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleUpdateFromTranscriptConfirm}
-                className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                Continue
-              </button>
+      {showUpdateScopesConfirm && (() => {
+        const selectableRooms = rooms.filter((r) => !r.isProjectOverhead);
+        const selectedCount = updateScopesSelectedIds.size;
+        const allChecked = selectableRooms.length > 0 && selectableRooms.every((r) => updateScopesSelectedIds.has(r.id));
+        const toggleRoom = (id: string) => {
+          setUpdateScopesSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          });
+        };
+        const toggleAll = () => {
+          setUpdateScopesSelectedIds(allChecked ? new Set() : new Set(selectableRooms.map((r) => r.id)));
+        };
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="update-scopes-confirm-title"
+          >
+            <div className="flex w-full max-w-md flex-col rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+              <div className="border-b border-zinc-200 p-4 dark:border-zinc-700">
+                <h2
+                  id="update-scopes-confirm-title"
+                  className="text-sm font-medium text-zinc-900 dark:text-zinc-100"
+                >
+                  Update scopes from transcript
+                </h2>
+                <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+                  Pick the sections to refresh. The AI re-reads the full transcript but only
+                  rewrites the selected scopes.
+                </p>
+              </div>
+              <div className="max-h-72 overflow-y-auto p-4">
+                {selectableRooms.length === 0 ? (
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">No sections to update.</p>
+                ) : (
+                  <>
+                    <label className="flex cursor-pointer items-center gap-2 border-b border-zinc-100 pb-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={allChecked}
+                        onChange={toggleAll}
+                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
+                      />
+                      Select all ({selectableRooms.length})
+                    </label>
+                    <div className="mt-2 space-y-1.5">
+                      {selectableRooms.map((r) => (
+                        <label
+                          key={r.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={updateScopesSelectedIds.has(r.id)}
+                            onChange={() => toggleRoom(r.id)}
+                            className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
+                          />
+                          {r.name}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center justify-between border-t border-zinc-200 p-4 dark:border-zinc-700">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {selectedCount} of {selectableRooms.length} selected
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowUpdateScopesConfirm(false)}
+                    className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUpdateFromTranscriptConfirm}
+                    disabled={selectedCount === 0}
+                    className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  >
+                    Update {selectedCount}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {unmatchedRooms != null && unmatchedRooms.length > 0 && (
         <NewRoomTypesModal
           projectId={projectId}
@@ -1938,6 +2034,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               onDimensionsSaved={() => router.refresh()}
               isEditing={editingId === room.id}
               isRewriting={rewritingRoomId === room.id}
+              isUpdatingScope={updatingScopeRoomId === room.id}
               onEdit={() => setEditingId(room.id)}
               onDoneEdit={() => {
                 setEditingId(null);
@@ -1946,6 +2043,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               onCancelEdit={() => setEditingId(null)}
               onDelete={() => handleDelete(room.id)}
               onRewriteScope={() => handleRewriteScope(room.id)}
+              onUpdateScopeFromTranscript={() => handleUpdateRoomScopeFromTranscript(room.id)}
               roomTemplates={roomTemplates}
               selectedTemplateId={selectedTemplates[room.id] ?? null}
               onTemplateChange={(roomId, templateId) => { setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId })); updateRoomTemplateAction(projectId, roomId, templateId); }}
@@ -1983,6 +2081,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   onDimensionsSaved={() => router.refresh()}
                   isEditing={editingId === room.id}
                   isRewriting={rewritingRoomId === room.id}
+                  isUpdatingScope={updatingScopeRoomId === room.id}
                   onEdit={() => setEditingId(room.id)}
                   onDoneEdit={() => {
                     setEditingId(null);
@@ -1991,6 +2090,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   onCancelEdit={() => setEditingId(null)}
                   onDelete={() => handleDelete(room.id)}
                   onRewriteScope={() => handleRewriteScope(room.id)}
+                  onUpdateScopeFromTranscript={() => handleUpdateRoomScopeFromTranscript(room.id)}
                   roomTemplates={roomTemplates}
                   selectedTemplateId={selectedTemplates[room.id] ?? null}
                   onTemplateChange={(roomId, templateId) => { setSelectedTemplates((prev) => ({ ...prev, [roomId]: templateId })); updateRoomTemplateAction(projectId, roomId, templateId); }}
@@ -2193,11 +2293,13 @@ function StaticRoomCard({
   onDimensionsSaved,
   isEditing,
   isRewriting,
+  isUpdatingScope,
   onEdit,
   onDoneEdit,
   onCancelEdit,
   onDelete,
   onRewriteScope,
+  onUpdateScopeFromTranscript,
   roomTemplates,
   selectedTemplateId,
   onTemplateChange,
@@ -2219,11 +2321,13 @@ function StaticRoomCard({
   onDimensionsSaved: () => void;
   isEditing: boolean;
   isRewriting: boolean;
+  isUpdatingScope: boolean;
   onEdit: () => void;
   onDoneEdit: () => void;
   onCancelEdit: () => void;
   onDelete: () => void;
   onRewriteScope: () => void;
+  onUpdateScopeFromTranscript: () => void;
   roomTemplates: RoomTemplateOption[];
   selectedTemplateId: string | null;
   onTemplateChange: (roomId: string, templateId: string | null) => void;
@@ -2360,6 +2464,14 @@ function StaticRoomCard({
             </button>
             <button
               type="button"
+              onClick={onUpdateScopeFromTranscript}
+              disabled={isUpdatingScope}
+              className="w-36 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {isUpdatingScope ? "Updating…" : "Update from transcript"}
+            </button>
+            <button
+              type="button"
               onClick={onEdit}
               className="w-36 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
@@ -2393,11 +2505,13 @@ function SortableRoomCard({
   onDimensionsSaved,
   isEditing,
   isRewriting,
+  isUpdatingScope,
   onEdit,
   onDoneEdit,
   onCancelEdit,
   onDelete,
   onRewriteScope,
+  onUpdateScopeFromTranscript,
   selected,
   onToggleSelected,
   roomTemplates,
@@ -2419,11 +2533,13 @@ function SortableRoomCard({
   onDimensionsSaved: () => void;
   isEditing: boolean;
   isRewriting: boolean;
+  isUpdatingScope: boolean;
   onEdit: () => void;
   onDoneEdit: () => void;
   onCancelEdit: () => void;
   onDelete: () => void;
   onRewriteScope: () => void;
+  onUpdateScopeFromTranscript: () => void;
   selected: boolean;
   onToggleSelected: () => void;
   roomTemplates: RoomTemplateOption[];
@@ -2599,6 +2715,14 @@ function SortableRoomCard({
               className="w-36 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               {isRewriting ? "Rewriting…" : "Rewrite with AI"}
+            </button>
+            <button
+              type="button"
+              onClick={onUpdateScopeFromTranscript}
+              disabled={isUpdatingScope}
+              className="w-36 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {isUpdatingScope ? "Updating…" : "Update from transcript"}
             </button>
             <button
               type="button"
@@ -3042,10 +3166,10 @@ function RoomForm({
           {room && (room.wallsSF != null || room.rendrCeilingHeightFt != null) && (
             <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
               <span className="font-medium text-green-600 dark:text-green-400">Rendr ref:</span>
-              {room.areaSqFt != null && <span>Area: {room.areaSqFt} SF</span>}
-              {room.rendrCeilingHeightFt != null && <span>Ceiling: {room.rendrCeilingHeightFt} ft</span>}
-              {room.perimeterLF != null && <span>Perimeter: {room.perimeterLF} LF</span>}
-              {room.wallsSF != null && <span>Wall SF: {room.wallsSF}</span>}
+              {room.areaSqFt != null && <span>Area: {room.areaSqFt.toFixed(1)} SF</span>}
+              {room.rendrCeilingHeightFt != null && <span>Ceiling: {room.rendrCeilingHeightFt.toFixed(1)} ft</span>}
+              {room.perimeterLF != null && <span>Perimeter: {room.perimeterLF.toFixed(1)} LF</span>}
+              {room.wallsSF != null && <span>Wall SF: {room.wallsSF.toFixed(1)}</span>}
             </div>
           )}
           {dimensionError && (
