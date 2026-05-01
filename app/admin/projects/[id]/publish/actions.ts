@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { ProjectStatus } from "@/app/generated/prisma";
-import type { SnapshotData } from "@/app/lib/snapshot";
+import type { SnapshotBranding, SnapshotData } from "@/app/lib/snapshot";
 import { serializeDeckForSnapshot } from "@/app/lib/snapshot-serializer";
 
 export async function publishProjectAction(projectId: string): Promise<{ error?: string }> {
@@ -19,6 +19,31 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
     },
   });
   if (!project) return { error: "Project not found" };
+
+  // Freeze the current company branding into the snapshot so the renderer
+  // (including the headless-Chromium PDF flow and any future public-share
+  // context) doesn't need a live `companySettings` lookup. We read directly
+  // via `findFirst()` rather than calling `getOrCreateCompanySettings()` —
+  // the latter is admin-gated and we want a consistent non-admin read here.
+  // If no settings row exists, `branding` is captured as null fields and
+  // the renderer falls back to default values from `adaptBrandingForDeck`.
+  const settings = await prisma.companySettings.findFirst();
+  const branding: SnapshotBranding = {
+    logoLightUrl: settings?.logoLightUrl ?? null,
+    logoDarkUrl: settings?.logoDarkUrl ?? null,
+    primaryColorHex: settings?.primaryColorHex ?? null,
+    textColorHex: settings?.textColorHex ?? null,
+    companyName: settings?.companyName ?? null,
+    addressLine1: settings?.addressLine1 ?? null,
+    addressLine2: settings?.addressLine2 ?? null,
+    city: settings?.city ?? null,
+    state: settings?.state ?? null,
+    zip: settings?.zip ?? null,
+    phone: settings?.phone ?? null,
+    email: settings?.email ?? null,
+    brandTagline: settings?.brandTagline ?? null,
+    closingHeadline: settings?.closingHeadline ?? null,
+  };
   const effectiveInvestmentItems = project.investmentLineItems.map((i) => {
     const rangeLow = i.isOverride ? i.overrideLow : i.rangeLow;
     const rangeTarget = i.isOverride ? i.overrideTarget : i.rangeTarget;
@@ -78,6 +103,7 @@ export async function publishProjectAction(projectId: string): Promise<{ error?:
     })),
     investmentLineItems: effectiveInvestmentItems,
     ...(deck ? { deck } : {}),
+    branding,
   };
   const [createdSnapshot] = await prisma.$transaction([
     prisma.publishedSnapshot.create({
