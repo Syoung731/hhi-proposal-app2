@@ -32,7 +32,7 @@ If you have an existing DB with the old schema, run `npx prisma migrate reset` (
 - Set in `.env`:
   - `CLERK_SECRET_KEY`
   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- Set `ADMIN_EMAILS` or `ADMIN_USER_IDS` (comma-separated) for admin allowlist.
+- Optionally set `ADMIN_EMAILS` (comma-separated) — feeds the bootstrap-admin count used by the demotion guard in `app/admin/settings/actions.ts`. Not an allowlist post-C.5; any Clerk-authenticated user is admin.
 
 ### 3. R2 / S3
 
@@ -148,7 +148,7 @@ Expected `/summary` shape (example):
 
 - `DATABASE_URL` – PostgreSQL URL
 - `CLERK_*` – Clerk keys
-- `ADMIN_EMAILS` or `ADMIN_USER_IDS` – Admin allowlist
+- `ADMIN_EMAILS` – Optional bootstrap-admin count for the demotion guard (not an auth allowlist post-C.5)
 - `R2_*` or S3 equivalents – Object storage
 - Optional: Playwright-related vars for PDF export
 - Optional: `HHI_DEV_CONTEXT_ENABLED`, `HHI_DEV_CONTEXT_BASE_URL`
