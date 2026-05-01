@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server";
 import { redeemExtensionPairCode } from "@/app/lib/extension-pair-code";
 
-/** CORS headers so the Chrome extension can call this route. */
+/**
+ * CORS rationale: called from the Zillow Importer Chrome extension
+ * (`chrome-extension://<id>` origin). Auth is the pair code itself — the
+ * server checks that it exists, hasn't passed its pre-redemption TTL on
+ * first use, and (on re-verification from /import-zillow-photos) is
+ * within its 24h post-redemption session window. The wildcard origin is
+ * intentional — the code, not the request origin, is the auth.
+ *
+ * TODO(saas-phase): tighten origin to known extension IDs from
+ * ZILLOW_EXTENSION_ALLOWLIST.
+ */
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",

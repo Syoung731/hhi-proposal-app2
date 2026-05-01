@@ -3,10 +3,28 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/app/lib/prisma";
 import { uploadBuffer } from "@/app/lib/s3";
 import { MediaKind, MediaPlacement, MediaType } from "@/app/generated/prisma";
+import { verifyImportSession } from "@/app/lib/zillow-browser-connection";
+import { redeemExtensionPairCode } from "@/app/lib/extension-pair-code";
 
 const ZILLOW_TAG = "zillow";
 
-/** CORS so the Chrome extension can call this route. */
+/**
+ * CORS rationale: this route is called from the Zillow Importer Chrome
+ * extension, whose origin is `chrome-extension://<id>` rather than the
+ * app origin. The browser blocks the request unless the server returns
+ * `Access-Control-Allow-Origin: *` (or matches the extension origin).
+ * The wildcard is acceptable because:
+ *
+ *   1. Auth is the `nonce` or `pairCode` in the body, not the origin.
+ *      A request from any origin without a valid bearer is rejected with
+ *      401 below.
+ *   2. The bearer is short-lived (5 min before /verify, 24h after) and
+ *      bound to a specific projectId.
+ *
+ * TODO(saas-phase): tighten origin to known extension IDs from
+ * ZILLOW_EXTENSION_ALLOWLIST so a leaked bearer can't be used from a
+ * non-allowlisted browser context.
+ */
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -24,7 +42,16 @@ export async function OPTIONS() {
 
 /**
  * Import Zillow photos into a project as unassigned EXISTING media tagged "zillow".
- * Body: { projectId: string, imageUrls: string[] }
+ * Body: {
+ *   projectId: string,
+ *   imageUrls: string[],
+ *   nonce?: string,    // direct-handshake bearer (extension stores after /verify)
+ *   pairCode?: string, // pair-code bearer (extension stores after /redeem-pair-code)
+ * }
+ * Auth: exactly one of `nonce` or `pairCode` must be supplied and verify
+ * against a recently-paired session bound to this projectId. See the
+ * IMPORT_SESSION_WINDOW_MS constants in zillow-browser-connection.ts and
+ * extension-pair-code.ts (24h).
  * Returns: { imported: number, skipped: number, failed: number } or { error: string }
  * Duplicate: skip if project already has Media with same sourceUrl and tag "zillow".
  */
@@ -32,6 +59,8 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
+    const nonce = typeof body?.nonce === "string" ? body.nonce.trim() : "";
+    const pairCode = typeof body?.pairCode === "string" ? body.pairCode.trim() : "";
     const rawUrls = Array.isArray(body?.imageUrls) ? body.imageUrls : [];
     const imageUrls = rawUrls
       .filter((u: unknown) => typeof u === "string" && u.trim().length > 0)
@@ -43,6 +72,32 @@ export async function POST(request: Request) {
     if (imageUrls.length === 0) {
       return withCors(
         NextResponse.json({ error: "imageUrls must be a non-empty array" }, { status: 400 })
+      );
+    }
+    if (!nonce && !pairCode) {
+      return withCors(
+        NextResponse.json(
+          { error: "Missing pairing credential — re-pair the extension" },
+          { status: 401 },
+        ),
+      );
+    }
+
+    // Verify the bearer against the pairing session it came from.
+    // Both paths return the projectId the credential is bound to; we then
+    // require it match the projectId the caller asserted.
+    const auth = nonce
+      ? await verifyImportSession(nonce, projectId)
+      : await redeemExtensionPairCode(pairCode);
+    if ("error" in auth) {
+      return withCors(NextResponse.json({ error: auth.error }, { status: 401 }));
+    }
+    if (auth.projectId !== projectId) {
+      return withCors(
+        NextResponse.json(
+          { error: "Pairing credential does not match this project" },
+          { status: 401 },
+        ),
       );
     }
 

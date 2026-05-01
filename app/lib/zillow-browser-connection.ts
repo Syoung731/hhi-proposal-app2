@@ -4,8 +4,16 @@ import {
   ZillowHandshakeMethod,
 } from "@/app/generated/prisma";
 
-/** Nonce TTL: 5 minutes. One-time use; short-lived. */
+/** Nonce TTL: 5 minutes. Time the extension has to call /verify after pairing starts. */
 const NONCE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Import-session window: how long after a successful /verify the extension
+ * may continue using the same nonce as a bearer for `/api/extension/import-zillow-photos`.
+ * 24 hours covers a normal Zillow import session without forcing repair, while
+ * keeping the bearer's lifetime bounded.
+ */
+const IMPORT_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** Parse allowlisted extension IDs from env (comma-separated). Empty = no allowlist check. */
 function getAllowlistedExtensionIds(): string[] {
@@ -188,6 +196,57 @@ export async function verifyDirectHandshake(
     console.error("[ZillowBrowserConnection] verifyDirectHandshake update error:", message);
     return { error: message };
   }
+}
+
+// ---------------------------------------------------------------------------
+// verifyImportSession
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-verify a previously-handshaked nonce for use as the auth credential on
+ * `/api/extension/import-zillow-photos`. The nonce is the bearer for the
+ * import session — the row stays in the DB after `/verify` flips it to
+ * CONNECTED, and this function checks:
+ *
+ *   1. nonce exists
+ *   2. status === CONNECTED (handshake actually completed)
+ *   3. projectId in body matches the project the nonce was issued for
+ *      (defends against a leaked nonce being used to write to a different
+ *      project)
+ *   4. verifiedAt is within IMPORT_SESSION_WINDOW_MS (bounds bearer lifetime)
+ *
+ * On success returns `{ projectId }` for the caller to log/echo. The
+ * caller has already been told the projectId by the body — this function's
+ * return is the authoritative source.
+ */
+export async function verifyImportSession(
+  nonce: string,
+  expectedProjectId: string,
+): Promise<{ projectId: string } | { error: string }> {
+  const trimmedNonce = (nonce ?? "").trim();
+  const trimmedProjectId = (expectedProjectId ?? "").trim();
+  if (!trimmedNonce) return { error: "Nonce is required" };
+  if (!trimmedProjectId) return { error: "projectId is required" };
+
+  const row = await prisma.zillowBrowserConnection.findUnique({
+    where: { nonce: trimmedNonce },
+    select: { status: true, projectId: true, verifiedAt: true },
+  });
+  if (!row) return { error: "Invalid or expired nonce" };
+  if (row.status !== ZillowConnectionStatus.CONNECTED) {
+    return { error: "Pairing session is not active" };
+  }
+  if (!row.verifiedAt) {
+    return { error: "Pairing session has no verifiedAt" };
+  }
+  if (row.projectId !== trimmedProjectId) {
+    return { error: "Nonce does not match this project" };
+  }
+  const ageMs = Date.now() - row.verifiedAt.getTime();
+  if (ageMs > IMPORT_SESSION_WINDOW_MS) {
+    return { error: "Pairing session expired — re-pair the extension" };
+  }
+  return { projectId: row.projectId };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { verifyDirectHandshake } from "@/app/lib/zillow-browser-connection";
 
-/** CORS so the Chrome extension can call this route. */
+/**
+ * CORS rationale: called from the Zillow Importer Chrome extension
+ * (`chrome-extension://<id>` origin). Auth is the one-time nonce bound
+ * to a specific `ZillowBrowserConnection.projectId`. The wildcard origin
+ * is intentional — the nonce, not the request origin, is the auth.
+ *
+ * TODO(saas-phase): tighten origin to known extension IDs from
+ * ZILLOW_EXTENSION_ALLOWLIST.
+ */
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
