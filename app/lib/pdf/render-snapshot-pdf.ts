@@ -33,6 +33,7 @@ import "server-only";
 import chromium from "@sparticuz/chromium";
 import { chromium as playwright } from "playwright-core";
 import { prisma } from "@/app/lib/prisma";
+import { generatePdfRenderToken } from "@/app/lib/pdf-render-token";
 
 export interface RenderSnapshotPdfParams {
   /** PublishedSnapshot.id. Ignored when `isDraft` is true. */
@@ -110,9 +111,18 @@ export async function renderSnapshotPdf(
     }
   }
 
+  // Mint a short-lived bypass token so the headless browser — which has no
+  // Clerk session cookie — can pass the proxy.ts gate. Token is bound to
+  // this exact snapshot/project; the middleware verifies it before
+  // skipping auth.
+  const pdfToken = await generatePdfRenderToken({
+    snapshotId: isDraft ? "draft" : snapshotId,
+    isDraft,
+    ...(projectId ? { projectId } : {}),
+  });
   const targetUrl = isDraft
-    ? `${baseUrl}/proposals/draft?draft=1&projectId=${encodeURIComponent(projectId!)}&print=1`
-    : `${baseUrl}/proposals/${encodeURIComponent(snapshotId)}?print=1`;
+    ? `${baseUrl}/proposals/draft?draft=1&projectId=${encodeURIComponent(projectId!)}&print=1&pdfToken=${encodeURIComponent(pdfToken)}`
+    : `${baseUrl}/proposals/${encodeURIComponent(snapshotId)}?print=1&pdfToken=${encodeURIComponent(pdfToken)}`;
 
   const isLocal = process.env.NODE_ENV === "development";
   const launchOptions = isLocal

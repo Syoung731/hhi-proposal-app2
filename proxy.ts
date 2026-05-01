@@ -1,4 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+import { verifyPdfRenderToken } from "@/app/lib/pdf-render-token";
 
 /**
  * Clerk middleware (Next 16 `proxy.ts` convention) for the HHI proposal app.
@@ -19,6 +21,13 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
  *   - The Clerk-hosted sign-in / sign-up pages (`/sign-in`, `/sign-up`)
  *     obviously cannot be Clerk-gated.
  *
+ *   - PDF render bypass: `/proposals/{snapshotId}` (and the draft variant)
+ *     accept a `?pdfToken=...` query param that's HMAC-signed with
+ *     `PDF_RENDER_SECRET`. The PDF route mints one before driving headless
+ *     Chromium, so the headless browser — which has no Clerk cookie — can
+ *     load the proposal page. Token is bound to a specific snapshot/project,
+ *     5 min TTL. See `app/lib/pdf-render-token.ts`.
+ *
  * Everything else — `/admin/*`, `/api/*` other than the exceptions, and
  * `/proposals/*` (Scope A: client-shareable links are deferred) — is
  * gated by `auth.protect()`. For document requests that means a redirect
@@ -36,10 +45,37 @@ const isPublicRoute = createRouteMatcher([
   "/api/extension/(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect();
+// Match the proposal page itself but NOT `/proposals/{id}/pdf` — the PDF
+// route stays Clerk-gated; only the page Playwright loads needs to bypass.
+const PROPOSAL_PAGE_RE = /^\/proposals\/([^/]+)\/?$/;
+
+/**
+ * Returns the snapshotId from a valid pdfToken on a `/proposals/{snapshotId}`
+ * page request, or null if the path doesn't match, the token is absent, the
+ * signature is bad, or the snapshotId in the token doesn't match the URL.
+ */
+async function pdfTokenSnapshotIdOrNull(request: Request): Promise<string | null> {
+  const url = new URL(request.url);
+  const match = url.pathname.match(PROPOSAL_PAGE_RE);
+  if (!match) return null;
+  let pathSnapshotId: string;
+  try {
+    pathSnapshotId = decodeURIComponent(match[1]);
+  } catch {
+    return null;
   }
+  const token = url.searchParams.get("pdfToken");
+  if (!token) return null;
+  const verified = await verifyPdfRenderToken(token);
+  if (!verified) return null;
+  if (verified.snapshotId !== pathSnapshotId) return null;
+  return verified.snapshotId;
+}
+
+export default clerkMiddleware(async (auth, request) => {
+  if (isPublicRoute(request)) return;
+  if (await pdfTokenSnapshotIdOrNull(request)) return NextResponse.next();
+  await auth.protect();
 });
 
 export const config = {
