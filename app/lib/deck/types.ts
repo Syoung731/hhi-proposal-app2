@@ -2191,3 +2191,18 @@ export const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
   "design-build":        "Design-Build",
   "addition-overview":   "Addition Overview",
 };
+
+/**
+ * Runtime registry of every slide type the renderer knows how to handle.
+ * Derived from `SLIDE_TYPE_LABELS` so it can never drift from `SlideType` —
+ * `Record<SlideType, ...>` requires every union member as a key, and adding
+ * a member to `SlideType` without a label entry is a compile-time error.
+ *
+ * Used by `backfillMissingDefaults()` (and any future runtime call site) to
+ * reject unknown slide types — guards against the rename-without-migration
+ * pattern that produced 50 orphaned legacy DeckSlide rows after commit
+ * 5e82145. See WEB_READINESS_PASS_1_C6_PDF_RENDER.md.
+ */
+export const KNOWN_SLIDE_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(SLIDE_TYPE_LABELS),
+);

@@ -49,6 +49,7 @@ import type {
   OverallInvestmentContent,
   BeforeAfterBullet,
 } from "./types";
+import { KNOWN_SLIDE_TYPES } from "./types";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
 import { computeRetainer } from "@/app/lib/retainer";
 // Phase 8C.1: T6 scope categorization reverted — classifyScopeItem import
@@ -1286,6 +1287,18 @@ const SYNC_WRITE_SCOPES: readonly SlideSyncRegistration[] = [
  * sync functions own them. Reclassified slides (risk-brief, process,
  * core-values, design-build, testimonials) are NOT in the
  * spec, so backfill will not resurrect them if a user removes them.
+ *
+ * # Unknown-type guard (Cluster C.6-B)
+ * Slot types are checked against `KNOWN_SLIDE_TYPES` (the runtime registry
+ * derived from `SLIDE_TYPE_LABELS` in `app/lib/deck/types.ts`) before any
+ * row is created. If `buildDefaultDeckSpec` ever emits a type the renderer
+ * doesn't recognize — e.g., because someone renamed a slot but forgot to
+ * update the renderer's switch — backfill skips it and logs a warning
+ * instead of silently creating a row that will render as "Unknown slide
+ * type." This is the regression guard for the rename-without-migration
+ * pattern that produced 50 orphaned legacy DeckSlide rows after commit
+ * 5e82145. The TS `SlideType` union should make this unreachable in
+ * compile-time-clean code; the runtime check is a backstop.
  */
 async function backfillMissingDefaults(
   deckId: string,
@@ -1298,6 +1311,15 @@ async function backfillMissingDefaults(
 
   for (const slot of spec) {
     if (existingTypes.has(slot.type)) continue;
+    if (!KNOWN_SLIDE_TYPES.has(slot.type)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[backfillMissingDefaults] Skipping unknown slide type: '${slot.type}'. ` +
+          `If this type was renamed, ensure migration ran. ` +
+          `If it was removed, this is expected — drop it from buildDefaultDeckSpec().`,
+      );
+      continue;
+    }
     const row = buildSlideDataFromSpec(slot, ctx);
     if (!row) continue; // auto-synced type — skip
     await prisma.deckSlide.create({
