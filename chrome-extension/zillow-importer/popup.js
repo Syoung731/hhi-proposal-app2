@@ -7,7 +7,11 @@
     appBaseUrl: "appBaseUrl",
     pairedProjectId: "pairedProjectId",
     pairedAt: "pairedAt",
+    // pairCodeLastUsed and pairedNonce are the bearer credentials photo-picker
+    // sends on /api/extension/import-zillow-photos. Server validates whichever
+    // is present against a 24h post-pair session window.
     pairCodeLastUsed: "pairCodeLastUsed",
+    pairedNonce: "pairedNonce",
     zillowLatestCapture: "zillowLatestCapture",
     pendingDirectNonce: "pendingDirectNonce",
     pendingDirectOrigin: "pendingDirectOrigin",
@@ -164,6 +168,8 @@
                     [STORAGE_KEYS.appBaseUrl]: baseUrl,
                     [STORAGE_KEYS.pairedProjectId]: result.body.projectId,
                     [STORAGE_KEYS.pairedAt]: new Date().toISOString(),
+                    // Persist the nonce as the bearer for subsequent /import-zillow-photos calls.
+                    [STORAGE_KEYS.pairedNonce]: nonce,
                   }, function () { showPairedState(result.body.projectId); });
                 }
               );
@@ -234,7 +240,7 @@
 
   clearBtn.addEventListener("click", function () {
     chrome.storage.local.remove(
-      [STORAGE_KEYS.pairedProjectId, STORAGE_KEYS.pairedAt, STORAGE_KEYS.pairCodeLastUsed],
+      [STORAGE_KEYS.pairedProjectId, STORAGE_KEYS.pairedAt, STORAGE_KEYS.pairCodeLastUsed, STORAGE_KEYS.pairedNonce],
       function () { showUnpairedState(); }
     );
   });

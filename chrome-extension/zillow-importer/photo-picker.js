@@ -7,6 +7,11 @@
   var STORAGE_KEYS = {
     appBaseUrl: "appBaseUrl",
     pairedProjectId: "pairedProjectId",
+    // Bearer credentials persisted by background.js (direct handshake) or
+    // popup.js (pair-code path). Server requires one of these on every
+    // /api/extension/import-zillow-photos call.
+    pairedNonce: "pairedNonce",
+    pairCodeLastUsed: "pairCodeLastUsed",
   };
   var DEFAULT_APP_URL = "http://localhost:3000";
 
@@ -36,6 +41,8 @@
   var previewUrl = null;
   var meta = {};
   var pairedProjectId = null;
+  var pairedNonce = null;
+  var pairedPairCode = null;
   var appBaseUrl = DEFAULT_APP_URL;
   var importing = false;
 
@@ -150,9 +157,17 @@
 
   function loadFromStorage() {
     chrome.storage.local.get(
-      [STORAGE_KEY_LATEST_CAPTURE, STORAGE_KEYS.appBaseUrl, STORAGE_KEYS.pairedProjectId],
+      [
+        STORAGE_KEY_LATEST_CAPTURE,
+        STORAGE_KEYS.appBaseUrl,
+        STORAGE_KEYS.pairedProjectId,
+        STORAGE_KEYS.pairedNonce,
+        STORAGE_KEYS.pairCodeLastUsed,
+      ],
       function (data) {
         pairedProjectId = data[STORAGE_KEYS.pairedProjectId] || null;
+        pairedNonce = data[STORAGE_KEYS.pairedNonce] || null;
+        pairedPairCode = data[STORAGE_KEYS.pairCodeLastUsed] || null;
         appBaseUrl = (data[STORAGE_KEYS.appBaseUrl] || DEFAULT_APP_URL).replace(/\/$/, "");
 
         var payload = data[STORAGE_KEY_LATEST_CAPTURE];
@@ -233,10 +248,15 @@
       }
 
       var endpoint = appBaseUrl + "/api/extension/import-zillow-photos";
+      // Send whichever pairing bearer was issued. The direct-handshake nonce
+      // takes precedence if both happen to be set (most recent pairing wins).
+      var importBody = { projectId: pairedProjectId, imageUrls: urls };
+      if (pairedNonce) importBody.nonce = pairedNonce;
+      else if (pairedPairCode) importBody.pairCode = pairedPairCode;
       fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: pairedProjectId, imageUrls: urls }),
+        body: JSON.stringify(importBody),
       })
         .then(function (res) {
           return res.json().then(function (body) {

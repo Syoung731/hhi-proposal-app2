@@ -11,6 +11,9 @@ importScripts("config.js", "messages.js");
     pairedProjectId: "pairedProjectId",
     appBaseUrl: "appBaseUrl",
     pairedAt: "pairedAt",
+    // Persisted bearer for /api/extension/import-zillow-photos calls.
+    // Set on direct-handshake verify success; cleared by popup's "Clear" button.
+    pairedNonce: "pairedNonce",
   };
   var DEBUG_STORAGE_KEY = "zillowImportDebug";
 
@@ -320,6 +323,9 @@ importScripts("config.js", "messages.js");
             [STORAGE_KEYS.appBaseUrl]: baseUrl,
             [STORAGE_KEYS.pairedProjectId]: projectId,
             [STORAGE_KEYS.pairedAt]: new Date().toISOString(),
+            // Persist the nonce so photo-picker can send it as the bearer
+            // on /api/extension/import-zillow-photos.
+            [STORAGE_KEYS.pairedNonce]: nonce,
           }, function () {
             log("beginHandshake: success", projectId);
           });
