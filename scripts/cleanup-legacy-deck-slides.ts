@@ -5,30 +5,44 @@ import { PrismaClient } from "../app/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 /**
- * Cluster C.6-A — DELETE the legacy `DeckSlide` rows whose `type` strings
- * predate commit 5e82145 ("refactor(deck): align slide-type slugs/types/files
- * with UI labels"). The rename touched code but not data, so existing decks
- * carry both old-named rows AND new-named rows that backfillMissingDefaults()
- * created when admins reopened the deck. Old-named rows render as "Unknown
- * slide type" in the published PDF — see WEB_READINESS_PASS_1_C6_PDF_RENDER.md.
+ * Cluster C.6-A / follow-up — DELETE the legacy `DeckSlide` rows whose `type`
+ * strings predate commit 5e82145 ("refactor(deck): align slide-type slugs/
+ * types/files with UI labels"). The rename touched code but not data, so
+ * existing decks carry both old-named rows AND (for default-deck slots)
+ * new-named rows that `backfillMissingDefaults()` created when admins
+ * reopened the deck. Old-named rows render as "Unknown slide type" in the
+ * published PDF — see WEB_READINESS_PASS_1_C6_PDF_RENDER.md.
  *
  * Per Cluster C.6-A: dry-run by default, requires `--confirm` to actually delete.
  *
  *   npx dotenv -e .env.local -- node node_modules/tsx/dist/cli.mjs scripts/cleanup-legacy-deck-slides.ts
  *   npx dotenv -e .env.local -- node node_modules/tsx/dist/cli.mjs scripts/cleanup-legacy-deck-slides.ts --confirm
  *
- * The 6 legacy types are not present anywhere in the current codebase
- * (verified via grep on app/lib/deck and app/admin/projects/[id]/deck/slides).
- * Deleting these rows is therefore non-destructive — no current code path
- * reads or writes them.
+ * Legacy types covered (none present in the current codebase — verified via
+ * grep on app/lib/deck and app/admin/projects/[id]/deck/slides):
+ *
+ *   First C.6-A pass (default-deck slots):
+ *     cope-page, visual-inspiration, project-timeline, investment,
+ *     design-retainer, closing-slide
+ *
+ *   Follow-up (optional slots — surfaced by find-orphan-deck-slide-types.ts):
+ *     design-build-advantage, process, client-testimonials
+ *
+ * Deleting these rows is non-destructive — no current code path reads or
+ * writes them.
  */
 const LEGACY_SLIDE_TYPES = [
+  // First pass — default-deck slot renames.
   "cope-page",
   "visual-inspiration",
   "project-timeline",
   "investment",
   "design-retainer",
   "closing-slide",
+  // Follow-up — optional-slot renames surfaced by find-orphan-deck-slide-types.ts.
+  "design-build-advantage",
+  "process",
+  "client-testimonials",
 ] as const;
 
 /**
