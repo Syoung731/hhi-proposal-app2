@@ -1,12 +1,16 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/app/lib/prisma";
-import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
+import { getCompanyBrandingForRender } from "@/app/lib/company-branding-for-render";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getDeckForProject } from "@/app/lib/deck/db";
 import { deserializeSnapshotSlides } from "@/app/lib/deck/deserialize-snapshot";
 import { PresentationFrame } from "./presentation-frame";
 import { PrintStack } from "./print-stack";
-import type { SnapshotData, SerializedDeckSlide } from "@/app/lib/snapshot";
+import type {
+  SnapshotData,
+  SerializedDeckSlide,
+  SnapshotBranding,
+} from "@/app/lib/snapshot";
 import type {
   BrandBackgroundForUI,
 } from "@/app/admin/settings/settings-tabs";
@@ -43,16 +47,17 @@ export default async function ProposalPublicRenderer({
   // resolve to a full BrandBackgroundForUI for the composite layer.
   const brandBackgrounds = await loadBrandBackgrounds();
 
-  // Load branding once — sourced from CompanySettings.
-  const companySettings = await getOrCreateCompanySettings();
-  const branding = adaptBrandingForDeck(companySettings);
-
   if (isDraft) {
     const projectId = sp.projectId;
     if (!projectId) notFound();
 
     const draft = await loadDraftDeck(projectId);
     if (!draft) notFound();
+
+    // Draft has no snapshot to read from — pull live branding via the
+    // non-admin-gated helper so the headless-Chromium PDF flow can render
+    // a draft preview without an admin session.
+    const branding = adaptBrandingForDeck(await getCompanyBrandingForRender());
 
     if (isPrint) {
       return (
@@ -94,6 +99,17 @@ export default async function ProposalPublicRenderer({
   if (data.schema !== "v2-deck" || !data.deck) notFound();
 
   const slides = deserializeSnapshotSlides(data.deck.slides as SerializedDeckSlide[]);
+
+  // Branding source priority:
+  //   1. Frozen `snapshotJson.branding` from publish time (post-Cluster C.5
+  //      snapshots). Renders identically across reloads regardless of
+  //      subsequent changes to CompanySettings.
+  //   2. Fallback to a live (non-admin-gated) lookup for legacy snapshots
+  //      published before C.5. Acceptable drift for old snapshots; the
+  //      next republish lifts them onto the frozen path.
+  const brandingSource: SnapshotBranding =
+    data.branding ?? (await getCompanyBrandingForRender());
+  const branding = adaptBrandingForDeck(brandingSource);
 
   if (isPrint) {
     return (
