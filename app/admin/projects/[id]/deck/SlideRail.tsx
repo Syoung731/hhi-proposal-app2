@@ -325,7 +325,7 @@ export function SlideRail({
                           pointerEvents: "none",
                         }}
                       >
-                        <SlideRenderer slide={slide} branding={branding} />
+                        <SlideRenderer slide={slide} branding={branding} isEditing />
                       </div>
                     </div>
                   );

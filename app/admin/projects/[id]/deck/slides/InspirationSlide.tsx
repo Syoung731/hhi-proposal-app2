@@ -9,6 +9,13 @@ interface Props {
   slide: ProposalSlide;
   branding: DeckBranding;
   hasAiBackground?: boolean;
+  /**
+   * When true, render editor-only affordances ("No hero photo selected",
+   * "Photo 1"/"Photo 2", "Select photos from the library"). The admin
+   * deck builder passes true; client-facing render paths (PresentationFrame,
+   * PrintStack) leave it false so empty slots render as plain linen panels.
+   */
+  isEditing?: boolean;
 }
 
 // ─── Design tokens ───────────────────────────────────────────────────────────
@@ -47,7 +54,7 @@ function PhotoCell({ url, style }: { url: string; style?: React.CSSProperties })
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
-export function InspirationSlide({ slide, branding, hasAiBackground }: Props) {
+export function InspirationSlide({ slide, branding, hasAiBackground, isEditing = false }: Props) {
   const c = (slide.content ?? {}) as InspirationContent;
   const layoutKey = slide.layoutKey as string;
   const headline = slide.headline ?? VISUAL_INSPIRATION_DEFAULTS.headline;
@@ -72,6 +79,7 @@ export function InspirationSlide({ slide, branding, hasAiBackground }: Props) {
           hasBg={hasBg}
           content={c}
           branding={branding}
+          isEditing={isEditing}
         />
       );
     case "masonry-grid":
@@ -82,6 +90,7 @@ export function InspirationSlide({ slide, branding, hasAiBackground }: Props) {
           hasBg={hasBg}
           content={c}
           branding={branding}
+          isEditing={isEditing}
         />
       );
     case "side-by-side-bleed":
@@ -93,6 +102,7 @@ export function InspirationSlide({ slide, branding, hasAiBackground }: Props) {
           hasBg={hasBg}
           content={c}
           branding={branding}
+          isEditing={isEditing}
         />
       );
     default:
@@ -105,6 +115,7 @@ export function InspirationSlide({ slide, branding, hasAiBackground }: Props) {
           hasBg={hasBg}
           content={c}
           branding={branding}
+          isEditing={isEditing}
         />
       );
   }
@@ -120,6 +131,7 @@ function HeroPlusStackedLayout({
   hasBg,
   content,
   branding,
+  isEditing,
 }: {
   headline: string;
   subtitle: string;
@@ -128,6 +140,7 @@ function HeroPlusStackedLayout({
   hasBg?: boolean;
   content: InspirationContent;
   branding: DeckBranding;
+  isEditing: boolean;
 }) {
   const stackedPhotos = photos.slice(0, 2);
 
@@ -141,10 +154,12 @@ function HeroPlusStackedLayout({
         <div style={{ width: "65%", height: "100%", position: "relative" }}>
           {heroPhoto ? (
             <PhotoCell url={heroPhoto} style={{ width: "100%", height: "100%" }} />
-          ) : (
+          ) : isEditing ? (
             <div style={{ width: "100%", height: "100%", background: "rgba(0,0,0,0.05)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontFamily: "'Jost', sans-serif", fontSize: "0.5em", color: "#9CA3AF" }}>No hero photo selected</span>
             </div>
+          ) : (
+            <div style={{ width: "100%", height: "100%", background: LINEN }} />
           )}
 
           {/* Text overlay with gradient */}
@@ -198,7 +213,7 @@ function HeroPlusStackedLayout({
             stackedPhotos.map((url, i) => (
               <PhotoCell key={i} url={url} style={{ flex: 1 }} />
             ))
-          ) : (
+          ) : isEditing ? (
             <>
               <div style={{ flex: 1, background: "rgba(0,0,0,0.03)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontFamily: "'Jost', sans-serif", fontSize: "0.4em", color: "#D1D5DB" }}>Photo 1</span>
@@ -207,9 +222,9 @@ function HeroPlusStackedLayout({
                 <span style={{ fontFamily: "'Jost', sans-serif", fontSize: "0.4em", color: "#D1D5DB" }}>Photo 2</span>
               </div>
             </>
-          )}
+          ) : null}
           {/* Fill remaining slots if only 1 photo */}
-          {stackedPhotos.length === 1 && (
+          {stackedPhotos.length === 1 && isEditing && (
             <div style={{ flex: 1, background: "rgba(0,0,0,0.03)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontFamily: "'Jost', sans-serif", fontSize: "0.4em", color: "#D1D5DB" }}>Photo 2</span>
             </div>
@@ -241,12 +256,14 @@ function MasonryGridLayout({
   hasBg,
   content,
   branding,
+  isEditing,
 }: {
   caption: string;
   photos: string[];
   hasBg?: boolean;
   content: InspirationContent;
   branding: DeckBranding;
+  isEditing: boolean;
 }) {
   // Span assignments for natural masonry feel
   const spanMap: { col: number; row: number }[] = [
@@ -291,7 +308,7 @@ function MasonryGridLayout({
               />
             );
           })
-        ) : (
+        ) : isEditing ? (
           <div
             style={{
               gridColumn: "span 4",
@@ -306,7 +323,7 @@ function MasonryGridLayout({
               Select photos from the library
             </span>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Caption overlay */}
@@ -353,6 +370,7 @@ function SideBySideBleedLayout({
   hasBg,
   content,
   branding,
+  isEditing,
 }: {
   headline: string;
   caption: string;
@@ -360,6 +378,7 @@ function SideBySideBleedLayout({
   hasBg?: boolean;
   content: InspirationContent;
   branding: DeckBranding;
+  isEditing: boolean;
 }) {
   const leftPhoto = photos[0] ?? null;
   const rightPhoto = photos[1] ?? null;
@@ -403,17 +422,21 @@ function SideBySideBleedLayout({
         <div style={{ flex: 1, display: "flex", gap: 2 }}>
           {leftPhoto ? (
             <PhotoCell url={leftPhoto} style={{ flex: 1 }} />
-          ) : (
+          ) : isEditing ? (
             <div style={{ flex: 1, background: "rgba(0,0,0,0.03)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontFamily: "'Jost', sans-serif", fontSize: "0.45em", color: "#D1D5DB" }}>Photo 1</span>
             </div>
+          ) : (
+            <div style={{ flex: 1, background: LINEN }} />
           )}
           {rightPhoto ? (
             <PhotoCell url={rightPhoto} style={{ flex: 1 }} />
-          ) : (
+          ) : isEditing ? (
             <div style={{ flex: 1, background: "rgba(0,0,0,0.03)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontFamily: "'Jost', sans-serif", fontSize: "0.45em", color: "#D1D5DB" }}>Photo 2</span>
             </div>
+          ) : (
+            <div style={{ flex: 1, background: LINEN }} />
           )}
         </div>
 

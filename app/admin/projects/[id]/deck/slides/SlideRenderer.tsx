@@ -26,6 +26,13 @@ interface Props {
   branding: DeckBranding;
   /** When true, a dark brand background is active — flip branding.textColor to light. */
   hasBrandDarkBackground?: boolean;
+  /**
+   * When true, slide components render editor-only affordances (e.g. the
+   * inspiration slide's "No hero photo selected" / "Photo 1" / "Photo 2"
+   * placeholders). Passed `true` from the admin deck builder; omitted /
+   * false from client-facing render paths.
+   */
+  isEditing?: boolean;
 }
 
 /** Light text color used on dark brand backgrounds. */
@@ -44,7 +51,7 @@ const DARK_BG_TEXT_COLOR = "#F8F4EE";
  * all 9 slide components automatically use light text without individual edits.
  * The accentColor (#F47216) is intentionally preserved — orange reads well on dark.
  */
-export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false }: Props) {
+export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false, isEditing = false }: Props) {
   const hasAiBackground = !!slide.aiBackground;
 
   // When a dark brand background is active, override primary text to near-white.
@@ -85,7 +92,7 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false 
     case "closing":
       return <ClosingSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "inspiration":
-      return <InspirationSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+      return <InspirationSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} isEditing={isEditing} />;
     case "testimonials":
       return <TestimonialsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "design-build":

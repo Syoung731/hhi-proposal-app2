@@ -40,6 +40,13 @@ interface Props {
    * Always true in client-facing contexts (Vibe presentation, PDF render).
    */
   hideTextZoneOverlay?: boolean;
+  /**
+   * When true, slide components render editor-only affordances (e.g. the
+   * inspiration slide's empty-photo placeholders). The admin SlideCanvas
+   * passes true; client-facing PrintStack / PresentationFrame leave it
+   * false so empty slots render as plain panels in the published PDF.
+   */
+  isEditing?: boolean;
 }
 
 /**
@@ -64,6 +71,7 @@ export function SlideCard({
   branding,
   brandBackgrounds = [],
   hideTextZoneOverlay = false,
+  isEditing = false,
 }: Props) {
   const activeBg = slide.backgroundId
     ? brandBackgrounds.find((b) => b.id === slide.backgroundId) ?? null
@@ -131,6 +139,7 @@ export function SlideCard({
           slide={slide}
           branding={branding}
           hasBrandDarkBackground={hasBrandDarkBackground}
+          isEditing={isEditing}
         />
       </div>
 

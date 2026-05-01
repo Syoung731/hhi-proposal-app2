@@ -57,6 +57,7 @@ export function SlideCanvas({ slide, branding, brandBackgrounds = [] }: Props) {
             slide={slide}
             branding={branding}
             brandBackgrounds={brandBackgrounds}
+            isEditing
           />
         ) : (
           /* Disabled slide placeholder */
