@@ -1,4 +1,34 @@
 /**
+ * Subset of `CompanySettings` columns required to render a proposal deck.
+ *
+ * Shape matches the input contract of `adaptBrandingForDeck()` exactly — the
+ * adapter is a pure transform that produces `DeckBranding` from this. Keep
+ * the two in lock-step; if a new branding column is added to `CompanySettings`
+ * and consumed by the adapter, add it here too and re-publish snapshots.
+ *
+ * Captured at publish time into `SnapshotData.branding` so the proposal
+ * renderer can produce the deck without a live `companySettings` lookup.
+ * The renderer therefore needs no admin context, which lets the headless
+ * Chromium PDF flow (and future public-share contexts) work.
+ */
+export type SnapshotBranding = {
+  logoLightUrl: string | null;
+  logoDarkUrl: string | null;
+  primaryColorHex: string | null;
+  textColorHex: string | null;
+  companyName: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+  email: string | null;
+  brandTagline: string | null;
+  closingHeadline: string | null;
+};
+
+/**
  * Shape of the JSON stored in PublishedSnapshot. Must be serializable and sufficient
  * to render the public proposal page without touching the database.
  *
@@ -8,6 +38,12 @@
  *     `undefined` as "v1-legacy" for backward compatibility.
  *   - "v2-deck"   — same legacy fields PLUS a serialized `deck` payload of DeckSlide rows,
  *     written by the post-Cleanup C publish flow.
+ *
+ * The `branding` field is additive — present on snapshots published after
+ * Cluster C.5, absent on older ones. Readers must fall back to a live
+ * `companySettings` lookup (via `getCompanyBrandingForRender()`) when it's
+ * missing. This avoids a schema discriminator bump and keeps legacy
+ * snapshots renderable.
  */
 export type SnapshotData = {
   schema: "v1-legacy" | "v2-deck";
@@ -65,6 +101,12 @@ export type SnapshotData = {
   }>;
   /** Present iff schema === "v2-deck". Snapshot of the project's ProposalDeck at publish time. */
   deck?: SerializedDeck;
+  /**
+   * Frozen copy of `CompanySettings` branding at publish time. Optional —
+   * snapshots from before Cluster C.5 don't have it. Renderer falls back
+   * to a live (non-admin-gated) lookup when absent. See SnapshotBranding above.
+   */
+  branding?: SnapshotBranding;
 };
 
 /**
