@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 import {
   Geist,
   Geist_Mono,
@@ -87,12 +88,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} ${cormorantGaramond.variable} ${jost.variable} ${playfairDisplay.variable} ${lora.variable} ${raleway.variable} ${dmSerifDisplay.variable} ${inter.variable} ${libreBaskerville.variable} antialiased`}
-      >
-        {children}
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en">
+        <body
+          className={`${geistSans.variable} ${geistMono.variable} ${cormorantGaramond.variable} ${jost.variable} ${playfairDisplay.variable} ${lora.variable} ${raleway.variable} ${dmSerifDisplay.variable} ${inter.variable} ${libreBaskerville.variable} antialiased`}
+        >
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

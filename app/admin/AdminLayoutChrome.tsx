@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserButton } from "@clerk/nextjs";
 import { AdminNav } from "./admin-nav";
 import { EstimateJobProvider } from "@/app/admin/_estimate-job/context";
 import { EstimateJobProgressBanner } from "@/app/admin/_estimate-job/progress-banner";
@@ -63,6 +64,9 @@ export function AdminLayoutChrome({
                 <span className="ml-4 text-xs text-zinc-500 dark:text-zinc-500">
                   {displayName}
                 </span>
+                <div className="ml-3 flex items-center">
+                  <UserButton afterSignOutUrl="/sign-in" />
+                </div>
               </div>
             </div>
           </div>
