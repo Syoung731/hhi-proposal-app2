@@ -127,7 +127,7 @@ export async function POST(
         projectId: original.projectId,
         sectionId: original.sectionId,
         ...(original.roomTemplateId
-          ? { roomTemplate: { connect: { id: original.roomTemplateId } } }
+          ? { roomTemplateId: original.roomTemplateId }
           : {}),
         status: "draft",
         totalCost: parsedEstimate.totalCost,

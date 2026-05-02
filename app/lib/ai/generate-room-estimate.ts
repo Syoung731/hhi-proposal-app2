@@ -248,7 +248,7 @@ export async function generateRoomEstimate(
     data: {
       projectId,
       sectionId,
-      roomTemplate: { connect: { id: roomTemplateId } },
+      roomTemplateId,
       status: "draft",
       totalCost: parsedEstimate.totalCost,
       totalPrice: parsedEstimate.totalPrice,

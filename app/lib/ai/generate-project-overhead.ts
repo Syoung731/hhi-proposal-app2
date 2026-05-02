@@ -247,7 +247,7 @@ export async function generateProjectOverhead(
       data: {
         projectId,
         sectionId: copeRoom.id,
-        roomTemplate: { connect: { id: copeTemplate.id } },
+        roomTemplateId: copeTemplate.id,
         status: "draft",
         totalCost: parsedEstimate.totalCost,
         totalPrice: parsedEstimate.totalPrice,
