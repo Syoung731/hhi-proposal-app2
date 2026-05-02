@@ -75,6 +75,7 @@ model Project {
   extensionPairCodes       ExtensionPairCode[]
   zillowBrowserConnections ZillowBrowserConnection[]
   estimateJobs             EstimateJob[]
+  aiEstimates              AIEstimate[]
   defaultCeilingHeightFt   Float?                    @default(9)
   projectQA                Json?
   proposalDeck             ProposalDeck?
@@ -278,6 +279,7 @@ model Room {
   subAreas                   RoomSubArea[]
   jobItems                   JobItem[]
   renderChecks               RoomRenderCheck[]
+  aiEstimates                AIEstimate[]
   project                    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   roomType                   RoomType?        @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
   stylePreset                StylePreset?     @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
@@ -1127,6 +1129,8 @@ model AIEstimate {
   rawResponse      String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section          Room               @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   roomTemplate     RoomTemplate?      @relation(fields: [roomTemplateId], references: [id], onDelete: SetNull)
   lineItems        EstimateLineItem[]
   priceCorrections PriceCorrection[]
