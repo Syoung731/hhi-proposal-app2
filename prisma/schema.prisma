@@ -1331,7 +1331,7 @@ model EmailSendLog {
   toAddress         String
   subject           String
   providerName      String
-  providerMessageId String?
+  providerMessageId String?            @unique
   sentAt            DateTime           @default(now())
   error             String?
   metadataJson      Json?
