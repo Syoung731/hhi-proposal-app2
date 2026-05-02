@@ -181,7 +181,6 @@ model ZillowBrowserConnection {
   handshakeMethod   ZillowHandshakeMethod  @default(DIRECT)
   project           Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
-  @@index([nonce])
   @@index([userId])
   @@index([projectId])
   @@index([expiresAt])
@@ -195,7 +194,6 @@ model Proposal {
   publicLayoutConfig Json?
   project            Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
   @@index([isPublic])
 }
 
@@ -435,7 +433,6 @@ model InvestmentLineItem {
   project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, bucket])
-  @@index([projectId])
   @@index([projectId, sortOrder])
 }
 
