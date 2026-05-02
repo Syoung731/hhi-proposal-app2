@@ -66,6 +66,7 @@ model Project {
   transcriptText           String?
   stylePresetId            String?
   stylePreset              StylePreset?              @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  coverHeroImage           Media?                    @relation("ProjectCoverHero", fields: [coverHeroImageId], references: [id], onDelete: SetNull)
   investmentLineItems      InvestmentLineItem[]
   media                    Media[]
   publishedSnapshots       PublishedSnapshot[]
@@ -280,6 +281,7 @@ model Room {
   jobItems                   JobItem[]
   renderChecks               RoomRenderCheck[]
   aiEstimates                AIEstimate[]
+  deckSlides                 DeckSlide[]
   project                    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   roomType                   RoomType?        @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
   stylePreset                StylePreset?     @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
@@ -379,6 +381,7 @@ model Media {
   parent          Media?         @relation("MediaParent", fields: [parentMediaId], references: [id], onDelete: SetNull)
   children        Media[]        @relation("MediaParent")
   stylePreset     StylePreset?   @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+  projectsAsCoverHero Project[]  @relation("ProjectCoverHero")
   type            MediaType      @default(EXISTING)
 
   @@index([projectId])
@@ -1029,6 +1032,7 @@ model DeckSlide {
   updatedAt      DateTime         @updatedAt
   deck           ProposalDeck     @relation(fields: [deckId], references: [id], onDelete: Cascade)
   background     BrandBackground? @relation(fields: [backgroundId], references: [id], onDelete: SetNull)
+  section        Room?            @relation(fields: [sectionId], references: [id], onDelete: SetNull)
 
   @@index([deckId, order])
   @@index([deckId, type])
