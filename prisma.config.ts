@@ -5,7 +5,7 @@ import { defineConfig } from "prisma/config";
 
 // Load .env from project root
 dotenv.config({ path: ".env" });
-
+dotenv.config({ path: ".env.local" });
 // We use:
 // - DIRECT_URL (non-pooler) for Prisma Migrate / schema operations
 // - DATABASE_URL (pooler) for app runtime (PrismaClient) if you want pooling

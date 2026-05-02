@@ -9,6 +9,7 @@
     "lint": "node node_modules/tsx/dist/cli.mjs scripts/dev-context-task-runner.ts lint -- node node_modules/eslint/bin/eslint.js",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
+    "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
