@@ -34,6 +34,19 @@ const nextConfig: NextConfig = {
         hostname: "media.hhi-builders.com",
         pathname: "/**",
       },
+      // Wildcard covers any r2.dev public-bucket subdomain (production may use
+      // a different bucket prefix than local .env.local).
+      {
+        protocol: "https",
+        hostname: "*.r2.dev",
+        pathname: "/**",
+      },
+      // Wildcard covers signed-URL access via the Cloudflare account-id host.
+      {
+        protocol: "https",
+        hostname: "*.r2.cloudflarestorage.com",
+        pathname: "/**",
+      },
     ],
   },
 };
