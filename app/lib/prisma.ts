@@ -63,6 +63,7 @@ const REQUIRED_RECENT_FIELDS: Record<string, string[]> = {
   Media: ["thumbnailUrl"], // Phase 9
   CompanySettings: ["designHourlyRate", "brandTagline", "closingHeadline"], // Phase 8C T1, Phase 11 Pass 2A T9
   RoomRenderCheck: ["id", "roomId", "itemText"], // Phase 10
+  PricingCatalogItem: ["hidden"], // Catalog Hide
 };
 
 function getPrisma(): PrismaClient {
