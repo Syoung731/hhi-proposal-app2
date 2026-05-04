@@ -60,5 +60,8 @@ next-env.d.ts
 # Add gitignore entries for investigation reports
 # Open .gitignore in your editor and add these lines:
 *_INVESTIGATION.md
-WEB_READINESS_*.md  
+WEB_READINESS_*.md
 AI_TIGHTENING_*.md
+
+# Generated migration backfill artifact (one-shot SQL output, never committed)
+scripts/migration-backfill.sql
