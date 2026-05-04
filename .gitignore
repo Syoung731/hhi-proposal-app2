@@ -56,3 +56,9 @@ next-env.d.ts
 
 # Claude Code runtime
 .claude/scheduled_tasks.lock
+
+# Add gitignore entries for investigation reports
+# Open .gitignore in your editor and add these lines:
+*_INVESTIGATION.md
+WEB_READINESS_*.md  
+AI_TIGHTENING_*.md
