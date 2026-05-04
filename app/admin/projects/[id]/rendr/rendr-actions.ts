@@ -442,11 +442,8 @@ export async function previewRendrResync(appProjectId: string): Promise<ResyncDi
   });
   if (!project?.rendrSpaceId) throw new Error("No Rendr scan linked.");
 
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/rendr/spaces/${project.rendrSpaceId}/takeoff`,
-  );
-  if (!res.ok) throw new Error("Failed to fetch takeoff data");
-  const takeoff = await res.json();
+  const raw = await getRendrTakeoffData(project.rendrSpaceId);
+  const takeoff = convertTakeoffData(raw);
 
   // Find all sections with Rendr mappings
   const sections = await prisma.room.findMany({
