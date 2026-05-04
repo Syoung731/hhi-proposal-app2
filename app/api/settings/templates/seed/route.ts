@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
-import { cleanDisplayName } from "@/app/lib/jobtread/catalog-api";
+import { cleanDisplayName, isCopeTemplate } from "@/app/lib/jobtread/catalog-api";
 
 /**
  * POST /api/settings/templates/seed
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
         jobtreadId: String(tpl.id),
         name: tpl.name,
         displayName,
+        isProjectOverhead: isCopeTemplate(displayName),
       },
     });
 
