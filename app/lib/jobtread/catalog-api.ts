@@ -478,3 +478,22 @@ export function cleanDisplayName(templateName: string): string {
   name = name.replace(/\s+\d{1,2}\/\d{1,2}\/\d{4}$/, "");
   return name.trim();
 }
+
+/**
+ * Detects whether a cleaned template displayName represents the COPE
+ * (Cost of Project Execution) template. Used by template import routes
+ * to set `isProjectOverhead = true` at insert time, matching the canonical
+ * detection pattern in prisma/seed.ts:506.
+ *
+ * Uses an exact case-insensitive match against the cleaned displayName,
+ * NOT the raw JobTread name. The cleaner already strips `A. / `B. /
+ * Updated - / Standardized - / trailing-date noise, so a JobTread template
+ * named `A. COPE`, `Updated - COPE 5/4/2026`, etc. all collapse to "COPE".
+ *
+ * Strict exact-match by design: avoids false-positives like "COPE Lite",
+ * "COPE Phase 2", or future template variants. If broader matching is ever
+ * needed, this is the single switching point.
+ */
+export function isCopeTemplate(displayName: string): boolean {
+  return displayName.trim().toUpperCase() === "COPE";
+}
