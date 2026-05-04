@@ -14,8 +14,10 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get("search")?.trim();
     const trade = searchParams.get("trade")?.trim();
     const costType = searchParams.get("costType")?.trim();
+    const includeHidden = searchParams.get("includeHidden") === "true";
 
     const where: Record<string, unknown> = { active: true };
+    if (!includeHidden) where.hidden = false;
 
     if (search) {
       where.name = { contains: search, mode: "insensitive" };

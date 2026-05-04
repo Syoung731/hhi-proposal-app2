@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     // Pull catalog items relevant to this trade
     const catalogItems = await prisma.pricingCatalogItem.findMany({
-      where: { active: true, OR: [{ trade: tradeGroup }, { trade: null }] },
+      where: { active: true, hidden: false, OR: [{ trade: tradeGroup }, { trade: null }] },
       select: { id: true, name: true, unit: true, unitCost: true, unitPrice: true, trade: true },
       orderBy: [{ trade: "asc" }, { name: "asc" }],
       take: 200,

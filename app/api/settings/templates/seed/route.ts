@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
     // Pre-load catalog for name matching
     const catalogItems = await prisma.pricingCatalogItem.findMany({
-      where: { active: true },
+      where: { active: true, hidden: false },
       select: { id: true, name: true },
     });
     const catalogByName = new Map(catalogItems.map((c) => [c.name, c.id]));
