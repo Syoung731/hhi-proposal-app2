@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { hideCatalogItems, unhideCatalogItems } from "./catalog-actions";
 
 type CatalogItem = {
   id: string;
@@ -13,6 +14,7 @@ type CatalogItem = {
   unitPrice: number | null;
   unit: string;
   trade: string | null;
+  hidden: boolean;
   lastSyncedAt: string;
 };
 
@@ -54,11 +56,18 @@ export function CatalogTab() {
   const [costTypeFilter, setCostTypeFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("trade");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [showHidden, setShowHidden] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [mutating, setMutating] = useState(false);
+  const [mutationResult, setMutationResult] = useState<string | null>(null);
 
-  async function loadItems() {
+  async function loadItems(includeHidden: boolean) {
     setLoading(true);
     try {
-      const res = await fetch("/api/settings/catalog/items");
+      const url = includeHidden
+        ? "/api/settings/catalog/items?includeHidden=true"
+        : "/api/settings/catalog/items";
+      const res = await fetch(url);
       const data = await res.json();
       setItems(data.items ?? []);
     } catch {
@@ -68,7 +77,10 @@ export function CatalogTab() {
     }
   }
 
-  useEffect(() => { loadItems(); }, []);
+  useEffect(() => {
+    loadItems(showHidden);
+    setSelectedIds(new Set());
+  }, [showHidden]);
 
   async function handleSync() {
     setSyncing(true);
@@ -80,7 +92,7 @@ export function CatalogTab() {
         setSyncResult(`Error: ${data.error}`);
       } else {
         setSyncResult(`Synced ${data.total} items (${data.updated} updated, ${data.created} created)`);
-        await loadItems();
+        await loadItems(showHidden);
       }
     } catch (e) {
       setSyncResult(`Sync failed: ${e instanceof Error ? e.message : "Unknown error"}`);
@@ -143,6 +155,71 @@ export function CatalogTab() {
     return sortDir === "asc" ? "↑" : "↓";
   };
 
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    const visibleIds = filtered.map((i) => i.id);
+    const allSelected = visibleIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  const selectedCount = selectedIds.size;
+  const selectedItems = useMemo(
+    () => items.filter((i) => selectedIds.has(i.id)),
+    [items, selectedIds],
+  );
+  const allSelectedAreHidden = selectedItems.length > 0 && selectedItems.every((i) => i.hidden);
+
+  async function handleHide() {
+    if (selectedCount === 0) return;
+    setMutating(true);
+    setMutationResult(null);
+    try {
+      const result = await hideCatalogItems(Array.from(selectedIds));
+      setMutationResult(`Hid ${result.count} item${result.count === 1 ? "" : "s"}`);
+      setSelectedIds(new Set());
+      await loadItems(showHidden);
+    } catch (e) {
+      setMutationResult(`Hide failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setMutating(false);
+    }
+  }
+
+  async function handleUnhide() {
+    if (selectedCount === 0) return;
+    setMutating(true);
+    setMutationResult(null);
+    try {
+      const result = await unhideCatalogItems(Array.from(selectedIds));
+      setMutationResult(`Unhid ${result.count} item${result.count === 1 ? "" : "s"}`);
+      setSelectedIds(new Set());
+      await loadItems(showHidden);
+    } catch (e) {
+      setMutationResult(`Unhide failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setMutating(false);
+    }
+  }
+
+  const visibleIds = filtered.map((i) => i.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
   return (
     <div className="space-y-6">
       {/* Sync Banner */}
@@ -162,6 +239,7 @@ export function CatalogTab() {
         <button
           onClick={handleSync}
           disabled={syncing}
+          style={{ minHeight: 32 }}
           className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
           {syncing ? "Syncing…" : "Sync from JobTread"}
@@ -173,18 +251,20 @@ export function CatalogTab() {
         )}
       </div>
 
-      {/* Filters */}
+      {/* Filters + Show Hidden + Bulk action bar */}
       <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
           placeholder="Search by name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          style={{ minHeight: 32 }}
           className="w-64 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
         />
         <select
           value={tradeFilter}
           onChange={(e) => setTradeFilter(e.target.value)}
+          style={{ minHeight: 32 }}
           className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
         >
           <option value="">All Trades</option>
@@ -195,6 +275,7 @@ export function CatalogTab() {
         <select
           value={costTypeFilter}
           onChange={(e) => setCostTypeFilter(e.target.value)}
+          style={{ minHeight: 32 }}
           className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
         >
           <option value="">All Cost Types</option>
@@ -202,10 +283,61 @@ export function CatalogTab() {
             <option key={t} value={t}>{t}</option>
           ))}
         </select>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={(e) => setShowHidden(e.target.checked)}
+            style={{ minHeight: 16, minWidth: 16 }}
+            className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
+          />
+          Show hidden
+        </label>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           {filtered.length} of {items.length} items
         </span>
       </div>
+
+      {/* Bulk action bar — appears when items are selected */}
+      {selectedCount > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/50">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            {selectedCount} selected
+          </span>
+          {!allSelectedAreHidden && (
+            <button
+              onClick={handleHide}
+              disabled={mutating}
+              style={{ minHeight: 32 }}
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {mutating ? "Hiding…" : `Hide ${selectedCount} Selected`}
+            </button>
+          )}
+          {selectedItems.some((i) => i.hidden) && (
+            <button
+              onClick={handleUnhide}
+              disabled={mutating}
+              style={{ minHeight: 32 }}
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {mutating ? "Unhiding…" : `Unhide ${selectedItems.filter((i) => i.hidden).length} Selected`}
+            </button>
+          )}
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            style={{ minHeight: 32 }}
+            className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          >
+            Clear
+          </button>
+          {mutationResult && (
+            <span className={`text-sm ${mutationResult.startsWith("Hide failed") || mutationResult.startsWith("Unhide failed") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
+              {mutationResult}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       {loading ? (
@@ -221,6 +353,16 @@ export function CatalogTab() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/50">
               <tr>
+                <th className="w-10 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    aria-label="Select all visible"
+                    style={{ minHeight: 16, minWidth: 16 }}
+                    className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
+                  />
+                </th>
                 <th className="cursor-pointer px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400" onClick={() => toggleSort("trade")}>
                   Trade {sortIcon("trade")}
                 </th>
@@ -242,24 +384,47 @@ export function CatalogTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {filtered.map((item) => (
-                <tr key={item.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
-                  <td className="px-3 py-2">
-                    {item.trade ? (
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TRADE_COLORS[item.trade] ?? DEFAULT_BADGE}`}>
-                        {item.trade}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-zinc-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-900 dark:text-zinc-100">{item.name}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{item.costType ?? "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{formatCurrency(item.unitCost)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-100 font-medium">{formatCurrency(item.unitPrice)}</td>
-                  <td className="px-3 py-2 text-zinc-500 dark:text-zinc-500">{item.unit}</td>
-                </tr>
-              ))}
+              {filtered.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                return (
+                  <tr
+                    key={item.id}
+                    className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/30 ${item.hidden ? "opacity-50" : ""} ${isSelected ? "bg-zinc-50 dark:bg-zinc-800/40" : ""}`}
+                  >
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(item.id)}
+                        aria-label={`Select ${item.name}`}
+                        style={{ minHeight: 16, minWidth: 16 }}
+                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      {item.trade ? (
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TRADE_COLORS[item.trade] ?? DEFAULT_BADGE}`}>
+                          {item.trade}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-900 dark:text-zinc-100">
+                      {item.name}
+                      {item.hidden && (
+                        <span className="ml-2 inline-block rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+                          Hidden
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{item.costType ?? "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{formatCurrency(item.unitCost)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-100 font-medium">{formatCurrency(item.unitPrice)}</td>
+                    <td className="px-3 py-2 text-zinc-500 dark:text-zinc-500">{item.unit}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
