@@ -5,6 +5,8 @@ import { prisma } from "@/app/lib/prisma";
 import { Prisma } from "@/app/generated/prisma";
 import { revalidatePath } from "next/cache";
 import { aggregateRendrTakeoffs } from "@/app/lib/rendr/aggregateTakeoffs";
+import { getRendrTakeoffData, getRendrSpaceGeometry } from "@/app/lib/rendr/rendrClient";
+import { convertTakeoffData } from "@/app/lib/rendr/convertTakeoff";
 import type { ImperialRoomTakeoff } from "@/app/lib/rendr/types";
 import { classifyRoomForDetail, type RoomDetail } from "@/app/lib/room-classification";
 import { extractCeilingHeightForMappedRooms } from "@/app/lib/rendr/extractCeilingHeight";
@@ -93,30 +95,15 @@ export async function importRendrMeasurements(
   });
   if (!project?.rendrSpaceId) throw new Error("No Rendr scan linked.");
 
-  // Get imperial takeoff data from API route
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/rendr/spaces/${project.rendrSpaceId}/takeoff`,
-  );
-  if (!res.ok) throw new Error("Failed to fetch takeoff data");
-  const takeoff = await res.json();
+  // Get imperial takeoff data
+  const raw = await getRendrTakeoffData(project.rendrSpaceId);
+  const takeoff = convertTakeoffData(raw);
 
   // Fetch geometry blob for wall dimensions / ceiling height (best-effort)
   let geometryData: Record<string, unknown> | null = null;
   try {
-    const geoUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/rendr/spaces/${project.rendrSpaceId}/geometry`;
-    if (process.env.NODE_ENV === "development") console.log("[Rendr Import] Fetching geometry from:", geoUrl);
-    const geoRes = await fetch(geoUrl);
-    if (process.env.NODE_ENV === "development") console.log("[Rendr Import] Geometry response:", geoRes.status, geoRes.ok);
-    if (geoRes.ok) {
-      geometryData = await geoRes.json();
-      if (process.env.NODE_ENV === "development") {
-        const space = (geometryData as Record<string, unknown>)?.space as Record<string, unknown> | undefined;
-        console.log("[Rendr Import] Geometry has space:", !!space, "rooms:", (space?.rooms as unknown[])?.length, "walls:", (space?.walls as unknown[])?.length);
-      }
-    }
-  } catch (e) {
-    if (process.env.NODE_ENV === "development") console.error("[Rendr Import] Geometry fetch error:", e);
-  }
+    geometryData = (await getRendrSpaceGeometry(project.rendrSpaceId)) as Record<string, unknown> | null;
+  } catch { /* best-effort */ }
 
   // Resolve mappings — existing-section mappings pass through; section-type
   // mappings are grouped by pendingKey so multiple Rendr rooms targeted at the
