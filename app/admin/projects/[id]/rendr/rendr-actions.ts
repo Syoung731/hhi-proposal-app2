@@ -529,19 +529,13 @@ export async function executeRendrResync(
   });
   if (!project?.rendrSpaceId) throw new Error("No Rendr scan linked.");
 
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/rendr/spaces/${project.rendrSpaceId}/takeoff`,
-  );
-  if (!res.ok) throw new Error("Failed to fetch takeoff data");
-  const takeoff = await res.json();
+  const raw = await getRendrTakeoffData(project.rendrSpaceId);
+  const takeoff = convertTakeoffData(raw);
 
   // Fetch geometry blob for ceiling heights (best-effort)
   let geometryDataResync: Record<string, unknown> | null = null;
   try {
-    const geoRes = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/rendr/spaces/${project.rendrSpaceId}/geometry`,
-    );
-    if (geoRes.ok) geometryDataResync = await geoRes.json();
+    geometryDataResync = (await getRendrSpaceGeometry(project.rendrSpaceId)) as Record<string, unknown> | null;
   } catch { /* best-effort */ }
 
   const sections = await prisma.room.findMany({
