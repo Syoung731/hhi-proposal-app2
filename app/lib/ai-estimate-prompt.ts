@@ -334,7 +334,8 @@ export function buildUserPromptParts(
 ): UserPromptParts {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
-    items: g.items.filter((item) => item.isActive !== false),
+    // Defensive: skip user-hidden catalog items even if the loader missed them.
+    items: g.items.filter((item) => item.isActive !== false && !item.catalogItem?.hidden),
   })).filter((g) => g.items.length > 0);
   const groups = filterTradeGroupsByScope(activeTradeGroups, scopeNarrative);
 

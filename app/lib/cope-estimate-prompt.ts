@@ -210,11 +210,12 @@ export function buildCopeUserPromptParts(
     ? `Yes ($${aggregateData.tradeBreakdown["Plumbing"]?.totalPrice?.toLocaleString() ?? "0"})`
     : "No";
 
-  // Catalog section from template (filter inactive items)
+  // Catalog section from template (filter inactive + user-hidden items)
   const catalogSection = copeTemplate.tradeGroups
     .map((g) => ({
       ...g,
-      items: g.items.filter((item) => item.isActive !== false),
+      // Defensive: skip user-hidden catalog items even if the loader missed them.
+      items: g.items.filter((item) => item.isActive !== false && !item.catalogItem?.hidden),
     }))
     .filter((g) => g.items.length > 0)
     .map((g) => {

@@ -129,6 +129,14 @@ export async function generateProjectOverhead(
           include: {
             items: {
               orderBy: { sortOrder: "asc" },
+              // Drop items whose joined catalogItem is user-hidden. Unmatched items
+              // (catalogItemId === null) pass through — same as before.
+              where: {
+                OR: [
+                  { catalogItemId: null },
+                  { catalogItem: { hidden: false } },
+                ],
+              },
               include: { catalogItem: true },
             },
           },
