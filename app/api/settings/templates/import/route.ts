@@ -3,6 +3,7 @@ import { prisma } from "@/app/lib/prisma";
 import {
   fetchCostGroupTemplateDetails,
   cleanDisplayName,
+  isCopeTemplate,
 } from "@/app/lib/jobtread/catalog-api";
 
 /**
@@ -67,6 +68,7 @@ export async function POST(req: NextRequest) {
           jobtreadId: templateId,
           name: detail.name,
           displayName,
+          isProjectOverhead: isCopeTemplate(displayName),
         },
       });
 
