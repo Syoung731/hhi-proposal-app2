@@ -826,8 +826,12 @@
         }
         if (!propData || !propData.property) continue;
 
-        // Use property.photos (has url + mixedSources with quality variants)
-        var photos = propData.property.photos;
+        // Traditional listings expose the photo array as `responsivePhotos`;
+        // showcase listings (and some older shapes) use `photos`. Try both.
+        // Each entry has the same shape: { url, mixedSources: { jpeg, webp } }.
+        var photos = (Array.isArray(propData.property.responsivePhotos) && propData.property.responsivePhotos.length > 0)
+          ? propData.property.responsivePhotos
+          : propData.property.photos;
         if (!Array.isArray(photos) || photos.length === 0) continue;
 
         var urls = [];
@@ -895,9 +899,40 @@
   }
 
   /**
-   * CAPTURE_GALLERY: try standard modal wall first, then Showcase lightbox, then listing preview fallback.
+   * CAPTURE_GALLERY:
+   *   0) FAST PATH — extract photos directly from the page's __NEXT_DATA__
+   *      JSON cache. Works on traditional AND showcase listings, requires
+   *      zero clicks, zero scrolls, zero DOM-selector matching. The JSON is
+   *      server-rendered Next.js data and contains the full property photo
+   *      array at max resolution before any client JS runs.
+   *   1) FALLBACK — legacy "See all photos" → vertical media wall
+   *      (traditional listings whose JSON shape we don't recognise).
+   *   2) FALLBACK — Showcase lightbox DOM scrape.
+   *   3) FALLBACK — listing-preview tile scrape (~6 photos only).
    */
   function runCaptureGallery(onProgress) {
+    // 0) Fast path: __NEXT_DATA__ JSON. No modal, no scroll.
+    try {
+      var jsonUrls = extractShowcasePhotosFromJSON();
+      if (jsonUrls && jsonUrls.length > 0) {
+        var statedFast = getZillowStatedCount();
+        if (typeof console !== "undefined" && console.log) {
+          console.log("[ZI] json extraction:", jsonUrls.length, "photos (stated:", statedFast, ")");
+        }
+        return Promise.resolve({
+          images: jsonUrls,
+          source: "json-cache",
+          capturedCount: jsonUrls.length,
+          targetPhotoCount: statedFast,
+          loadedViaAutoScroll: false,
+        });
+      }
+    } catch (e) {
+      if (typeof console !== "undefined" && console.log) {
+        console.log("[ZI] json extraction failed, falling back:", e.message || e);
+      }
+    }
+
     // 1) Try standard "See all photos" → vertical media wall (traditional listings)
     return openFullGalleryModal().then(function (opened) {
       var modalRoot = getModalRoot();
