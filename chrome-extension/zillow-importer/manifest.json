@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zillow Import",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Pair with the proposal app to import listing photos from Zillow.",
   "icons": {
     "16": "icons/icon.png",
@@ -12,6 +12,7 @@
   "host_permissions": [
     "http://localhost:3000/*",
     "https://localhost:3000/*",
+    "https://app.hhi-builders.com/*",
     "https://www.zillow.com/*",
     "https://zillow.com/*"
   ],
@@ -21,7 +22,8 @@
   "externally_connectable": {
     "matches": [
       "http://localhost:3000/*",
-      "https://localhost:3000/*"
+      "https://localhost:3000/*",
+      "https://app.hhi-builders.com/*"
     ]
   },
   "action": {
@@ -41,7 +43,8 @@
     {
       "matches": [
         "http://localhost:3000/*",
-        "https://localhost:3000/*"
+        "https://localhost:3000/*",
+        "https://app.hhi-builders.com/*"
       ],
       "js": ["appPageContentScript.js"],
       "run_at": "document_idle"

@@ -21,7 +21,7 @@
   };
   var PENDING_MAX_AGE_MS = 6 * 60 * 1000;
 
-  var DEFAULT_APP_URL = "http://localhost:3000";
+  var DEFAULT_APP_URL = "https://app.hhi-builders.com";
 
   var appUrlEl = document.getElementById("app-url");
   var pairCodeEl = document.getElementById("pair-code");

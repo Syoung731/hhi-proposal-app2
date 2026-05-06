@@ -7,8 +7,7 @@
 var ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "https://localhost:3000",
-  // Add production app URL when deployed, e.g.:
-  // "https://app.yourdomain.com",
+  "https://app.hhi-builders.com",
 ];
 
 /** Storage key for debug logging (set to "true" to enable). */

@@ -13,7 +13,7 @@
     pairedNonce: "pairedNonce",
     pairCodeLastUsed: "pairCodeLastUsed",
   };
-  var DEFAULT_APP_URL = "http://localhost:3000";
+  var DEFAULT_APP_URL = "https://app.hhi-builders.com";
 
   var pickerMetaEl = document.getElementById("picker-meta");
   var pickerSourceEl = document.getElementById("picker-source");
