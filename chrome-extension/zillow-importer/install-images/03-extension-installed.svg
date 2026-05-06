@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" width="800" height="360" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <!-- Browser window frame -->
+  <rect x="0" y="0" width="800" height="360" fill="#F5F6F8" stroke="#D1D5DB" stroke-width="1"/>
+
+  <!-- Title bar -->
+  <rect x="0" y="0" width="800" height="36" fill="#E5E7EB" stroke="#D1D5DB" stroke-width="1"/>
+  <circle cx="14" cy="18" r="5" fill="#FF5F57"/>
+  <circle cx="32" cy="18" r="5" fill="#FEBC2E"/>
+  <circle cx="50" cy="18" r="5" fill="#28C840"/>
+
+  <!-- URL bar -->
+  <rect x="80" y="9" width="640" height="18" rx="9" fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1"/>
+  <text x="92" y="22" font-size="11" fill="#6B7280" font-family="ui-monospace, 'Cascadia Code', Menlo, monospace">chrome://extensions</text>
+
+  <!-- Developer Mode toggle ON (right side) -->
+  <text x="610" y="60" font-size="13" fill="#3C4043">Developer mode</text>
+  <rect x="725" y="48" width="42" height="22" rx="11" fill="#1A73E8"/>
+  <circle cx="756" cy="59" r="9" fill="#FFFFFF"/>
+
+  <!-- Extension card -->
+  <rect x="60" y="100" width="380" height="180" rx="8" fill="#FFFFFF" stroke="#DADCE0" stroke-width="1"/>
+
+  <!-- Extension icon (orange square stand-in) -->
+  <rect x="80" y="120" width="48" height="48" rx="8" fill="#F47216"/>
+  <text x="104" y="151" font-size="22" font-weight="700" fill="#FFFFFF" text-anchor="middle">Z</text>
+
+  <!-- Extension name -->
+  <text x="146" y="138" font-size="16" font-weight="600" fill="#202124">Zillow Import</text>
+
+  <!-- Version (highlighted with red callout) -->
+  <text x="146" y="160" font-size="12" fill="#5F6368">0.3.1</text>
+  <rect x="142" y="148" width="38" height="18" rx="4" fill="none" stroke="#DC2626" stroke-width="2"/>
+
+  <!-- Description -->
+  <text x="80" y="195" font-size="12" fill="#5F6368">Pair with the proposal app to import listing</text>
+  <text x="80" y="211" font-size="12" fill="#5F6368">photos from Zillow.</text>
+
+  <!-- Bottom row: ID + toggle + buttons -->
+  <text x="80" y="245" font-size="10" fill="#80868B" font-family="ui-monospace, 'Cascadia Code', Menlo, monospace">ID: abc123def456...</text>
+
+  <!-- Reload icon (highlighted with red callout) -->
+  <g transform="translate(335, 232)">
+    <circle cx="16" cy="16" r="16" fill="#F1F3F4"/>
+    <!-- Simple curved arrow shape -->
+    <path d="M 16 7 A 9 9 0 1 1 7.5 19 L 10 19 L 6 23 L 6 19 L 10 19" fill="none" stroke="#5F6368" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <polygon points="14,4 19,7 14,10" fill="#5F6368"/>
+  </g>
+  <rect x="328" y="225" width="46" height="46" rx="23" fill="none" stroke="#DC2626" stroke-width="2"/>
+
+  <!-- Card "Enabled" toggle (right side of card) -->
+  <rect x="385" y="248" width="32" height="16" rx="8" fill="#1A73E8"/>
+  <circle cx="408" cy="256" r="6" fill="#FFFFFF"/>
+
+  <!-- Annotation arrows -->
+  <path d="M 470 158 Q 290 158 195 158" stroke="#DC2626" stroke-width="2" fill="none"/>
+  <polygon points="195,158 203,154 203,162" fill="#DC2626"/>
+  <text x="480" y="148" font-size="13" font-weight="600" fill="#DC2626">Confirm version reads 0.3.1</text>
+  <text x="480" y="166" font-size="12" fill="#3C4043">(or higher — newer is fine)</text>
+
+  <path d="M 525 248 Q 440 248 380 248" stroke="#DC2626" stroke-width="2" fill="none"/>
+  <polygon points="380,248 388,244 388,252" fill="#DC2626"/>
+  <text x="540" y="244" font-size="13" font-weight="600" fill="#DC2626">Reload icon</text>
+  <text x="540" y="260" font-size="11" fill="#3C4043">Click to refresh after each update</text>
+
+  <!-- Step badge -->
+  <circle cx="32" cy="48" r="13" fill="#1A73E8"/>
+  <text x="32" y="53" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle">✓</text>
+</svg>

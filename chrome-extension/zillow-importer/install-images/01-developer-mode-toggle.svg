@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" width="800" height="360" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <!-- Browser window frame -->
+  <rect x="0" y="0" width="800" height="360" fill="#F5F6F8" stroke="#D1D5DB" stroke-width="1"/>
+
+  <!-- Title bar -->
+  <rect x="0" y="0" width="800" height="36" fill="#E5E7EB" stroke="#D1D5DB" stroke-width="1"/>
+  <circle cx="14" cy="18" r="5" fill="#FF5F57"/>
+  <circle cx="32" cy="18" r="5" fill="#FEBC2E"/>
+  <circle cx="50" cy="18" r="5" fill="#28C840"/>
+
+  <!-- URL bar -->
+  <rect x="80" y="9" width="640" height="18" rx="9" fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1"/>
+  <text x="92" y="22" font-size="11" fill="#6B7280" font-family="ui-monospace, 'Cascadia Code', Menlo, monospace">chrome://extensions</text>
+
+  <!-- Page header -->
+  <text x="32" y="76" font-size="20" font-weight="600" fill="#202124">Extensions</text>
+
+  <!-- Developer Mode toggle area, on the right side -->
+  <text x="610" y="76" font-size="13" fill="#3C4043">Developer mode</text>
+
+  <!-- Toggle switch (OFF state) — gray pill with knob on the left -->
+  <rect x="725" y="62" width="42" height="22" rx="11" fill="#BDC1C6"/>
+  <circle cx="736" cy="73" r="9" fill="#FFFFFF" stroke="#9AA0A6" stroke-width="0.5"/>
+
+  <!-- Highlight ring around the toggle -->
+  <rect x="718" y="55" width="56" height="36" rx="18" fill="none" stroke="#DC2626" stroke-width="2.5" stroke-dasharray="4 3"/>
+
+  <!-- Annotation arrow + label -->
+  <path d="M 600 130 Q 660 115 700 90" stroke="#DC2626" stroke-width="2" fill="none"/>
+  <polygon points="700,90 692,98 695,86" fill="#DC2626"/>
+  <text x="430" y="135" font-size="14" font-weight="600" fill="#DC2626">Click this toggle to turn ON Developer mode</text>
+
+  <!-- Empty extensions area -->
+  <rect x="32" y="110" width="736" height="220" rx="8" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="1"/>
+  <text x="400" y="220" font-size="13" text-anchor="middle" fill="#9AA0A6">Your installed extensions appear here</text>
+
+  <!-- Step badge -->
+  <circle cx="32" cy="48" r="13" fill="#1A73E8"/>
+  <text x="32" y="53" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+</svg>

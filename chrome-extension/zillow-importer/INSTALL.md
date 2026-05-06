@@ -3,6 +3,11 @@
 This extension lets the HHI Proposal app import listing photos and details
 from Zillow into a project. One-time setup, ~3 minutes.
 
+> **Tip:** double-click `INSTALL.html` (next to this file inside the
+> unzipped folder) to read this doc with images in any browser.
+> Plain-text Markdown also works if you prefer; the screenshots live in
+> the `install-images/` folder.
+
 ---
 
 ## What you'll need
@@ -48,6 +53,8 @@ Top-right corner of the extensions page, flip the **Developer mode**
 toggle to ON. Three new buttons appear: **Load unpacked**, **Pack
 extension**, **Update**.
 
+![Developer mode toggle](install-images/01-developer-mode-toggle.svg)
+
 ### 5. Click "Load unpacked"
 
 A folder picker opens. Navigate to the `zillow-importer-x.y.z` folder
@@ -56,6 +63,10 @@ you extracted in step 2. Click **Select Folder** (Windows) or
 
 A new card appears on the extensions page titled **Zillow Import**
 with a version number like `0.3.1`.
+
+![Load unpacked button](install-images/02-load-unpacked-button.svg)
+
+![Installed extension card](install-images/03-extension-installed.svg)
 
 ### 6. (Recommended) Pin the extension
 

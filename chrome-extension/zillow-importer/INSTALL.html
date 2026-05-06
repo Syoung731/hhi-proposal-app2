@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Zillow Import — Chrome Extension Setup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #FAFBFC;
+    --fg: #1F2937;
+    --muted: #6B7280;
+    --border: #E5E7EB;
+    --accent: #1A73E8;
+    --warn: #DC2626;
+    --code-bg: #F3F4F6;
+    --tip-bg: #EFF6FF;
+    --tip-border: #1A73E8;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 36px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 28px 0 8px;
+    color: var(--accent);
+  }
+  p { margin: 0 0 14px; }
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 32px 0;
+  }
+  code {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 14px;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 12px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 12px 0;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+  }
+  .lead {
+    color: var(--muted);
+    font-size: 17px;
+    margin-bottom: 24px;
+  }
+  .tip {
+    background: var(--tip-bg);
+    border-left: 4px solid var(--tip-border);
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 15px;
+  }
+  .tip strong { color: var(--accent); }
+  ul, ol { padding-left: 24px; margin: 0 0 14px; }
+  li { margin: 4px 0; }
+  img {
+    display: block;
+    max-width: 100%;
+    margin: 16px auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #FFFFFF;
+  }
+  .step-list { counter-reset: step; padding-left: 0; list-style: none; }
+  .step-list > li {
+    margin: 28px 0;
+    padding-left: 44px;
+    position: relative;
+  }
+  .step-list > li::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    text-align: center;
+    background: var(--accent);
+    color: #FFFFFF;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .step-list h3 {
+    margin-top: 0;
+    color: var(--fg);
+  }
+  .footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Zillow Import — Chrome Extension Setup</h1>
+<p class="lead">
+  This extension lets the HHI Proposal app import listing photos and
+  details from Zillow into a project. One-time setup, about 3 minutes.
+</p>
+
+<h2>What you'll need</h2>
+<ul>
+  <li>Google Chrome (any recent version)</li>
+  <li>The <code>zillow-importer-x.y.z.zip</code> file Steve sent you</li>
+  <li>About 3 minutes</li>
+</ul>
+
+<h2>Steps</h2>
+
+<ol class="step-list">
+
+<li>
+  <h3>Save the .zip somewhere permanent</h3>
+  <p>
+    Move the <code>zillow-importer-x.y.z.zip</code> file to a folder you
+    won't accidentally delete later. A <code>Tools</code> or <code>Apps</code>
+    folder under <code>Documents</code> works well.
+  </p>
+  <div class="tip">
+    <strong>Important:</strong> the unzipped folder needs to stay in the same
+    place after installation. If you move or delete it, the extension stops
+    working.
+  </div>
+</li>
+
+<li>
+  <h3>Unzip it</h3>
+  <ul>
+    <li><strong>Windows:</strong> right-click the <code>.zip</code> &rarr;
+      <strong>Extract All&hellip;</strong> &rarr; pick the same folder, click
+      Extract. You'll get a folder named <code>zillow-importer-x.y.z</code>
+      containing files like <code>manifest.json</code>, <code>background.js</code>, etc.</li>
+    <li><strong>Mac:</strong> double-click the <code>.zip</code>. It expands into
+      a folder next to it.</li>
+  </ul>
+</li>
+
+<li>
+  <h3>Open Chrome's extensions page</h3>
+  <p>In Chrome, paste this into the address bar and hit Enter:</p>
+  <pre><code>chrome://extensions</code></pre>
+  <p style="font-size: 14px; color: var(--muted);">
+    (You can't click a regular link to <code>chrome://</code> URLs &mdash; Chrome
+    blocks it. Copy and paste manually.)
+  </p>
+</li>
+
+<li>
+  <h3>Turn on Developer Mode</h3>
+  <p>
+    Top-right corner of the extensions page, flip the <strong>Developer mode</strong>
+    toggle to ON. Three new buttons appear: <strong>Load unpacked</strong>,
+    <strong>Pack extension</strong>, <strong>Update</strong>.
+  </p>
+  <img src="install-images/01-developer-mode-toggle.svg" alt="Developer mode toggle highlighted in the top-right of chrome://extensions">
+</li>
+
+<li>
+  <h3>Click "Load unpacked"</h3>
+  <p>
+    A folder picker opens. Navigate to the <code>zillow-importer-x.y.z</code>
+    folder you extracted in step 2. Click <strong>Select Folder</strong>
+    (Windows) or <strong>Open</strong> (Mac).
+  </p>
+  <img src="install-images/02-load-unpacked-button.svg" alt="Load unpacked button highlighted with a red border">
+  <p>A new card appears on the extensions page:</p>
+  <img src="install-images/03-extension-installed.svg" alt="The Zillow Import extension card showing version 0.3.1 with the reload icon highlighted">
+</li>
+
+<li>
+  <h3>(Recommended) Pin the extension</h3>
+  <p>
+    Click the puzzle-piece icon to the right of Chrome's address bar, find
+    <strong>Zillow Import</strong> in the dropdown, click the pin icon next to it.
+    The Zillow Import icon now lives next to your address bar so you can
+    see when it's active.
+  </p>
+</li>
+
+<li>
+  <h3>Test the connection</h3>
+  <ol>
+    <li>Open <code>https://app.hhi-builders.com</code> and sign in.</li>
+    <li>Open any project, go to the <strong>Media</strong> tab.</li>
+    <li>Click <strong>Import from Zillow</strong>.</li>
+  </ol>
+  <p>
+    If the connection works, you'll see the Zillow URL input field directly
+    (no "Connect Browser" modal). You're done.
+  </p>
+  <p>
+    If you still see the <strong>Connect Browser</strong> modal after step 7, see
+    <strong>Troubleshooting</strong> below.
+  </p>
+</li>
+
+</ol>
+
+<hr>
+
+<h2>Troubleshooting</h2>
+
+<h3>"Connect Browser" modal still appears after install</h3>
+<p>
+  Go to <code>chrome://extensions</code>, find <strong>Zillow Import</strong>,
+  and click the <strong>circular reload icon</strong> (looks like &#x21bb;) on
+  its card. Then refresh the proposal app and try again.
+</p>
+<p>
+  If that doesn't fix it, confirm the version on the extension card reads
+  <code>0.3.1</code> or higher. If it reads <code>0.3.0</code> or lower, the
+  cached build is stale &mdash; repeat steps 1&ndash;5 with the new .zip Steve sent.
+</p>
+
+<h3>Yellow banner: "Disable developer mode extensions"</h3>
+<p>
+  Chrome shows this once per browser restart when any developer-mode
+  extension is loaded. It's expected. Click the <strong>X</strong> to
+  dismiss; it does NOT mean the extension is broken. Chrome behaves this
+  way on purpose to discourage installing random unsigned extensions
+  &mdash; for one we built in-house, you can ignore it.
+</p>
+<p>
+  If the warning is annoying you, the medium-term fix is publishing the
+  extension to the Chrome Web Store (no developer mode required). Talk to
+  Steve if you want that prioritized.
+</p>
+
+<h3>Extension card shows red "Errors" button</h3>
+<p>
+  Click it, screenshot whatever's there, send it to Steve. Almost always
+  this is a stale download &mdash; re-extract the .zip and click
+  <strong>Reload</strong>.
+</p>
+
+<h3>"Open Chrome Extensions" button in the app doesn't do anything</h3>
+<p>
+  That button is a known limitation &mdash; Chrome blocks pages from
+  programmatically opening <code>chrome://</code> URLs. Use <strong>step 3</strong>
+  above (paste <code>chrome://extensions</code> into the address bar manually).
+</p>
+
+<hr>
+
+<h2>Updating to a new version</h2>
+<p>
+  When Steve sends you a new <code>.zip</code> (different version number in the
+  filename):
+</p>
+<ol>
+  <li>Save and unzip the new file the same way as steps 1&ndash;2 above.</li>
+  <li>Go to <code>chrome://extensions</code>, find Zillow Import.</li>
+  <li>Click <strong>Remove</strong> on the old version's card.</li>
+  <li>Click <strong>Load unpacked</strong> and pick the NEW unzipped folder.</li>
+  <li>Repin (step 6).</li>
+</ol>
+<p>
+  (There's a shortcut: if the folder path stays the same and you just
+  overwrite the contents with the new files, you can hit the reload icon
+  on the existing card instead. But removing and re-adding is foolproof.)
+</p>
+
+<hr>
+
+<h2>Uninstalling</h2>
+<p>
+  <code>chrome://extensions</code> &rarr; Zillow Import card &rarr;
+  <strong>Remove</strong>. Done. The app's "Connect Browser" modal will reappear
+  next time you click Import from Zillow, so you can always reinstall if
+  needed.
+</p>
+
+<div class="footer">
+  HHI Builders Proposal App &middot; Zillow Import extension v0.3.1
+</div>
+
+</body>
+</html>
