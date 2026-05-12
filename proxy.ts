@@ -49,10 +49,15 @@ const isPublicRoute = createRouteMatcher([
 // route stays Clerk-gated; only the page Playwright loads needs to bypass.
 const PROPOSAL_PAGE_RE = /^\/proposals\/([^/]+)\/?$/;
 
-// Budget-print page — internal admin-only print view that the budget PDF
-// route drives Playwright to. Same pdfToken bypass mechanism as proposal
-// PDFs, but keyed on projectId (the token already supports that field).
-const BUDGET_PRINT_PAGE_RE = /^\/admin\/projects\/([^/]+)\/budget-print\/?$/;
+// Budget-print page — internal print view that the budget PDF route
+// drives Playwright to. Same pdfToken bypass mechanism as proposal PDFs,
+// but keyed on projectId (the token already supports that field).
+//
+// Lives at /budget-print/ (top level) rather than under /admin/ so it
+// doesn't inherit the admin layout's Clerk chrome — Chromium has no
+// session and any server-rendered Clerk component would throw
+// UnauthorizedError during SSR before data-print-ready could fire.
+const BUDGET_PRINT_PAGE_RE = /^\/budget-print\/([^/]+)\/?$/;
 
 /**
  * Returns the snapshotId from a valid pdfToken on a `/proposals/{snapshotId}`
@@ -94,28 +99,13 @@ async function pdfTokenProjectIdOrNull(request: Request): Promise<string | null>
   try {
     pathProjectId = decodeURIComponent(match[1]);
   } catch {
-    console.log("[pdfBypass] decodeURIComponent failed for", match[1]);
     return null;
   }
   const token = url.searchParams.get("pdfToken");
-  if (!token) {
-    console.log("[pdfBypass] no pdfToken on budget-print URL", pathProjectId);
-    return null;
-  }
+  if (!token) return null;
   const verified = await verifyPdfRenderToken(token);
-  if (!verified) {
-    // Either bad shape, bad signature, or expired. Token length helps
-    // distinguish (very short = mint failed; expired = full length).
-    console.log("[pdfBypass] verifyPdfRenderToken returned null. tokenLen=", token.length);
-    return null;
-  }
-  if (verified.projectId !== pathProjectId) {
-    console.log(
-      "[pdfBypass] projectId mismatch — tokenPid=", verified.projectId,
-      "pathPid=", pathProjectId,
-    );
-    return null;
-  }
+  if (!verified) return null;
+  if (verified.projectId !== pathProjectId) return null;
   return verified.projectId;
 }
 

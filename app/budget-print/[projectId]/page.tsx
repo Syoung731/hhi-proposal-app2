@@ -6,14 +6,23 @@
  * URL with `?print=1&pdfToken=...`, and waits for
  * `[data-print-ready="true"]` before calling `page.pdf()`.
  *
+ * # Why this lives at /budget-print/ instead of /admin/.../budget-print
+ * Pages under /admin/ inherit AdminLayoutChrome, which renders Clerk's
+ * <UserButton> and other auth-aware components. The headless Chromium
+ * browser the PDF route uses has no Clerk session, so those components
+ * throw UnauthorizedError during SSR and the page renders an error
+ * boundary — never flips data-print-ready. Hoisting this route to the
+ * top level skips the admin chrome entirely; it only inherits the root
+ * layout (ClerkProvider + fonts), which is passive.
+ *
  * Layout: landscape Letter. Each room renders as a section with
  * trade-grouped tables; group + room subtotals shown inline. COPE room
  * appears last with a tinted header so the human flipping pages sees
  * which section is project overhead.
  *
- * Auth: gated by Clerk via proxy.ts. The PDF route's pdfToken bypass
- * (extended to cover `/admin/projects/{id}/budget-print`) lets the
- * headless browser through.
+ * Auth: Clerk-gated by proxy.ts. The PDF route's pdfToken bypass
+ * (which checks the projectId field of the token against the URL
+ * projectId) lets the headless browser through.
  */
 
 import { notFound } from "next/navigation";
@@ -28,11 +37,11 @@ import { PrintReadySignal } from "./print-ready";
 export const dynamic = "force-dynamic";
 
 interface PageProps {
-  params: Promise<{ id: string }>;
+  params: Promise<{ projectId: string }>;
 }
 
 export default async function BudgetPrintPage({ params }: PageProps) {
-  const { id: projectId } = await params;
+  const { projectId } = await params;
 
   let exp: BudgetExport;
   try {
