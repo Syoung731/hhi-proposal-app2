@@ -94,13 +94,28 @@ async function pdfTokenProjectIdOrNull(request: Request): Promise<string | null>
   try {
     pathProjectId = decodeURIComponent(match[1]);
   } catch {
+    console.log("[pdfBypass] decodeURIComponent failed for", match[1]);
     return null;
   }
   const token = url.searchParams.get("pdfToken");
-  if (!token) return null;
+  if (!token) {
+    console.log("[pdfBypass] no pdfToken on budget-print URL", pathProjectId);
+    return null;
+  }
   const verified = await verifyPdfRenderToken(token);
-  if (!verified) return null;
-  if (verified.projectId !== pathProjectId) return null;
+  if (!verified) {
+    // Either bad shape, bad signature, or expired. Token length helps
+    // distinguish (very short = mint failed; expired = full length).
+    console.log("[pdfBypass] verifyPdfRenderToken returned null. tokenLen=", token.length);
+    return null;
+  }
+  if (verified.projectId !== pathProjectId) {
+    console.log(
+      "[pdfBypass] projectId mismatch — tokenPid=", verified.projectId,
+      "pathPid=", pathProjectId,
+    );
+    return null;
+  }
   return verified.projectId;
 }
 

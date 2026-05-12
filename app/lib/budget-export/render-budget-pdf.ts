@@ -56,6 +56,9 @@ export async function renderBudgetPdf(
     `${baseUrl}/admin/projects/${encodeURIComponent(projectId)}/budget-print` +
     `?print=1&pdfToken=${encodeURIComponent(pdfToken)}`;
 
+  console.log("[renderBudgetPdf] driving Chromium to:", targetUrl.slice(0, 120) + "...");
+  console.log("[renderBudgetPdf] pdfToken length:", pdfToken.length, "projectId:", projectId);
+
   const isLocal = process.env.NODE_ENV === "development";
   const launchOptions = isLocal
     ? { headless: true }
@@ -72,7 +75,27 @@ export async function renderBudgetPdf(
     });
     const page = await context.newPage();
     await page.goto(targetUrl, { waitUntil: "networkidle", timeout: 45000 });
-    await page.waitForSelector('[data-print-ready="true"]', { timeout: 30000 });
+    console.log(
+      "[renderBudgetPdf] post-goto url:", page.url(),
+      "title:", await page.title().catch(() => "(no title)"),
+    );
+    try {
+      await page.waitForSelector('[data-print-ready="true"]', { timeout: 30000 });
+    } catch (selErr) {
+      // Capture what's actually on the page when the selector never
+      // appears — sign-in HTML body is the smoking gun for a bypass
+      // failure; an error-boundary body points at SSR errors.
+      const headBody = await page.evaluate(() => {
+        return {
+          title: document.title,
+          bodyStart: document.body?.innerText?.slice(0, 300) ?? "",
+          hasReady: document.documentElement.getAttribute("data-print-ready"),
+          url: location.href,
+        };
+      }).catch((e) => ({ evalError: String(e) }));
+      console.log("[renderBudgetPdf] data-print-ready timeout. Page state:", headBody);
+      throw selErr;
+    }
 
     const pdfBuffer = await page.pdf({
       // Letter landscape — @page rule in the print stylesheet drives the
