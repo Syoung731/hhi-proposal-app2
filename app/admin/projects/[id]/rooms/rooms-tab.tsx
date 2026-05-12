@@ -31,6 +31,7 @@ import { NewRoomTypesModal } from "./new-room-types-modal";
 import { AIEstimatePanel } from "./ai-estimate-panel";
 import { BulkReviewAndEstimateModal } from "./bulk-review-and-estimate-modal";
 import { RetryFailedRoomsBar } from "./retry-failed-rooms-bar";
+import { BudgetExportButton } from "./budget-export-button";
 import { ScopeReviewModal, type ReviewQuestion } from "./scope-review-modal";
 import { formatInchesToFeetInches, parseFeetInchesToInches } from "@/app/lib/dimensions";
 import { getEffectiveMeasurementMode, computeUnitQuantity } from "@/app/lib/section-unit-quantity";
@@ -1781,6 +1782,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           >
             Generate AI Estimates
           </button>
+          <BudgetExportButton projectId={projectId} disabled={!rooms.length} />
           <span className="ml-2 flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
             Default Ceiling Height:
             <input
