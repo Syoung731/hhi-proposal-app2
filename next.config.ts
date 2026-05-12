@@ -9,6 +9,18 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "5mb",
     },
   },
+  // Keep @sparticuz/chromium and playwright-core out of the server bundle.
+  // The Sparticuz package ships its Chromium binary in a `bin/` directory
+  // that Webpack/Turbopack relocates away from at build time — leaving the
+  // runtime code looking for `/var/task/node_modules/@sparticuz/chromium/bin`
+  // which no longer exists. Externalizing tells Next.js to require these
+  // from node_modules at runtime instead of bundling them.
+  //
+  // Affects both:
+  //   GET /proposals/{snapshotId}/pdf
+  //   GET /api/projects/{id}/budget-export/pdf
+  // both of which drive playwright-core to Chromium via @sparticuz/chromium.
+  serverExternalPackages: ["@sparticuz/chromium", "playwright-core"],
   // Resolve node: built-ins for Turbopack server chunks (avoids ChunkLoadError for node:crypto)
   turbopack: {
     resolveAlias: {
