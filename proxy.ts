@@ -49,6 +49,11 @@ const isPublicRoute = createRouteMatcher([
 // route stays Clerk-gated; only the page Playwright loads needs to bypass.
 const PROPOSAL_PAGE_RE = /^\/proposals\/([^/]+)\/?$/;
 
+// Budget-print page — internal admin-only print view that the budget PDF
+// route drives Playwright to. Same pdfToken bypass mechanism as proposal
+// PDFs, but keyed on projectId (the token already supports that field).
+const BUDGET_PRINT_PAGE_RE = /^\/admin\/projects\/([^/]+)\/budget-print\/?$/;
+
 /**
  * Returns the snapshotId from a valid pdfToken on a `/proposals/{snapshotId}`
  * page request, or null if the path doesn't match, the token is absent, the
@@ -72,9 +77,37 @@ async function pdfTokenSnapshotIdOrNull(request: Request): Promise<string | null
   return verified.snapshotId;
 }
 
+/**
+ * Returns the projectId from a valid pdfToken on a
+ * `/admin/projects/{projectId}/budget-print` request, or null if anything
+ * fails (path mismatch, missing token, bad signature, projectId mismatch).
+ *
+ * Same token format as the proposal PDF flow — we just use the
+ * `projectId` field instead of `snapshotId` for path comparison. The
+ * budget PDF route mints tokens with both fields populated.
+ */
+async function pdfTokenProjectIdOrNull(request: Request): Promise<string | null> {
+  const url = new URL(request.url);
+  const match = url.pathname.match(BUDGET_PRINT_PAGE_RE);
+  if (!match) return null;
+  let pathProjectId: string;
+  try {
+    pathProjectId = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+  const token = url.searchParams.get("pdfToken");
+  if (!token) return null;
+  const verified = await verifyPdfRenderToken(token);
+  if (!verified) return null;
+  if (verified.projectId !== pathProjectId) return null;
+  return verified.projectId;
+}
+
 export default clerkMiddleware(async (auth, request) => {
   if (isPublicRoute(request)) return;
   if (await pdfTokenSnapshotIdOrNull(request)) return NextResponse.next();
+  if (await pdfTokenProjectIdOrNull(request)) return NextResponse.next();
   await auth.protect();
 });
 
