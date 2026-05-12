@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node node_modules/tsx/dist/cli.mjs scripts/dev-context-task-runner.ts dev-server -- node node_modules/tsx/dist/cli.mjs scripts/dev-with-dev-context.ts",
-    "build": "node node_modules/tsx/dist/cli.mjs scripts/dev-context-task-runner.ts build -- node node_modules/next/dist/bin/next build",
-    "vercel-build": "prisma migrate deploy && next build",
+    "build": "node node_modules/tsx/dist/cli.mjs scripts/dev-context-task-runner.ts build -- node node_modules/next/dist/bin/next build --webpack",
+    "vercel-build": "prisma migrate deploy && next build --webpack",
     "start": "next start",
     "lint": "node node_modules/tsx/dist/cli.mjs scripts/dev-context-task-runner.ts lint -- node node_modules/eslint/bin/eslint.js",
     "typecheck": "tsc --noEmit",
