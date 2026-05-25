@@ -1,0 +1,1453 @@
+============================================================
+DISPLAY APP HANDOFF — Technical Audit of hhi-proposal-app2
+============================================================
+
+Purpose: this report captures everything the Display app planner
+needs to know about the Proposal App. The Display app's "Welcome"
+screens are conceptually the same as proposal cover slides
+(fullscreen, hero image, headline text), so most of the report
+focuses on the slide editor, slide primitives, design tokens,
+and AI background generation. Other modes (photo carousel,
+YouTube) are not present in this app and will be greenfield.
+
+A note on scope of facts: I read the source. Where the user's
+prompt described something that does NOT exist in code (notably
+the Imagen 4 `imagen-4.0-fast-generate-001` model and "curated
+background library" specifics) I flag that explicitly.
+
+============================================================
+0. EXECUTIVE TL;DR
+============================================================
+
+- Framework: Next.js 16.1.6, App Router, React 19.2, TypeScript
+  strict, Tailwind v4 (PostCSS). Server Actions everywhere; no
+  tRPC or REST layer for app data. Clerk for admin auth. Prisma
+  7 + Postgres (Neon via PrismaPg adapter). R2-compatible
+  S3 storage. Playwright for server-side PDF rendering.
+
+- State: per-page React useState in client components.
+  Persistence = server actions writing to Prisma. No Redux,
+  no Zustand, no React Query. Cross-page state for the public
+  viewer goes through one Context (`ProposalProvider`).
+
+- The "slide editor" is a master/detail UI: a left page list +
+  a right page editor that branches by page kind (cover,
+  objective, why us, room/section, rollup). State of truth is
+  one big JSON blob (`Proposal.publicLayoutConfig`).
+
+- Slides are not composed from generic primitives like "title
+  block / text block / image block". Each page has its own
+  bespoke renderer component with hardcoded design choices.
+  Layout variants are toggles (`heroOverlay | splitCover |
+  titlePlate`, `gridCards | stacked | columns | simple |
+  iconRows`, etc.) — not a freeform canvas.
+
+- Cover-page primitives = three React components in
+  `components/public/blocks/`: `EditorialHero`, `SplitCover`,
+  `TitlePlate`. These are the closest analog to the Display
+  app's Welcome screen and they are the cleanest extraction
+  candidate.
+
+- AI image generation = Google `@google/genai` SDK with the
+  Gemini image model `gemini-2.5-flash-image`. There is NO
+  Google Imagen 4 / `imagen-4.0-fast-generate-001` integration
+  in this repo. The prompt fixture used for backgrounds asks
+  for "seamless, tileable, subtle background texture". Outputs
+  are uploaded to R2 and recorded as `BrandBackground` rows
+  with separate base color + overlay image/icon composition.
+
+- There is NO CLAUDE.md, no AGENTS.md, no husky hooks, no
+  auto-commit infrastructure. Commit history is small (~13
+  commits, single dev). Branches/PR conventions exist only in
+  the user's session prompt, not in the repo.
+
+============================================================
+1. OVERALL ARCHITECTURE
+============================================================
+
+------------------------------------------------------------
+1.1 Stack & dependencies
+------------------------------------------------------------
+
+File: `package.json`
+
+Runtime:
+- next 16.1.6
+- react 19.2.3 / react-dom 19.2.3
+- typescript 5.x (strict mode, `moduleResolution: bundler`,
+  `target: ES2017`, JSX `react-jsx`)
+- tailwindcss 4 via `@tailwindcss/postcss`
+
+Data & infra:
+- @prisma/client 7.4 + prisma 7.4 + @prisma/adapter-pg 7.4 +
+  pg 8.18 (no Accelerate; direct Postgres via adapter)
+- @clerk/nextjs 6.9 (admin auth + middleware)
+- @aws-sdk/client-s3 3.700 + @aws-sdk/s3-request-presigner
+  (works with Cloudflare R2)
+- @vercel/blob 2.3 (legacy artifact; not used in current code
+  paths I read)
+- @upstash/qstash 2.9 (present, only used in a test script)
+- sharp 0.33 (server-side image processing — PNG of generated
+  background previews)
+- playwright 1.49 (server-side PDF rendering)
+
+AI:
+- @google/genai 1.42 (current Gemini SDK — image gen for
+  rooms, covers, brand icons, brand backgrounds)
+- @google/generative-ai 0.24.1 (older SDK; used only by
+  `app/lib/rendering/provider.ts` as a parallel render path)
+- openai 6.23 (used only for transcript → structured JSON
+  extraction; gpt-5.2 referenced in code as default model
+  via OPENAI_MODEL env)
+
+UI helpers:
+- @dnd-kit/core + sortable + utilities (drag-reorder lists)
+- clsx 2.1, tailwind-merge 2.6
+- zod 4.3 (validation; lightly used)
+- semver 7.7
+- data-uri-to-buffer 6.0
+
+Build/runtime config: `next.config.ts`
+- Turbopack alias for node: builtins (`node:crypto` →
+  `crypto`, etc.) — workaround for Turbopack chunk loader
+  issues.
+- `images.remotePatterns` allowlists two hosts only:
+  `pub-2d4238639a274f32ba8641274e00f39c.r2.dev` and
+  `media.hhi-builders.com`. Anything else falls back to
+  plain `<img>` in code via `isAllowedHostForNextImage`.
+
+------------------------------------------------------------
+1.2 Directory layout
+------------------------------------------------------------
+
+`app/`                          — Next.js App Router root
+`app/admin/`                    — Admin (Clerk-gated) UI
+`app/admin/layout.tsx`          — Auth gate + chrome
+`app/admin/AdminLayoutChrome.tsx` — Header with logo + nav
+`app/admin/admin-nav.tsx`       — Top nav (Home, Projects, Settings)
+`app/admin/page.tsx`            — Admin home with two big cards
+`app/admin/projects/[id]/`      — Per-project editing tabs
+   `page.tsx`, `tabs.tsx`       — Tabs: Overview / Sections (Rooms)
+                                  / Media / Timeline / Investment /
+                                  Presentation / Preview & Publish
+   `overview/`, `media/`,
+   `rooms/`, `timeline/`,
+   `investment/`,
+   `publish/`,
+   `(preview)/`, `preview/`,
+   `presentation/`              — The slide builder (see §2)
+`app/admin/settings/`           — Company-wide settings
+   `branding/`                  — Logos + colors + icons +
+                                  backgrounds (AI generation
+                                  lives in `backgrounds/actions.ts`)
+   `presentation/value-pillars/` — Default Why Us copy
+   `photo-library/`             — Global LibraryMedia CRUD
+   `room-types-tab.tsx`,
+   `section-types-tab.tsx`,
+   `style-presets-tab.tsx`      — Catalog admin
+`app/api/`                      — Tiny: health checks, presigned
+                                  branding upload, qstash test
+`app/components/`               — Server/client React (mixed)
+   `presentation/presentation-frame.tsx` — Background/transition
+                                  wrapper applied to the public
+                                  proposal pages
+   `presentation/objective/`    — Objective template A/B/C
+                                  renderers + layout constants
+   `proposal-from-snapshot.tsx` — Legacy single-page render
+                                  from snapshot (used by PDF)
+`app/generated/prisma/`         — Generated Prisma client
+                                  (committed; not checked in
+                                  per .gitignore)
+`app/lib/`                      — Shared server + browser-safe
+                                  helpers (auth, prisma, s3,
+                                  media, layout-config,
+                                  gemini, sections, etc.)
+`app/lib/ai/`                   — OpenAI prompts:
+                                  extract-from-transcript,
+                                  objective-content,
+                                  template-c-columns,
+                                  why-us-fit
+`app/lib/rendering/provider.ts` — Older Gemini render entry
+                                  (RENDER_PROVIDER=gemini)
+`app/p/[id]/`                   — PUBLIC proposal viewer
+   `layout.tsx`                 — Provider + shell
+   `ProposalContext.tsx`        — Cross-page context
+   `cover/`, `objective/`,
+   `difference/`, `closing/`,
+   `investment/`, `timeline/`,
+   `next-steps/`, `scope/`,
+   `section/[roomId]/`,
+   `additional-sections/`       — Per-chapter pages, each its
+                                  own server component
+   `[pageId]/page.tsx`          — Catch-all that 404s unknown ids
+   `pdf/route.ts`               — Playwright PDF route
+`app/sign-in`, `app/sign-up`    — Clerk UI mounts
+`app/globals.css`               — Tailwind v4 import + a few
+                                  CSS vars + one keyframe
+                                  (`proposal-chapter-fade`)
+`components/`                   — Reusable React shared across
+                                  admin + public:
+   `ui/reorderable-list.tsx`    — dnd-kit drag list
+   `public/cover/`              — `CoverRenderer` + `resolveCoverHeroMedia`
+   `public/blocks/`             — Editorial primitives:
+                                  EditorialHero, SplitCover,
+                                  TitlePlate, EditorialGallery,
+                                  EditorialTwoCol, EditorialSectionHeading
+   `public/objective/`          — ObjectiveRenderer (templates A & default)
+   `public/section/`            — Section page templates (Split,
+                                  ComparisonCollage)
+   `public/Proposal*`           — Shell, drawer nav, prev/next,
+                                  progress dots, full-page wrapper
+   `presentation/why-us/`       — Why Us multi-variant renderer
+                                  (1090 lines, very feature-rich)
+`prisma/schema.prisma`          — Single 554-line schema
+`prisma/migrations/`            — 39 migrations dated Feb–Mar 2026
+`prisma/seed.ts`                — Seed script (referenced in
+                                  package.json "prisma.seed")
+`middleware.ts`                 — Clerk middleware; only runs on
+                                  `/admin`, `/sign-in`, `/sign-up`,
+                                  `/api`, `/trpc`. `/`, `/p/*`
+                                  bypass middleware entirely.
+`scripts/`                      — `qstash-test.ts`, two
+                                  verify-section-* scripts
+`docs/`                         — IMAGE-AUDIT.md, COVER_GENERATION_DELIVERABLES.md
+`README.md`                     — Quickstart + flow
+`VERIFICATION.md`               — Manual test recipes
+`.env.example`                  — DATABASE_URL, CLERK_*,
+                                  ADMIN_EMAILS/IDS, R2_*,
+                                  GEMINI_IMAGE_MODEL
+
+------------------------------------------------------------
+1.3 Routing & middleware
+------------------------------------------------------------
+
+App Router with route groups. Three trees:
+
+  /                            — public marketing (just the
+                                  Next default index page;
+                                  bypasses middleware entirely)
+  /admin/**                    — Clerk-gated, admin allowlist
+  /p/[id]/**                   — Public proposal viewer
+                                  (also bypasses middleware;
+                                  auth happens in the server
+                                  component via
+                                  `getPublicProposalSnapshot`
+                                  which checks `proposal.isPublic`)
+
+`middleware.ts` exports `config.matcher` listing ONLY
+`/admin/:path*`, `/sign-in/:path*`, `/sign-up/:path*`,
+`/api/:path*`, `/trpc/:path*` — so middleware never even
+loads for `/` or `/p/*`. This avoids Clerk JS on the public
+viewer.
+
+Admin allowlist: env `ADMIN_EMAILS` / `ADMIN_USER_IDS`
+(CSV), plus a Super Admin email in
+`app/lib/constants.ts` (file is 2 lines; constant is
+`SUPER_ADMIN_EMAIL`), plus `Employee.isAdmin` lookup in DB
+(`app/lib/auth.ts`).
+
+------------------------------------------------------------
+1.4 Data layer / persistence
+------------------------------------------------------------
+
+ORM: Prisma 7 with the Postgres driver adapter (no Accelerate
+or Data Proxy). The single client is cached on `globalThis`
+in dev to survive HMR (`app/lib/prisma.ts`), with a
+defensive check that the cached client still has expected
+delegates (Company, ValuePillar). This is a workaround for
+HMR + schema-changed regenerations.
+
+There is no GraphQL/tRPC/REST layer for app data. All
+mutations are Next.js Server Actions in files named
+`actions.ts` co-located with the route, and reads are direct
+Prisma calls in server components. Server actions all start
+with `await requireAdmin();` for admin auth.
+
+Important model summary (`prisma/schema.prisma`):
+
+- `Project` (the top-level proposal record): owner names,
+  address, title, subtitle, objective, status (DRAFT |
+  PUBLISHED | ARCHIVED), `coverHeroImageId`,
+  `stylePresetId`, `publishedVersion`, and `transcriptText`
+  (the raw transcript that OpenAI parses into Overview +
+  Rooms).
+- `Proposal` (1:1 with Project): houses `isPublic` and the
+  big `publicLayoutConfig` Json blob for the slide deck.
+- `Room` (renamed conceptually to "Section"): per-section
+  scope narrative + measurement/pricing fields. Many added
+  later (pricing buckets, dimensions, unit qty override).
+  Schema shows clear evolution.
+- `Media`: project-scoped images with `kind` (COVER, BEFORE,
+  AFTER, INSPIRATION, PLAN, TEAM, OTHER), `type` (HERO,
+  EXISTING, RENDERING), `placement` (SECTION, FRONT_PAGE,
+  UNASSIGNED). Render tracking columns: renderStatus,
+  renderProvider, renderModel, parentMediaId, sourceMediaId,
+  editInstruction, promptVersion.
+- `PublishedSnapshot`: immutable JSON snapshot of a published
+  proposal version. Used by `/p/[id]/*` rendering and PDF.
+- `CompanySettings`: singleton row with logos, brand colors
+  (primaryColorHex, textColorHex), default disclaimer, etc.
+- `Company` + `ValuePillar` + `WhyUsDefaults`: single-tenant
+  "Why Us" defaults shared across projects.
+- `BrandIcon`: PNG icon library (small icons for Template C
+  columns, Why Us pillars). AI-generated via Gemini.
+- `BrandBackground`: a curated/AI-generated background
+  texture library (base hex + optional overlay image OR
+  overlay icon + opacity/scale/spacing/rotation knobs +
+  cached PNG preview). See §5.
+- `LibraryMedia` + `LibraryTag`: global photo library across
+  projects ("past work").
+- `RoomType`, `SectionType`, `StylePreset`: catalog tables.
+- `Employee`: people on the team (used for admin allowlist).
+
+Migrations are timestamped 20260223–20260305 (clearly future-
+dated; the dev machine clock is in 2026). 39 migrations
+applied since the initial schema; the model has churned a
+lot — particularly around section pricing buckets, room
+dimension/measurement, and value-pillar/why-us refactors.
+
+------------------------------------------------------------
+1.5 State management approach
+------------------------------------------------------------
+
+- Server components do data loads via Prisma; results are
+  serialized down to client components as props.
+- Client components hold state with `useState` / `useReducer`.
+  No global store.
+- Cross-component state in the public viewer flows through
+  one `ProposalContext` (`app/p/[id]/ProposalContext.tsx`)
+  that includes the snapshot, derived sections list, layout
+  config, and presentation settings.
+- The presentation editor (master/detail page list + editor)
+  holds the entire `PresentationConfigSaved` JSON blob in one
+  parent `useState` (`PresentationTab`). All child editors
+  receive `onConfigChange` and mutate immutably.
+- Persistence: a single "Save" button calls
+  `savePresentationLayoutAction` which writes the whole blob
+  back to `Proposal.publicLayoutConfig`. There is no
+  optimistic update / autosave / undo. Status states are a
+  4-tuple `"idle" | "saving" | "saved" | "error"`.
+
+------------------------------------------------------------
+1.6 Auth & admin gating
+------------------------------------------------------------
+
+`app/lib/auth.ts`:
+- `checkIsAdmin()` — boolean check used by viewer fallback so
+  admins can see unpublished/draft proposals.
+- `requireAdmin()` — throws on non-admin. Called at the top
+  of every server action and protected server component.
+- Admin sources: SUPER_ADMIN_EMAIL constant + ADMIN_EMAILS
+  env + ADMIN_USER_IDS env + `Employee.isAdmin` row.
+
+------------------------------------------------------------
+1.7 Storage / R2 / image pipeline
+------------------------------------------------------------
+
+`app/lib/s3.ts`:
+- Single S3-compatible client (R2 by default; AWS S3
+  fallbacks honored). Three helpers:
+  - `getPresignedUploadUrl(fileKey, contentType)` — used by
+    client-side direct uploads.
+  - `uploadBuffer(fileKey, body, contentType)` — used by
+    server-side AI image flows (e.g. write generated PNG
+    directly to R2).
+  - `deleteR2Objects(keys[])` — batched delete, all-or-
+    nothing.
+
+`app/lib/media.ts`:
+- `isBadPlaceholderUrl(url)` — treats placehold.co etc as
+  empty/missing.
+- `isAllowedHostForNextImage(url)` — boolean gate that
+  shadows the Next config allowlist so the app can fall back
+  to `<img>` instead of `<Image>` when a host isn't yet
+  configured. Hostnames hardcoded; must be kept in sync with
+  `next.config.ts`.
+
+The presigned-upload pattern: client POSTs a request to a
+small route (e.g. `app/api/settings/branding/upload/route.ts`)
+which returns `{ uploadUrl, publicUrl }`. Client then PUTs the
+file directly to R2 with the presigned URL. The `publicUrl`
+gets stored in DB.
+
+------------------------------------------------------------
+1.8 PDF export
+------------------------------------------------------------
+
+`app/p/[id]/pdf/route.ts`:
+- Launches headless Chromium via `playwright`.
+- Navigates to `${BASE_URL}/p/${id}?print=1` and grabs the
+  PDF. `BASE_URL` resolves from NEXT_PUBLIC_APP_URL or
+  VERCEL_URL or localhost.
+- Returns `Content-Disposition: attachment`.
+- No auth; relies on `proposal.isPublic` check beforehand.
+
+------------------------------------------------------------
+1.9 Background jobs
+------------------------------------------------------------
+
+QStash is wired (`scripts/qstash-test.ts` + `@upstash/qstash`
+dep) but no production code path uses it. AI image generation
+is purely synchronous server actions: the user clicks
+"Generate" and the server action awaits Gemini, uploads to
+R2, and writes the DB row before returning.
+
+That works because:
+- Gemini image gen takes ~10–30s for a single image; OK
+  inside a server action.
+- Bulk background generation runs 4 calls in parallel via
+  `Promise.all` (see `generateBackgroundImagesAction`,
+  `NUM_IMAGES = 4`).
+
+============================================================
+2. PRESENTATION EDITOR (the slide builder)
+============================================================
+
+This is the area most directly analogous to the Display app's
+Welcome screen editor.
+
+------------------------------------------------------------
+2.1 Files & responsibilities
+------------------------------------------------------------
+
+`app/admin/projects/[id]/presentation/`
+
+- `page.tsx`        — Server entry. Loads Project + Media +
+                      Rooms + StylePresets + SectionTypes +
+                      BrandIcons + CompanySettings, then
+                      renders `<PresentationTab>` inside
+                      `<ProjectTabs currentTab="presentation">`.
+- `presentation-tab.tsx` (607 lines)
+                    — Top-level client component. Owns the
+                      `PresentationConfigSaved` state, the
+                      selected page id, save bar status,
+                      media snapshot, and the prefetched
+                      Photo Library list. Computes derived
+                      data (rooms with concepts, rollup
+                      eligibility, page list items).
+                      Renders: left `<PageList>`, right
+                      `<PageEditor>` (or `<SettingsTab>`),
+                      plus `<SaveBar>`.
+- `page-list.tsx` (146 lines)
+                    — Left sidebar list of pages. Top-level
+                      items (Cover, Objective, Why Us) +
+                      expandable "Sections" group with
+                      per-room checkboxes for include/
+                      exclude. Selection is single.
+- `page-editor.tsx` (4136 lines — yes, four thousand)
+                    — Right pane. Branches by `pageId` and
+                      renders the per-page editor: cover
+                      layout picker, objective template
+                      A/B/C editor, why-us variant editor,
+                      etc. Each variant has its own JSX
+                      block inline. This is the single
+                      largest file in the repo.
+- `section-page-editor.tsx` (923 lines)
+                    — Per-section (room) page editor. Sub-
+                      editor with its own four template
+                      variants and live preview frame.
+- `additional-sections-editor.tsx` (111 lines)
+                    — Rollup page editor.
+- `settings-tab.tsx` (132 lines)
+                    — Modal/panel for live-view settings
+                      (background light/dark/warm/imageOverlay,
+                      transition mode, speed).
+- `save-bar.tsx` (36 lines)
+                    — Sticky Save button + status text.
+- `slide-preview-frame.tsx` (84 lines)
+                    — 16:9 aspect-ratio container that scales
+                      a fixed-pixel design canvas (e.g.
+                      1200×675) to fit the live preview area.
+                      Uses ResizeObserver + CSS transform.
+                      Used by every editor's "Live Preview"
+                      block.
+- `template-c-icon-picker.tsx` (154 lines)
+                    — Filterable dropdown of BrandIcons for
+                      Objective Template C column icons.
+- `why-us/WhyUsContentEditor.tsx`
+                    — Why Us pillar editor (companion to
+                      `components/presentation/why-us/WhyUsRenderer.tsx`).
+- `types.ts` (591 lines)
+                    — Local type helpers and the canonical
+                      `normalizePresentationConfig()` function
+                      that merges legacy and new shapes into
+                      `PresentationConfigSaved`. Includes
+                      defaults, clamp helpers for slider
+                      ranges, parsers for URL hash → page id.
+- `actions.ts` (480 lines)
+                    — Server actions:
+                      • savePresentationLayoutAction — single
+                        write to Proposal.publicLayoutConfig
+                        (creates Proposal if missing) and
+                        syncs Project.coverHeroImageId.
+                      • getPresentationMediaSnapshotAction —
+                        re-fetch project media (used after
+                        the user toggles to "Refresh
+                        Concepts").
+                      • A dozen AI helper actions:
+                        suggestObjectiveCopyAction,
+                        suggestObjectivePhotoFiltersAction,
+                        suggestTemplateCColumnsAction,
+                        suggestTemplateCColumnAction,
+                        suggestTemplateBFitStatementAction,
+                        rewriteWhyUsToFitAction, etc.
+
+Shared data flow:
+
+  Server `page.tsx`
+    -> serializes Project + Media + Rooms to plain JSON
+    -> passes to `<PresentationTab>`
+       -> `useState(normalizePresentationConfig(initialConfig))`
+       -> renders PageList + PageEditor
+          -> child editors mutate via `onConfigChange`
+       -> SaveBar calls `savePresentationLayoutAction(projectId, config)`
+          -> Prisma update on Proposal.publicLayoutConfig
+          -> `revalidatePath` for admin and `/p/[id]/*` routes
+
+------------------------------------------------------------
+2.2 The PresentationConfigSaved JSON
+------------------------------------------------------------
+
+Defined in `app/lib/layout-config.ts` (541 lines, very dense).
+This single typed JSON object describes the whole proposal
+deck. The relevant shape:
+
+  {
+    version: 1,
+    settings: { background, transition, speed },
+    transitions: { mode },
+    pages: {
+      cover: { variant: "heroOverlay"|"splitCover"|"titlePlate",
+               heroMediaId: string | null },
+      objective: ObjectivePageConfig, // templateId A/B/C,
+                                      // title, subtitle,
+                                      // objectiveText, commitments,
+                                      // photoSlots, executiveLabel,
+                                      // columns (Template C),
+                                      // templateB { underlineColor, dividerColor, ... },
+                                      // templateC { barColor, columns[] },
+                                      // ai { suggestedSections, ... }
+      whyUs: WhyUsPageConfig, // variant + pillars + per-variant
+                              // style overrides
+      sections: { [roomId]: SectionPageConfig, additionalSections: {include} },
+      rooms:    { [roomId]: { enabled, variant, featuredMediaId, published } },
+      rollup:   { mode: "auto"|"manual", variant, roomIds[], published }
+    }
+  }
+
+Two non-obvious properties:
+
+1) `normalizePresentationConfig(saved)` accepts both the
+   modern nested shape and a legacy flat shape (kept around
+   from earlier iterations). It also synthesizes
+   `pages.sections` from legacy `pages.rooms` if absent. Any
+   greenfield app should NOT inherit the legacy shape — it
+   exists purely for backward compat.
+
+2) `getLayoutConfig(saved)` produces a merged
+   `PublicLayoutConfig` with both nested AND legacy flat
+   keys for renderer convenience. This duplication is purely
+   to avoid touching renderers during the nested-shape
+   migration. Drop the legacy mirror in any new app.
+
+------------------------------------------------------------
+2.3 How a slide is rendered for *viewing*
+------------------------------------------------------------
+
+Two parallel renderer paths:
+
+(a) Public chapter route (`app/p/[id]/cover/page.tsx`, etc.)
+    Each chapter is its own server component that:
+      - Reads the snapshot via `getPublicProposalSnapshot()`.
+      - Merges the layout config via `getLayoutConfig()`.
+      - Passes content + config to the corresponding
+        Renderer component (`<CoverRenderer>`, `<ObjectiveRenderer>`,
+        etc.) in `components/public/`.
+    Animated transitions handled by the shared
+    `<PresentationFrame>` wrapper around the page tree.
+
+(b) Live preview inside the editor (`page-editor.tsx`).
+    Each editor block renders `<SlidePreviewFrame designW={1200}
+    designH={675}>{children}</SlidePreviewFrame>`, and uses the
+    same Renderer components with `preview={true}` so they
+    swap min-h vh units for fixed pixel heights. The frame's
+    ResizeObserver scales the 1200×675 canvas via CSS
+    transform to fit available space without overflow.
+
+This means: editor and viewer share the SAME renderer
+components. Just two helpful modes (`preview` vs. live).
+
+------------------------------------------------------------
+2.4 Live-view presentation settings
+------------------------------------------------------------
+
+`app/components/presentation/presentation-frame.tsx`:
+- Background tokens (map background → Tailwind class):
+  • light = "bg-zinc-50 dark:bg-zinc-950"
+  • dark = "bg-zinc-900 dark:bg-zinc-950"
+  • warm = "bg-amber-50/80 dark:bg-zinc-950"
+  • imageOverlay = "bg-zinc-100 dark:bg-zinc-900"
+- Transition modes:
+  • none, fade ("animate-in fade-in"),
+  • slide ("animate-in slide-in-from-right-4")
+- Speed durations:
+  • slow=duration-500, normal=duration-300, fast=duration-150
+
+Implemented by changing `key` on the inner div per page; on
+page navigation the wrapper re-mounts the animated child.
+
+Plus the public proposal also has a "Present mode" (separate
+from this — see §2.5).
+
+------------------------------------------------------------
+2.5 Public viewer (the "show mode")
+------------------------------------------------------------
+
+`components/public/ProposalShell.tsx` (287 lines):
+- Defines a fixed slide canvas `SLIDE_W = 1365, SLIDE_H = 768`.
+- `useScaleToFit(SLIDE_W, SLIDE_H)` hook adapts CSS scale on
+  window resize so the canvas fills the viewport.
+- "Present mode" toggle persists in localStorage per
+  proposal id under key `"proposal-present-mode"`. In present
+  mode the chrome (header/footer) is gone and the page is
+  rendered fullscreen, scaled.
+- Keyboard nav: ArrowLeft / ArrowRight find a hidden
+  Prev/Next link in the DOM and click it (route-based
+  navigation).
+- Companion components: `ProposalDrawerNav`,
+  `ProposalProgressDots`, `ProposalPrevNext`.
+
+This is exactly the "kiosk fullscreen" UX you want, but it's
+implemented around routed pages (per chapter URL), which is
+awkward for kiosk auto-rotate. A kiosk would be better as a
+single client component with a state machine, NOT individual
+routes.
+
+============================================================
+3. DESIGN SYSTEM (such as it is)
+============================================================
+
+------------------------------------------------------------
+3.1 Tailwind setup
+------------------------------------------------------------
+
+Tailwind v4 via PostCSS. The entire CSS file (`app/globals.css`)
+is 47 lines:
+
+  @import "tailwindcss";
+
+  :root {
+    --background: #ffffff;
+    --foreground: #171717;
+  }
+
+  @theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --font-sans: var(--font-geist-sans);
+    --font-mono: var(--font-geist-mono);
+  }
+
+  /* dark mode media query overrides background/foreground */
+  /* one keyframe: proposal-chapter-fade */
+  /* print-only rules */
+
+There is NO custom tailwind.config.* file. There is NO
+@theme block adding brand colors. There is NO design-token
+file like `tokens.ts` or `colors.ts`. The entire palette in
+use is Tailwind defaults — `zinc-*` (primary surface),
+`amber-*` (warm accents), and `emerald-*` (success).
+
+This means the "warm linen / navy / gold" tokens the user
+mentioned for the Display app are NOT defined in this repo.
+The Proposal App's palette is cool-zinc with amber accents
+(see e.g. `bg-amber-500/90` in ObjectiveRenderer for check
+icons; warm setting = `bg-amber-50/80`).
+
+What there IS:
+
+1) Brand color is configurable per company via
+   `CompanySettings.primaryColorHex` and `textColorHex`. The
+   admin nav (`admin-nav.tsx`) reads `primaryColorHex` and
+   uses it as the active-tab border color via inline style.
+2) Template-specific defaults inline in
+   `app/lib/layout-config.ts`:
+   - `TEMPLATE_C_DEFAULT_BAR_COLOR = "#64748b"` (muted blue-gray)
+   - `TEMPLATE_B_DEFAULT_UNDERLINE_COLOR = "#F97316"` (orange-500)
+   - `TEMPLATE_B_DEFAULT_DIVIDER_COLOR = "#E5E7EB"` (neutral-200)
+   - `GRID_CARDS_DEFAULT_CARD_BG = "#F3F3F1"`
+   - `GRID_CARDS_DEFAULT_CARD_BORDER = "#1E2D3A"` (dark navy!)
+   - `STACKED_DEFAULT_CARD_BG = "#F7F7F5"`
+   - `STACKED_DEFAULT_UNDERLINE_COLOR = "#E07A2F"` (HHI orange)
+   - `COLUMNS_DEFAULT_TEXT_COLOR = "#111827"` (gray-900)
+3) Section template brand accent constant in code:
+   `SectionTemplateSplit.tsx`: `const BRAND_ACCENT = "#E07A2F"`.
+   This same orange hex appears inline in multiple files —
+   no central token.
+
+------------------------------------------------------------
+3.2 Typography
+------------------------------------------------------------
+
+- Default font: `font-family: Arial, Helvetica, sans-serif`
+  in `body` (from `globals.css`). Note this OVERRIDES
+  Tailwind's default. The `--font-geist-*` vars from
+  `@theme inline` are defined but the `<html>` element
+  isn't wired up to a Next font loader, so the project
+  effectively runs in Arial.
+- A serif stack is used in two places via Tailwind utility
+  `font-serif` (default Tailwind serif stack) for editorial
+  headlines on Objective Template A and Why Us columns.
+- Concrete size pattern: heading text uses
+  `text-3xl sm:text-4xl md:text-5xl font-semibold
+  tracking-tight`; body uses `text-lg` or `text-xl`. Cover
+  badge line: `text-xs font-medium uppercase
+  tracking-[0.2em]`.
+
+------------------------------------------------------------
+3.3 Spacing & layout idioms
+------------------------------------------------------------
+
+- Page wrappers commonly use `pt-2 sm:pt-4` (or
+  `pt-8 sm:pt-12` for non-hero variants).
+- "Editorial" container has fixed image-wrapper styling:
+    `relative w-full overflow-hidden rounded-2xl
+    border border-zinc-200/80 bg-zinc-50
+    shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08)]
+    dark:border-zinc-700/80 dark:bg-zinc-800/50
+    dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.25)]`
+- A thin rule under the headline:
+    `<div className="h-px w-16 bg-zinc-300 dark:bg-zinc-600" />`
+- Hero containers use either `min-h-[70vh]` (live) or fixed
+  `h-[450px]` (preview).
+- Live slide canvas across the codebase varies:
+  • SlidePreviewFrame default = 1200×675 (admin editor)
+  • ProposalShell present mode = 1365×768
+  • Objective Template B layout constants = 1200×675
+  This inconsistency is a small wart.
+
+------------------------------------------------------------
+3.4 Iconography
+------------------------------------------------------------
+
+- BrandIcon table holds AI-generated PNG icons in R2. Used
+  in Why Us pillars, Objective Template C columns, optional
+  Brand Background overlays. UI uses
+  `template-c-icon-picker.tsx` (a filtered dropdown) and
+  `library-media-picker.tsx` (a fuller modal picker).
+- Inline SVGs are used for utility chrome (admin nav icons,
+  check marks). No external icon library (no lucide,
+  no heroicons in package.json).
+
+------------------------------------------------------------
+3.5 Component library
+------------------------------------------------------------
+
+There is NO shadcn/ui despite README claiming it. There is
+NO `components/ui/button.tsx`, `dialog.tsx`, etc. The only
+file in `components/ui/` is `reorderable-list.tsx` (a
+dnd-kit wrapper). Every button is styled inline with
+Tailwind classes like:
+
+    "rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium
+     text-white hover:bg-zinc-800 disabled:opacity-60
+     dark:bg-zinc-100 dark:text-zinc-900
+     dark:hover:bg-zinc-200"
+
+Every input uses similar inline classes. Class strings are
+sometimes pulled into local constants at the top of a file
+(`const inputClass = "..."`, `const labelClass = "..."`).
+
+This is fine for a single-product app but it is NOT a
+reusable design system. If the Display app needs the same
+visual language, a shared package isn't justified — copy
+the snippets and start adding shadcn/ui to the new repo if
+you want a real component library.
+
+============================================================
+4. SLIDE PRIMITIVES
+============================================================
+
+The Proposal App doesn't use a generic "slide = composition
+of blocks" model. Each page kind has its own renderer with
+a hardcoded layout. For the Display app's Welcome screens
+the closest primitives are the **cover blocks**.
+
+------------------------------------------------------------
+4.1 Cover blocks (the Welcome-screen analog) — RECOMMENDED
+------------------------------------------------------------
+
+`components/public/blocks/EditorialHero.tsx` (126 lines)
+- Full-bleed hero image with bottom-anchored text overlay.
+- Props: `imageUrl, badge, title, subtitle, children,
+  imageAspect, preview`.
+- The most common cover style. Uses a bottom-aligned
+  gradient overlay for legibility:
+    `bg-gradient-to-t from-black/50 via-black/20 to-transparent`.
+- Title typography: white, drop-shadow, text-3xl→5xl,
+  font-semibold tracking-tight.
+- Children block = the "meta" line (client names + address).
+
+`components/public/blocks/SplitCover.tsx` (80 lines)
+- 50/50 grid: image on left, dark text panel on right.
+- Title is dark zinc-900 on light background.
+
+`components/public/blocks/TitlePlate.tsx` (80 lines)
+- Image on top, text plate below (single column).
+
+`components/public/cover/CoverRenderer.tsx` (116 lines)
+- Variant switch + `resolveCoverHeroMedia(heroMediaId, media,
+  coverHeroImageId)` helper that walks the precedence:
+  explicit hero media id → first media with `type === HERO`
+  → project.coverHeroImageId → first media with
+  `kind === COVER` → fallback to first media.
+- Both editor preview AND public route consume this same
+  component.
+
+The `<EditorialHero>` block is essentially the Display
+Welcome card. It accepts:
+  - imageUrl    (string | null)
+  - badge       (string | null)   — e.g. "Welcome"
+  - title       (ReactNode)       — client / family name
+  - subtitle    (ReactNode)       — meeting context
+  - children    (ReactNode)       — additional meta line
+  - imageAspect ("16/10" | "4/3" | "3/2")
+  - preview     (boolean)         — fixed height vs. vh
+
+It is plain React + Tailwind. No project-specific imports
+except `isBadPlaceholderUrl` from `app/lib/media.ts` (which
+itself depends on nothing). VERY portable.
+
+------------------------------------------------------------
+4.2 Section page primitives (Before/After templates)
+------------------------------------------------------------
+
+`components/public/section/SectionTemplateSplit.tsx` (411 lines)
+- Bespoke Before/After layout. Includes per-room scope
+  panel sizing (S/M/L), title scale, photo area %, scope
+  text scale. ResizeObserver-driven scale math.
+
+`components/public/section/SectionTemplateComparisonCollage.tsx`
+- Different layout: 1 before + 1 after + up to 3 reference
+  library photos in a 2x2/3-up collage.
+
+These are very domain-specific (renovations Before/After)
+and likely NOT useful for a Display kiosk.
+
+------------------------------------------------------------
+4.3 Objective page renderers
+------------------------------------------------------------
+
+Three templates A / B / C, each implemented as its own
+component:
+
+- `components/public/objective/ObjectiveRenderer.tsx` —
+  Template A (default) and `fullBleedQuote` variant.
+- `app/components/presentation/objective/objective-template-b.tsx`
+  — Notebook-LM style two-column with a fit-to-statement
+  rewriter (calls Gemini at editor time). Has a debug-layout
+  bounds visualization gated by `?debugLayout=1`.
+- `app/components/presentation/objective/objective-template-c.tsx`
+  — Three icon columns + left vertical bar (the "executive
+  summary" plate).
+- `app/components/presentation/objective/template-b-layout.ts`
+  — Pure constants (canvas size, paddings, font sizes) for
+  Template B's pixel-precise layout math.
+
+These are interesting because they show how the team handled
+"the same content with different visual templates" — but
+templates are not data-driven; each is a separate React
+file with hardcoded JSX. Not great for extensibility.
+
+------------------------------------------------------------
+4.4 Why Us renderer
+------------------------------------------------------------
+
+`components/presentation/why-us/WhyUsRenderer.tsx` (1090 lines!)
+- One component, five variants (`gridCards`, `stacked`,
+  `columns`, `simple`/timeline, `iconRows`).
+- Three style-config layers: shared style (headlineSizePx,
+  bodySizePx, iconScale...) + per-variant style
+  (gridCardsStyle, stackedStyle, columnsStyle, simpleStyle)
+  + per-pillar content.
+- This is the most config-driven renderer; it could be a
+  reference for how to make a flexible Display widget.
+
+------------------------------------------------------------
+4.5 Block library (`components/public/blocks/`)
+------------------------------------------------------------
+
+In addition to the three covers, the block library exposes:
+
+- `EditorialGallery.tsx` (115 lines) — variants: `grid`,
+  `one-large-two-small`, `two-by-two-featured`. Accepts a
+  list of `EditorialGalleryImage` ({id, url, caption}) and
+  renders them in the chosen layout. **This is the cleanest
+  reusable photo-carousel building block in the repo** —
+  worth copying for the Display app's "photo carousel" mode
+  even though it's grid-based, not a kinetic carousel.
+- `EditorialTwoCol.tsx` (32 lines) — 50/50 grid wrapper.
+- `EditorialSectionHeading.tsx` (52 lines) — Kicker + h2 +
+  rule wrapper. Useful for the "meeting context" subhead.
+
+============================================================
+5. AI BACKGROUND GENERATION
+============================================================
+
+------------------------------------------------------------
+5.1 Imagen 4 / `imagen-4.0-fast-generate-001` clarification
+------------------------------------------------------------
+
+The user's prompt mentioned Imagen 4 with model id
+`imagen-4.0-fast-generate-001`. **This repo does not use
+Imagen 4. It uses Gemini's image-capable models via
+`@google/genai`.** Concretely:
+
+- `process.env.GEMINI_IMAGE_MODEL` (default
+  `"gemini-2.5-flash-image"`) is the model id used for
+  brand-background and brand-icon generation
+  (`app/admin/settings/branding/backgrounds/actions.ts` and
+  `app/admin/settings/actions.ts`).
+- `process.env.GEMINI_MODEL` (default
+  `"gemini-2.5-flash-image"`) is the model id used for
+  room rendering and cover render-edit operations
+  (`app/lib/gemini.ts`).
+- `app/lib/rendering/provider.ts` uses the older
+  `@google/generative-ai` SDK and gates on `RENDER_PROVIDER
+  === "gemini"`. Comments say it can be extended to OpenAI.
+
+If the Display app should use Imagen 4 specifically, that
+is a NEW integration (Imagen 4 is exposed through the
+Vertex AI / Gemini Developer API but is a distinct model
+family). The patterns here will guide it but you'll need a
+fresh client call.
+
+------------------------------------------------------------
+5.2 Where background generation lives
+------------------------------------------------------------
+
+`app/admin/settings/branding/backgrounds/actions.ts`
+- `generateBackgroundImagesAction({ prompt, type })`
+- Concurrency: spawns `NUM_IMAGES = 4` parallel Gemini
+  calls and gathers results via `Promise.all`. Partial
+  success returns whichever succeeded; full failure returns
+  an aggregated error string.
+
+Prompt construction:
+
+  const BACKGROUND_SYSTEM_PREFIX = `
+  Create a seamless, tileable, subtle background texture.
+  No focal point.
+  Low contrast.
+  No text.
+  No logos.
+  Designed for use behind presentation content.`;
+
+  function buildBackgroundPrompt(userPrompt, type) {
+    const styleHint =
+      type === "icon_pattern"
+        ? "Subtle repeating pattern of small motifs..."
+      : type === "gradient_texture"
+        ? "Very subtle gradient with light texture..."
+      : "Subtle, even texture; no strong focal point.";
+    return `${BACKGROUND_SYSTEM_PREFIX}\n\nStyle description:\n${styleHint}\n\nUser description: ${prompt}\n\nOutput a single square image, high resolution (at least 1024x1024, preferably 2048x2048). PNG format.`;
+  }
+
+`type` enum: `"subtle_texture" | "icon_pattern" | "gradient_texture"`.
+
+Gemini call shape (also used by other image flows):
+
+  await ai.models.generateContent({
+    model: GEMINI_IMAGE_MODEL,
+    contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+    config: { responseModalities: ["IMAGE"] },
+  });
+
+  // Walk response.candidates[0].content.parts[]
+  // Find part.inlineData.data (base64) + part.inlineData.mimeType
+  // → Buffer.from(data, "base64")
+
+Upload + DB write:
+
+  const objectKey = `brand-backgrounds/global/${Date.now()}-${rand}.png`;
+  const { publicUrl, fileKey } = await uploadBuffer(objectKey, bytes, mimeType);
+
+The returned `{ images: [{ imageUrl, imageKey }] }` array is
+shown in the client UI for the admin to pick one and save
+as a `BrandBackground` row.
+
+------------------------------------------------------------
+5.3 The BrandBackground composition model
+------------------------------------------------------------
+
+This is NOT "AI gives me a background → I store the image".
+It's "AI gives me a tileable overlay → I store base color +
+overlay knobs and compose at render time".
+
+`BrandBackground` row stores:
+- `baseColorHex` (string, e.g. "#FFFFFF")
+- `overlayImageUrl` + `overlayImageKey` (optional AI-generated
+  texture in R2)
+- OR `overlayIconId` (optional link to a BrandIcon for an
+  icon-pattern background)
+- `overlayOpacity` (0–100), `overlayScale` (25–300%),
+  `overlaySpacing` (10–600 px), `overlayRotation` (0–45°)
+- `previewImageUrl` + `previewImageKey` — a pre-rendered
+  composed PNG, generated server-side via the `sharp`
+  package and an SVG `<pattern>` definition (see
+  `buildBackgroundPreviewSvg` in the same file). Pre-render
+  is recreated on every save.
+- `isAvailable` (selectable in UI) and `isActive` (internal
+  rollout toggle), `sortOrder`, `tags`.
+
+`BackgroundPreviewSurface.tsx` (in the same dir) renders the
+composed background live in React using a CSS-painted
+`background-image` from the overlay URL + the overlay
+opacity/scale/spacing/rotation as inline style. So the
+preview can be: (a) live composed in the browser via CSS, or
+(b) the cached PNG.
+
+------------------------------------------------------------
+5.4 The Curated Background Library
+------------------------------------------------------------
+
+The "library" is simply the BrandBackground table viewed
+through `/admin/settings/branding/backgrounds/` UI
+(`BackgroundLibraryClient.tsx`, 120-line head shown in audit).
+Admins can:
+  - Create a background from scratch (base color + overlay).
+  - Generate 4 AI texture candidates from a prompt.
+  - Pick one as the overlay.
+  - Tweak opacity/scale/spacing/rotation with live preview.
+  - Toggle `isAvailable` (gates which backgrounds appear in
+    pickers) and `isActive` (kill switch).
+  - Save → server regenerates the cached preview PNG.
+
+There is NO seeded list of "starter backgrounds". The library
+starts empty and admins build it up.
+
+For the Display app you can almost certainly:
+- Reuse the BrandBackground schema as-is (it's well-thought-out).
+- Reuse the AI prompt format (small tweaks for the kiosk
+  aesthetic).
+- Reuse `BackgroundPreviewSurface` as the runtime renderer
+  for the Welcome screen's background layer.
+
+------------------------------------------------------------
+5.5 Related AI generation (brand icons)
+------------------------------------------------------------
+
+`app/admin/settings/actions.ts > generateBrandIconPngAction`
+is a long, very strict prompt for "single icon on white
+background" PNG generation, used to populate the BrandIcon
+table. It's a useful template but Display kiosk probably
+doesn't need this.
+
+------------------------------------------------------------
+5.6 Cover hero "render edit" — also AI but image-to-image
+------------------------------------------------------------
+
+`app/admin/projects/[id]/media/actions.ts > startHeroRenderAction`
+uses `generateRenderEdit` (in `app/lib/gemini.ts`) to take an
+existing photo and apply an edit instruction (e.g. "Crop for
+cover (16:9). Brighten photo. Remove watermark.") through
+Gemini's image-edit modality. Result is a new Media row with
+type=RENDERING, kind=COVER. There are 7 preset transforms
+in `hero-presets.ts`.
+
+Display kiosk: not relevant for v1. But the pattern is the
+same `@google/genai` flow — useful if you ever want to
+post-process kiosk welcome backgrounds.
+
+============================================================
+6. INVESTMENT AUTO-POPULATION (for awareness)
+============================================================
+
+This is unrelated to the Display app but the user wanted
+awareness of the pattern.
+
+`app/lib/investment-rollup.ts` (69 lines):
+- Function `recomputeInvestmentRollups(projectId)`.
+- Reads all `Room` rows for the project, sums their
+  `totalLow/Target/High` grouped by `SectionBucket`
+  (BASE | ALTERNATE | ALLOWANCE), then `upsert`s three
+  `InvestmentLineItem` rows (one per bucket). The unique
+  index `(projectId, bucket)` makes this idempotent.
+- Called after section CRUD changes (see
+  `app/admin/projects/[id]/rooms/actions.ts` and
+  `investment/actions.ts`).
+- Per-line override pattern: InvestmentLineItem stores both
+  the auto-computed `rangeLow/Target/High` and an
+  `overrideLow/Target/High` + `isOverride` flag. Effective
+  range is chosen at read time (see
+  `app/admin/projects/[id]/investment/investment-tab.tsx`).
+- The viewer reads only the effective values from the
+  published snapshot (not the override fields), so
+  publishing freezes the choice.
+
+Pattern takeaway: aggregation + manual override is done as
+two parallel columns + a boolean, computed sums are derived
+from child rows on write rather than on read. This pattern
+will be useful if the Display kiosk has aggregated stats
+(today's meetings, photo count, etc).
+
+============================================================
+7. CLAUDE.md / AUTO-COMMIT CONVENTIONS
+============================================================
+
+There is no `CLAUDE.md`, `AGENTS.md`, or `CONTRIBUTING.md` in
+this repo. There is no `.husky/`, no `.github/`, no
+pre-commit hooks (`.git/hooks/` only contains the unmodified
+git sample files). There is no auto-commit workflow.
+
+What does exist:
+- `README.md` — Setup + flow + commands.
+- `VERIFICATION.md` — Manual curl recipes for verifying
+  routing/middleware behavior + section unitQuantity logic.
+- `docs/IMAGE-AUDIT.md` — Notes about next/image hostname
+  allowlisting.
+- `docs/COVER_GENERATION_DELIVERABLES.md` — A change log /
+  spec for the cover-versioning feature.
+
+Commit history (`git log --oneline -20`):
+
+  be7d740  Stable baseline: working section templates and media layout
+  0d48dfe  Checkpoint before section template preview rollback
+  ec50f3c  Start Why Us page work
+  7d94c18  fix(template-b): local settings + NotebookLM-style UI, no global sidebar
+  6870252  Backup before slug decision
+  a9f6818  Restore blue price range pill on Sections tab (section cards)
+  7ddf130  End of day backup - media stable + style presets + versioning
+  206f7a6  Phase 5: Publish snapshot + Public page + PDF export
+  f55bcef  Phase 4: Rooms/Timeline/Investment CRUD + Draft preview
+  b124ad1  Phase 3: Media upload via presigned URLs (R2/S3) + Media CRUD UI
+  3115b7f  Phase 2: Clerk auth + admin gating + admin routes skeleton
+  410b0ab  Phase 1: project scaffold + Prisma schema + migrations + seed
+  2eae92b  Initial commit from Create Next App
+
+Commit style: free-form, sometimes Conventional Commits
+("fix(template-b): ..."), often "Backup before X" /
+"Checkpoint before Y" / "End of day backup ...". Not enforced.
+
+If the user expects an auto-commit workflow on the Display
+app, it does NOT exist here and will need to be set up
+fresh (see /update-config skill in this Claude session for
+the hook mechanism).
+
+============================================================
+8. SECONDARY ITEMS WORTH KNOWING
+============================================================
+
+------------------------------------------------------------
+8.1 Photo library (LibraryMedia)
+------------------------------------------------------------
+
+`app/admin/settings/photo-library/` is a substantial subsystem
+(3000+ lines) that manages a global pool of past-project
+photos with `useType` (BEFORE | AFTER | IN_PROGRESS | RENDER
+| DETAIL | LIFESTYLE), `quality` (HERO_READY | STANDARD),
+`orientation`, tags, room types. The
+`<LibraryMediaPicker>` modal is used inside the presentation
+editor to pick reference photos for sections and Objective
+page collages.
+
+For the Display app's "photo carousel" mode this same
+LibraryMedia table is a candidate source — but only if both
+apps share a database. If not, a similar schema would work
+well.
+
+------------------------------------------------------------
+8.2 Snapshot pattern
+------------------------------------------------------------
+
+`app/lib/snapshot.ts` defines the SnapshotData type that
+gets frozen into `PublishedSnapshot.snapshotJson` at publish
+time. The public viewer reads from snapshots, NOT from live
+project data. Admin preview uses live data through the same
+SnapshotData shape (built on the fly from current Prisma
+rows in `(preview)/preview/draft/page.tsx`).
+
+Pattern: separate edit model from view model via a JSON
+snapshot. This is good architecture and worth lifting. For
+the Display kiosk, snapshots probably aren't needed — kiosk
+content is live by definition — but you could borrow the
+shape if you want versioned welcome screens.
+
+------------------------------------------------------------
+8.3 Reorder UI
+------------------------------------------------------------
+
+`components/ui/reorderable-list.tsx` is a clean dnd-kit
+wrapper used for page reorder, room reorder, line-item
+reorder. Generic over `<T extends { id: string }>`. Worth
+copying as-is if you need drag reorder.
+
+------------------------------------------------------------
+8.4 Naming inconsistencies
+------------------------------------------------------------
+
+- "Rooms" in the schema is "Sections" in the UI. Variables
+  and props mix the two ("Section" UI label, "room" data
+  shape). Don't be surprised.
+- "Why Us" page is also referenced as "difference" in legacy
+  layout config and one route (`/p/[id]/difference`).
+- Both `components/presentation/why-us/` and
+  `app/admin/projects/[id]/presentation/why-us/` exist;
+  shared renderer is the former, editor is the latter.
+- "Hero", "cover", "front page" are used somewhat
+  interchangeably. The actual invariant is documented in
+  `docs/COVER_GENERATION_DELIVERABLES.md`:
+  `project.coverHeroImageId` must point to a Media row with
+  `type=RENDERING` and `kind=COVER`.
+
+============================================================
+9. RECOMMENDED EXTRACTION PLAN
+============================================================
+
+Honest opinions follow.
+
+------------------------------------------------------------
+9.1 COPY-PASTE (do this for v1; cheap and pragmatic)
+------------------------------------------------------------
+
+These are clean, low-dep, and the Display app will benefit
+immediately:
+
+1) **EditorialHero, SplitCover, TitlePlate**
+   (`components/public/blocks/*.tsx`)
+   - The Welcome screen IS a cover. Three variants give you
+     immediate visual variety without writing a layout
+     engine.
+   - Dependencies: just `isBadPlaceholderUrl` from
+     `app/lib/media.ts` (10 lines you can inline).
+   - Plan: copy them, rename to `WelcomeHero`,
+     `WelcomeSplit`, `WelcomePlate`. Strip the dark-mode
+     classes if your kiosk is light-only (or keep them).
+   - Wire up to your own props: `clientName`, `meetingContext`,
+     `heroImageUrl`.
+
+2) **EditorialGallery**
+   (`components/public/blocks/EditorialGallery.tsx`)
+   - For the "photo carousel" mode at least as a non-kinetic
+     fallback (grid view). For an actual rotating carousel
+     you'll want a separate component (Swiper, embla, or
+     hand-rolled with CSS transforms — none exist here).
+
+3) **SlidePreviewFrame**
+   (`app/admin/projects/[id]/presentation/slide-preview-frame.tsx`)
+   - If the Display app has an admin editor for welcome-
+     screen templates, this 16:9 scale-to-fit frame is
+     ready to use. Zero deps beyond React.
+
+4) **useScaleToFit** logic
+   (from `components/public/ProposalShell.tsx`)
+   - For fullscreen kiosk display: 4 lines of React that
+     scale a fixed canvas to viewport. Useful even if the
+     rest of ProposalShell is too coupled.
+
+5) **AI background generation prompt + Gemini call**
+   (`app/admin/settings/branding/backgrounds/actions.ts`)
+   - The prompt template (`BACKGROUND_SYSTEM_PREFIX` +
+     `buildBackgroundPrompt`) and the four-image parallel
+     pattern are the right starting point.
+   - Action: copy the prompt, swap the model id to
+     `imagen-4.0-fast-generate-001` if you actually want
+     Imagen 4 (you'll need to switch the SDK call to the
+     Imagen-specific endpoint — Imagen is reached via the
+     Vertex AI SDK or the `@google/genai` SDK with a
+     different model + image params). Verify the Imagen 4
+     model id against current Google docs before committing.
+
+6) **S3/R2 helpers** (`app/lib/s3.ts`)
+   - 149 lines. Cleanest, easiest to lift. Copy whole-file.
+     Adjust env var names if you want.
+
+7) **Brand colors / company settings sketch**
+   - The pattern `CompanySettings` (singleton row with hex
+     colors, logo URL) is worth replicating. Copy the
+     relevant Prisma fields, not the whole table.
+
+------------------------------------------------------------
+9.2 EXTRACT TO SHARED PACKAGE (only if there's a clear win)
+------------------------------------------------------------
+
+My honest take: **probably none, for now.** A shared package
+adds tooling complexity, a build step, version drift, and a
+publishing process. With only two apps and minimal current
+overlap (one set of cover blocks + maybe S3 + maybe Gemini
+prompt), the shared-package payoff is small.
+
+If you DO push toward a monorepo eventually, the right
+candidates would be:
+
+- **`@hhi/s3` (the R2 helper)** — pure server-side, no UI,
+  used by both apps the same way. Smallest blast radius.
+- **`@hhi/ai`** — wrapping Gemini/Imagen calls + prompts
+  for backgrounds + maybe icons. Useful if you'll have 3+
+  apps doing AI image gen. Likely not for 2 apps.
+
+What is NOT a good shared-package candidate:
+- The slide blocks (EditorialHero etc) — they're 80–130 line
+  Tailwind components that you'll want to fork visually
+  anyway. Copy is fine.
+- Anything in `app/lib/layout-config.ts` — it is so deeply
+  shaped around the Proposal App's domain (cover variants,
+  objective templates, why-us variants) that extracting it
+  would just impose Proposal App vocabulary on the Display
+  app.
+
+------------------------------------------------------------
+9.3 REBUILD FROM SCRATCH (don't try to copy these)
+------------------------------------------------------------
+
+1) **The presentation editor master/detail architecture.**
+   `page-editor.tsx` is 4136 lines of branched JSX for
+   per-page variants. It's effective for one product but
+   it is NOT a reusable editor. The Display app should
+   build a simpler editor:
+   - One screen mode (Welcome / PhotoCarousel / YouTube).
+   - A small variant picker for Welcome (re-using the cover
+     blocks).
+   - Per-mode state in a small reducer.
+   - Direct save (no 600-line orchestration component).
+
+2) **PresentationConfigSaved blob shape.**
+   Drop the legacy flat layer. Drop the "pages.rooms"
+   parallel-to-"pages.sections" structure. Use a clean
+   discriminated union per screen type. Versioning + migration
+   are nice ideas but in a fresh app you don't have legacy
+   data to migrate.
+
+3) **The public proposal viewer's chapter-per-route model.**
+   ProposalShell + per-page route is the wrong shape for a
+   kiosk that auto-rotates. A kiosk wants a single client
+   page with a state machine that cycles screens. No
+   navigation, no routes, no Next-page-load transitions —
+   just CSS-animated cross-fades inside one persistent shell.
+
+4) **The Why Us renderer (1090-line WhyUsRenderer).**
+   It's the most config-driven file in the repo but it's a
+   leaky abstraction (five variants + three style layers).
+   The Display app does not need this complexity.
+
+5) **The legacy `app/lib/rendering/provider.ts` alongside
+   `app/lib/gemini.ts`.** Two different Gemini SDKs in the
+   same codebase is a wart. Use ONE SDK (`@google/genai`)
+   in the new app.
+
+6) **Slide canvas sizing inconsistency.** Pick one (e.g.
+   1920×1080 for kiosk) and use it everywhere.
+
+------------------------------------------------------------
+9.4 Quick "do this first" checklist for the Display app
+------------------------------------------------------------
+
+1. Bootstrap with Next.js 16 + App Router + Tailwind 4 +
+   Prisma 7 + Clerk + R2. Same stack avoids learning curve.
+2. Skip middleware on the kiosk display routes (treat them
+   like `/p/*`). Auth only the admin editor.
+3. Define design tokens UP FRONT in a real Tailwind config
+   (or `@theme` in globals.css for v4):
+     --color-linen, --color-navy, --color-gold,
+     plus font sizes for headline / sub / meta.
+   This is the one thing the Proposal App got wrong and
+   you don't want to inherit.
+4. Add shadcn/ui from day one (Button, Dialog, Select,
+   Input). Don't repeat the "inline Tailwind classes
+   everywhere" pattern.
+5. Copy `EditorialHero` / `SplitCover` / `TitlePlate` as
+   your Welcome variants. Restyle to your tokens.
+6. Copy `app/lib/s3.ts` and the Gemini/Imagen background
+   prompt; rewrite the call to the model you actually want.
+7. Build the kiosk runtime as a single client page that
+   reads a "next screen" from state and animates between
+   them. Don't route per-screen.
+8. Use a simple Prisma schema:
+     Screen { id, mode: ENUM, title, subtitle, heroMediaId,
+              backgroundId, ... }
+     Background { ...BrandBackground fields... }
+     ScreenSchedule { screenId, startsAt, endsAt }
+   No PublishedSnapshot necessary for v1.
+
+============================================================
+10. OPEN QUESTIONS — answer these before architecting
+============================================================
+
+1. **Imagen 4 vs Gemini Flash Image.** The user prompt
+   specified `imagen-4.0-fast-generate-001`. This repo uses
+   `gemini-2.5-flash-image`. Are you intentionally switching
+   for the Display app (e.g. for better quality on
+   non-photo aesthetic backgrounds, or licensing reasons)?
+   If yes, confirm the Imagen 4 access pattern: it's the
+   Gemini API (`ai.models.generateImages(...)`) not
+   `generateContent`. The integration code will differ
+   meaningfully from this repo.
+
+2. **Shared database or separate?** Will the Display app
+   share Postgres with the Proposal App (so it can read
+   LibraryMedia, employees, clients) or be standalone?
+   If shared, several things become "import the existing
+   model" instead of "copy the schema". If separate, the
+   apps will probably drift quickly and a shared package
+   is even less compelling.
+
+3. **Monorepo or multi-repo?** This repo is a single repo
+   with no workspace config. If you intend to share any
+   packages between the two apps, you'll need to pick:
+   pnpm workspaces, turborepo, or just publish to npm/
+   private registry. None of that exists today.
+
+4. **Auth model for the kiosk.** The Proposal App is admin-
+   only for editing and public-by-link for viewing. The
+   kiosk display itself is presumably unauthenticated
+   (running on an office TV/iPad). Will the kiosk editor be
+   Clerk + same admin allowlist, or a different identity?
+
+5. **Persistence model — is content "live" or "snapshotted"?**
+   Proposal App snapshots at publish time so the viewer is
+   never reading half-finished edits. Kiosk could either:
+   (a) read live edits in real time (good for "set up
+   today's welcome 30 seconds before the client arrives"),
+   or (b) snapshot before display. (a) is simpler — go
+   there unless you have a reason not to.
+
+6. **Photo carousel: source?** Will it pull from the
+   Proposal App's LibraryMedia (shared DB), upload its own
+   photos to R2, or both? Affects schema and upload UI.
+
+7. **YouTube mode: which YouTube?**
+   - Embedded iframe with autoplay (subject to YouTube's
+     mute-required autoplay policy)?
+   - YouTube TV / kiosk app deeplink?
+   - Local cached video? (legal questions if rebroadcasting
+     YouTube content)
+   This will dictate whether kiosk needs network egress.
+
+8. **Background composition: AI textures only, or full
+   photographic backgrounds?** Proposal App treats the
+   background as a subtle texture behind content. The
+   Display kiosk's Welcome screen sounds like it wants a
+   hero photograph (the room, the office, etc) as the
+   background — that's a different aesthetic. Confirm.
+
+9. **Fonts.** Proposal App effectively uses Arial because of
+   a body CSS rule that overrides the configured
+   `--font-geist-*`. Do you want to ship a proper webfont
+   for the kiosk (Inter? Geist? a serif?), and is brand
+   typography decided?
+
+10. **Multi-tenant, ever?** The Proposal App is single-
+    tenant (single Company row, singleton CompanySettings).
+    If the Display app should later be sold to other
+    builders, plan tenancy now — adding it later is painful
+    (cf. how this repo handles `Company` as a singleton).
+
+11. **Auto-commit / Claude Code workflow.** There's no
+    CLAUDE.md or hook setup in this repo. Confirm whether
+    you want one created for the Display app at startup
+    (the `/update-config` skill in this session can write
+    it).
+
+============================================================
+END OF REPORT
+============================================================
