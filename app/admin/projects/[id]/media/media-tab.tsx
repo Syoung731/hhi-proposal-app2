@@ -25,6 +25,7 @@ import {
 import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
 import { LocalImportModal } from "./components/LocalImportModal";
+import { PhoneUploadModal } from "./components/PhoneUploadModal";
 import { MediaType } from "@/app/generated/prisma";
 import { isBadPlaceholderUrl, isAllowedHostForNextImage } from "@/app/lib/media";
 import {
@@ -770,6 +771,7 @@ export function MediaTab({
   const [uploadResult, setUploadResult] = useState<UploadBatchResult | null>(null);
   /** Phase 9: Bulk Local Media Import modal open state. */
   const [localImportOpen, setLocalImportOpen] = useState(false);
+  const [phoneUploadOpen, setPhoneUploadOpen] = useState(false);
   const [activeSourceMediaId, setActiveSourceMediaId] = useState<string | null>(null);
   const [activeRenderMediaId, setActiveRenderMediaId] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -1566,18 +1568,40 @@ export function MediaTab({
           Bulk-import 30–100 photos straight from your computer (e.g. a walkthrough from your phone). They land in <strong>Unassigned Photos</strong>; assign them to sections from there.
         </p>
         <div className="flex flex-col gap-1">
-          <button
-            type="button"
-            onClick={() => setLocalImportOpen(true)}
-            className="w-fit rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            Import Local Photos
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setLocalImportOpen(true)}
+              className="w-fit rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              Import Local Photos
+            </button>
+            <button
+              type="button"
+              onClick={() => setPhoneUploadOpen(true)}
+              className="w-fit rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            >
+              Send from Phone
+            </button>
+          </div>
           <span className="text-xs text-zinc-500 dark:text-zinc-400">
             Drag a folder, select files, or pick a folder. JPG, PNG, HEIC, WebP supported.
+            Or tap <strong>Send from Phone</strong> to scan a QR code and upload from your phone.
           </span>
         </div>
       </section>
+
+      <PhoneUploadModal
+        projectId={projectId}
+        open={phoneUploadOpen}
+        onClose={(didReceive) => {
+          setPhoneUploadOpen(false);
+          if (didReceive) {
+            // New phone-uploaded photos land in Unassigned; refresh to show them.
+            router.refresh();
+          }
+        }}
+      />
 
       <LocalImportModal
         projectId={projectId}

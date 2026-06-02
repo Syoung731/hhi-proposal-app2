@@ -74,6 +74,7 @@ model Project {
   timelinePhases           TimelinePhase[]
   proposal                 Proposal?
   extensionPairCodes       ExtensionPairCode[]
+  photoUploadTokens        PhotoUploadToken[]
   zillowBrowserConnections ZillowBrowserConnection[]
   estimateJobs             EstimateJob[]
   aiEstimates              AIEstimate[]
@@ -150,6 +151,32 @@ model ExtensionPairCode {
   expiresAt       DateTime
   usedAt          DateTime?
   project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([expiresAt])
+}
+
+/**
+ * Short-lived, project-scoped bearer token for the "Send from Phone" upload
+ * flow. The admin mints one (createPhoneUploadSession), it is encoded into a
+ * QR code, and the salesperson's phone opens /m/<token> to upload photos
+ * directly to R2 WITHOUT a Clerk login. Same security shape as
+ * ExtensionPairCode: scoped to one project, time-boxed, revocable.
+ *
+ * `token` is a long random secret (not the human-friendly ExtensionPairCode
+ * format) because it travels in a URL/QR rather than being typed.
+ */
+model PhotoUploadToken {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  projectId   String
+  createdByUserId String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  uploadCount Int       @default(0)
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([expiresAt])
