@@ -26,6 +26,7 @@ import { ChangesDetectedSummary } from "./changes-detected-summary";
 import { FrontPageHeroEditor } from "./front-page-hero-editor";
 import { LocalImportModal } from "./components/LocalImportModal";
 import { PhoneUploadModal } from "./components/PhoneUploadModal";
+import { DriveImportModal } from "./components/DriveImportModal";
 import { MediaType } from "@/app/generated/prisma";
 import { isBadPlaceholderUrl, isAllowedHostForNextImage } from "@/app/lib/media";
 import {
@@ -772,6 +773,7 @@ export function MediaTab({
   /** Phase 9: Bulk Local Media Import modal open state. */
   const [localImportOpen, setLocalImportOpen] = useState(false);
   const [phoneUploadOpen, setPhoneUploadOpen] = useState(false);
+  const [driveImportOpen, setDriveImportOpen] = useState(false);
   const [activeSourceMediaId, setActiveSourceMediaId] = useState<string | null>(null);
   const [activeRenderMediaId, setActiveRenderMediaId] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -1583,6 +1585,13 @@ export function MediaTab({
             >
               Send from Phone
             </button>
+            <button
+              type="button"
+              onClick={() => setDriveImportOpen(true)}
+              className="w-fit rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            >
+              Import from Google Drive
+            </button>
           </div>
           <span className="text-xs text-zinc-500 dark:text-zinc-400">
             Drag a folder, select files, or pick a folder. JPG, PNG, HEIC, WebP supported.
@@ -1598,6 +1607,18 @@ export function MediaTab({
           setPhoneUploadOpen(false);
           if (didReceive) {
             // New phone-uploaded photos land in Unassigned; refresh to show them.
+            router.refresh();
+          }
+        }}
+      />
+
+      <DriveImportModal
+        projectId={projectId}
+        open={driveImportOpen}
+        onClose={(didImport) => {
+          setDriveImportOpen(false);
+          if (didImport) {
+            // Drive-imported photos land in Unassigned; refresh to show them.
             router.refresh();
           }
         }}

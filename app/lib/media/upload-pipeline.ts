@@ -1,7 +1,12 @@
 import "server-only";
+import sharp from "sharp";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/app/lib/prisma";
-import { getPresignedUploadUrl, readObjectToBuffer } from "@/app/lib/s3";
+import {
+  getPresignedUploadUrl,
+  readObjectToBuffer,
+  uploadBuffer,
+} from "@/app/lib/s3";
 import { generateAndUploadThumbnail } from "@/app/lib/media/generate-thumbnail";
 import { MediaKind, MediaPlacement, MediaType } from "@/app/generated/prisma";
 
@@ -216,6 +221,106 @@ export async function commitMediaBatch(params: {
     } catch (e) {
       failed.push({
         fileKey: item.fileKey,
+        error: e instanceof Error ? e.message : "Unknown error during media create",
+      });
+    }
+  }
+
+  if (success.length > 0) {
+    revalidatePath(`/admin/projects/${projectId}`);
+    revalidatePath(`/admin/projects/${projectId}/preview`);
+  }
+  return { success, failed };
+}
+
+export type DownloadedMediaItem = {
+  /** Raw image bytes already fetched server-side (e.g. from Google Drive). */
+  buffer: Buffer;
+  /** MIME type of the bytes. */
+  contentType: string;
+  /** Original filename (for caption / extension derivation). */
+  originalName: string;
+};
+
+/**
+ * Server-side variant of commitMediaBatch for sources where the SERVER already
+ * holds the bytes (Google Drive download) rather than the client having PUT
+ * them to R2. For each item: upload the buffer to R2, measure dimensions +
+ * generate a thumbnail (best-effort), then insert the Media row with the
+ * caller-supplied tags. Performs NO auth — caller must validate write access.
+ */
+export async function commitDownloadedMedia(params: {
+  projectId: string;
+  items: DownloadedMediaItem[];
+  tags: string[];
+}): Promise<CommitMediaResult> {
+  const { projectId, items, tags } = params;
+  if (!items.length) return { success: [], failed: [] };
+
+  const baseline = await prisma.media
+    .aggregate({
+      where: {
+        projectId,
+        type: MediaType.EXISTING,
+        roomId: null,
+        placement: MediaPlacement.UNASSIGNED,
+      },
+      _max: { sortOrder: true },
+    })
+    .then((r) => r._max.sortOrder ?? -1);
+
+  const success: CommitMediaResult["success"] = [];
+  const failed: CommitMediaResult["failed"] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const ext = extFromContentType(item.contentType);
+    const fileKey = `projects/${projectId}/drive-import/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    try {
+      // 1. Upload original bytes to R2.
+      const { publicUrl } = await uploadBuffer(fileKey, item.buffer, item.contentType);
+
+      // 2. Measure dimensions (best-effort).
+      let width: number | null = null;
+      let height: number | null = null;
+      try {
+        const meta = await sharp(item.buffer).metadata();
+        width = meta.width ?? null;
+        height = meta.height ?? null;
+      } catch {
+        /* non-image or unreadable — leave dims null */
+      }
+
+      // 3. Thumbnail (best-effort — null is fine, UI falls back).
+      const thumbnailUrl = await generateAndUploadThumbnail({
+        projectId,
+        originalBuffer: item.buffer,
+        originalFileKey: fileKey,
+      });
+
+      // 4. Insert Media row (drive imports preserve picker order).
+      const media = await prisma.media.create({
+        data: {
+          projectId,
+          roomId: null,
+          kind: MediaKind.OTHER,
+          type: MediaType.EXISTING,
+          url: publicUrl,
+          fileKey,
+          thumbnailUrl,
+          caption: item.originalName || null,
+          tags,
+          sortOrder: baseline + 1 + i,
+          placement: MediaPlacement.UNASSIGNED,
+          width,
+          height,
+        },
+        select: { id: true, fileKey: true },
+      });
+      success.push({ id: media.id, fileKey: media.fileKey });
+    } catch (e) {
+      failed.push({
+        fileKey,
         error: e instanceof Error ? e.message : "Unknown error during media create",
       });
     }
