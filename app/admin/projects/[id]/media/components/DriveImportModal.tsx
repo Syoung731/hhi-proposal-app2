@@ -99,13 +99,29 @@ export function DriveImportModal({ projectId, open, onClose }: Props) {
   const openPicker = useCallback((accessToken: string): Promise<PickedFile[]> => {
     return new Promise((resolve) => {
       const google = (window as any).google;
-      const view = new google.picker.DocsView(google.picker.ViewId.DOCS_IMAGES)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(false)
-        .setMode(google.picker.DocsViewMode.GRID);
+
+      // Build navigable, images-only views. LIST mode renders folder/file
+      // NAMES clearly (GRID showed blank tiles). Folders are included so you
+      // can browse into them; setParent("root") starts at My Drive's top level
+      // so you see your folders in a sensible alphabetical order.
+      const makeView = (extra: (v: any) => any) =>
+        extra(
+          new google.picker.DocsView(google.picker.ViewId.DOCS_IMAGES)
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(false)
+            .setMode(google.picker.DocsViewMode.LIST),
+        );
+
+      const myDriveView = makeView((v: any) => v.setParent("root"));
+      const sharedDrivesView = makeView((v: any) => v.setEnableDrives(true));
+      const sharedWithMeView = makeView((v: any) => v.setOwnedByMe(false));
 
       const builder = new google.picker.PickerBuilder()
-        .addView(view)
+        .setOrigin(window.location.origin)
+        .setTitle("Select photos")
+        .addView(myDriveView)
+        .addView(sharedDrivesView)
+        .addView(sharedWithMeView)
         .setOAuthToken(accessToken)
         .setDeveloperKey(API_KEY)
         .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
