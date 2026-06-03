@@ -14,6 +14,13 @@ function createPrismaClient(): PrismaClient {
   });
   return new PrismaClient({
     adapter,
+    // Prisma's default interactive/batch transaction timeout is 5000ms. Large
+    // projects (many rooms + investment line items) writing over Neon's network
+    // latency can exceed that, which caused recomputeInvestmentRollups to roll
+    // back with "expired transaction" and silently fail to persist recomputed
+    // prices. 20s gives ample headroom without masking a real hang. Applies to
+    // both array-form ($transaction([...])) and interactive transactions.
+    transactionOptions: { timeout: 20_000, maxWait: 15_000 },
     log:
       process.env.NODE_ENV === "development"
         ? ["error", "warn"]
@@ -104,6 +111,8 @@ function getPrisma(): PrismaClient {
     cached.estimateJob !== undefined &&
     "jobItem" in cached &&
     cached.jobItem !== undefined &&
+    "photoUploadToken" in cached &&
+    cached.photoUploadToken !== undefined &&
     hasAllExpectedFields(cached, REQUIRED_RECENT_FIELDS)
   ) {
     return cached;

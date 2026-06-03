@@ -2408,7 +2408,7 @@ export function MediaTab({
                               <img src={m.url} alt="" className="h-full w-full object-cover" />
                             ) : (
                               <Image
-                                src={m.url}
+                                src={m.thumbnailUrl ?? m.url}
                                 alt=""
                                 fill
                                 className="object-cover"
@@ -2655,7 +2655,7 @@ export function MediaTab({
                                       <img src={m.url} alt="" className="h-full w-full object-cover" />
                                     ) : (
                                       <Image
-                                        src={m.url}
+                                        src={m.thumbnailUrl ?? m.url}
                                         alt=""
                                         fill
                                         className="object-cover"
@@ -2806,7 +2806,7 @@ export function MediaTab({
                                   <img src={m.url} alt="" className="h-full w-full object-cover" />
                                 ) : (
                                   <Image
-                                    src={m.url}
+                                    src={m.thumbnailUrl ?? m.url}
                                     alt=""
                                     fill
                                     className="object-cover"
@@ -3583,7 +3583,7 @@ function UnassignedRow({
           />
         ) : (
           <Image
-            src={media.url}
+            src={media.thumbnailUrl ?? media.url}
             alt=""
             fill
             className="object-cover"

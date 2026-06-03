@@ -242,6 +242,13 @@ async function _recomputeInvestmentRollups(projectId: string): Promise<void> {
 
   // Execute all writes as a batched transaction (single round-trip).
   // Retry on deadlock (Neon/Postgres error P2034) up to 3 times with backoff.
+  //
+  // The 5000ms default transaction timeout was too tight for large projects
+  // over Neon latency (caused "expired transaction" rollbacks that silently
+  // dropped recomputed prices). The timeout is raised to 20s globally via
+  // `transactionOptions` on the PrismaClient (app/lib/prisma.ts) — the
+  // array-form $transaction below has no per-call timeout option, so it
+  // inherits that client default.
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
