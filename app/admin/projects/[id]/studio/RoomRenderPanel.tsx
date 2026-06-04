@@ -150,7 +150,7 @@ export function RoomRenderPanel({
 
   const remove = useCallback(
     async (mediaId: string) => {
-      if (!window.confirm("Delete this render?")) return;
+      if (!window.confirm("Remove this render?")) return;
       setBusy(true);
       await deleteMediaAction(projectId, mediaId);
       setBusy(false);
@@ -384,14 +384,22 @@ export function RoomRenderPanel({
                           Update
                         </button>
                       )}
-                      {!pending && (
+                      <button
+                        type="button"
+                        onClick={() => remove(r.id)}
+                        disabled={busy}
+                        className="rounded border border-zinc-300 px-2 py-0.5 text-red-600 dark:border-zinc-600"
+                      >
+                        {pending ? "Cancel" : "Delete"}
+                      </button>
+                      {pending && (
                         <button
                           type="button"
-                          onClick={() => remove(r.id)}
+                          onClick={() => void load()}
                           disabled={busy}
-                          className="rounded border border-zinc-300 px-2 py-0.5 text-red-600 dark:border-zinc-600"
+                          className="rounded border border-zinc-300 px-2 py-0.5 dark:border-zinc-600"
                         >
-                          Delete
+                          Refresh
                         </button>
                       )}
                     </div>
