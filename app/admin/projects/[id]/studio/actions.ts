@@ -194,6 +194,7 @@ export type RoomRenderPrep = {
 export async function prepareRoomRender(
   projectId: string,
   roomId: string,
+  sourceMediaId?: string,
 ): Promise<RoomRenderPrep | { error: string }> {
   await requireAdmin();
 
@@ -210,8 +211,11 @@ export async function prepareRoomRender(
   });
   if (!room) return { error: "Room not found in this project" };
 
+  const usable = room.media.filter((m) => m.url && m.url.trim() !== "");
   const before =
-    room.media.find((m) => m.url && m.url.trim() !== "") ?? null;
+    (sourceMediaId ? usable.find((m) => m.id === sourceMediaId) : null) ??
+    usable[0] ??
+    null;
 
   // Scope checklist (cached on the room; generated from scope if needed).
   const checklist = await extractRenderChecklistAction(roomId);
@@ -380,6 +384,71 @@ export async function getRoomRenderStatus(
   });
   if (!m?.renderStatus) return { status: "unknown" };
   return { status: m.renderStatus, error: m.renderError };
+}
+
+export type StudioRenderState = {
+  selectedRenderMediaId: string | null;
+  photos: { id: string; url: string; thumbnailUrl: string | null }[];
+  renders: {
+    id: string;
+    url: string;
+    thumbnailUrl: string | null;
+    sourceMediaId: string | null;
+    parentMediaId: string | null;
+    status: "QUEUED" | "RENDERING" | "DONE" | "FAILED";
+    error: string | null;
+  }[];
+};
+
+/** Full render state for a room: its before photos, all renders, and the selected one. */
+export async function getRoomRenderState(
+  projectId: string,
+  roomId: string,
+): Promise<StudioRenderState | { error: string }> {
+  await requireAdmin();
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    select: {
+      selectedRenderMediaId: true,
+      media: {
+        where: { OR: [{ type: MediaType.EXISTING }, { type: MediaType.RENDERING }] },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          id: true,
+          url: true,
+          thumbnailUrl: true,
+          type: true,
+          sourceMediaId: true,
+          parentMediaId: true,
+          renderStatus: true,
+          renderError: true,
+        },
+      },
+    },
+  });
+  if (!room) return { error: "Room not found in this project" };
+
+  const photos = room.media
+    .filter((m) => m.type === MediaType.EXISTING && m.url && m.url.trim() !== "")
+    .map((m) => ({ id: m.id, url: m.url, thumbnailUrl: m.thumbnailUrl }));
+
+  const renders = room.media
+    .filter((m) => m.type === MediaType.RENDERING)
+    .map((m) => ({
+      id: m.id,
+      url: m.url,
+      thumbnailUrl: m.thumbnailUrl,
+      sourceMediaId: m.sourceMediaId,
+      parentMediaId: m.parentMediaId,
+      status: (m.renderStatus ?? (m.url ? "DONE" : "QUEUED")) as
+        | "QUEUED"
+        | "RENDERING"
+        | "DONE"
+        | "FAILED",
+      error: m.renderError,
+    }));
+
+  return { selectedRenderMediaId: room.selectedRenderMediaId, photos, renders };
 }
 
 /**
