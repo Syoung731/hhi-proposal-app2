@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
-import { MediaKind, MediaPlacement, MediaType } from "@/app/generated/prisma";
+import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
+import { getGeminiImageModel } from "@/app/lib/ai/gemini-models";
+import { publishStudioRenderMessage } from "@/app/lib/media/studio-render-job";
 import {
   signBulkUploadUrls,
   commitMediaBatch,
@@ -13,7 +15,6 @@ import {
 } from "@/app/lib/media/upload-pipeline";
 import {
   setProjectHeroMediaAction,
-  startRoomRenderAction,
   extractRenderChecklistAction,
 } from "../media/actions";
 import { detectPhotoFixtures } from "@/app/lib/gemini";
@@ -227,12 +228,12 @@ export async function prepareRoomRender(
 }
 
 /**
- * Generate a before/after render for a room from the confirmed scope items, then
- * select it so the deck's before/after slide auto-builds. Reuses the existing
- * render path (anti-hallucination guardrails + prompt-safe filtering). Runs
- * synchronously per room — fine for one-at-a-time studio use.
+ * Queue a before/after render as a QStash background job (Phase 2b). Creates a
+ * QUEUED render row, selects it (so the before/after slide builds when DONE),
+ * and publishes to the worker. Returns immediately — the studio polls
+ * getRoomRenderStatus to watch progress without blocking.
  */
-export async function renderRoomFromStudio(
+export async function queueStudioRender(
   projectId: string,
   roomId: string,
   sourceMediaId: string,
@@ -240,19 +241,106 @@ export async function renderRoomFromStudio(
 ): Promise<{ ok: true; mediaId: string } | { error: string }> {
   await requireAdmin();
 
-  const res = await startRoomRenderAction(projectId, roomId, sourceMediaId, {
-    checkedBullets: confirmedItems,
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, stylePresetId: true },
   });
-  if ("error" in res) return { error: res.error };
+  if (!project) return { error: "Project not found" };
 
-  // Select the new render so syncBeforeAfterSlides builds the slide.
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    select: { id: true },
+  });
+  if (!room) return { error: "Room not found in this project" };
+
+  const source = await prisma.media.findFirst({
+    where: { id: sourceMediaId, projectId, roomId, type: MediaType.EXISTING },
+    select: { id: true },
+  });
+  if (!source) return { error: "Source photo not found" };
+
+  const rootCount = await prisma.media.count({
+    where: { projectId, roomId, type: MediaType.RENDERING, parentMediaId: null },
+  });
+  if (rootCount >= 3) {
+    return { error: "Max 3 renders per section — delete one to generate another." };
+  }
+
+  const maxOrder = await prisma.media
+    .aggregate({
+      where: { projectId, roomId, type: MediaType.RENDERING },
+      _max: { sortOrder: true },
+    })
+    .then((r) => r._max.sortOrder ?? -1);
+
+  const created = await prisma.media.create({
+    data: {
+      projectId,
+      roomId,
+      kind: MediaKind.OTHER,
+      type: MediaType.RENDERING,
+      url: "",
+      fileKey: `renderings/pending/${sourceMediaId}/${Date.now()}`,
+      caption: null,
+      tags: [],
+      sortOrder: maxOrder + 1,
+      sourceMediaId,
+      stylePresetId: project.stylePresetId,
+      renderProvider: "gemini",
+      renderModel: await getGeminiImageModel(),
+      renderStatus: RenderStatus.QUEUED,
+      promptVersion: 1,
+    },
+    select: { id: true },
+  });
+
+  // Select it now so syncBeforeAfterSlides builds the slide once it's DONE.
   await prisma.room.update({
     where: { id: roomId },
-    data: { selectedRenderMediaId: res.createdMediaId },
+    data: { selectedRenderMediaId: created.id },
   });
-  revalidatePath(`/admin/projects/${projectId}`);
 
-  return { ok: true, mediaId: res.createdMediaId };
+  try {
+    await publishStudioRenderMessage({
+      projectId,
+      roomId,
+      sourceMediaId,
+      createdMediaId: created.id,
+      checkedBullets: confirmedItems,
+    });
+  } catch (e) {
+    await prisma.media.update({
+      where: { id: created.id },
+      data: {
+        renderStatus: RenderStatus.FAILED,
+        renderError: (e instanceof Error ? e.message : "Queue failed").slice(0, 500),
+      },
+    });
+    return {
+      error: `Could not queue render: ${e instanceof Error ? e.message : "unknown"}`,
+    };
+  }
+
+  revalidatePath(`/admin/projects/${projectId}`);
+  return { ok: true, mediaId: created.id };
+}
+
+export type RoomRenderStatus = {
+  status: "QUEUED" | "RENDERING" | "DONE" | "FAILED" | "unknown";
+  error?: string | null;
+};
+
+/** Poll a render's status (studio watches this after queueing). */
+export async function getRoomRenderStatus(
+  mediaId: string,
+): Promise<RoomRenderStatus> {
+  await requireAdmin();
+  const m = await prisma.media.findUnique({
+    where: { id: mediaId },
+    select: { renderStatus: true, renderError: true },
+  });
+  if (!m?.renderStatus) return { status: "unknown" };
+  return { status: m.renderStatus, error: m.renderError };
 }
 
 /**

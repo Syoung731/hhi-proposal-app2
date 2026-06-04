@@ -14,7 +14,8 @@ import {
   commitStudioRoomPhotos,
   commitStudioHeroPhoto,
   prepareRoomRender,
-  renderRoomFromStudio,
+  queueStudioRender,
+  getRoomRenderStatus,
   composeDeckCopyAction,
   type StudioReadiness,
   type RoomRenderPrep,
@@ -260,6 +261,13 @@ function RoomRenderReview({
     "idle" | "preparing" | "prepared" | "rendering" | "done" | "error"
   >("idle");
   const [error, setError] = useState<string | null>(null);
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const prepare = useCallback(async () => {
     setStatus("preparing");
@@ -290,7 +298,7 @@ function RoomRenderReview({
     if (!prep?.beforeMedia) return;
     setStatus("rendering");
     setError(null);
-    const res = await renderRoomFromStudio(
+    const res = await queueStudioRender(
       projectId,
       roomId,
       prep.beforeMedia.id,
@@ -301,7 +309,22 @@ function RoomRenderReview({
       setStatus("error");
       return;
     }
-    setStatus("done");
+    // Poll the background job's status until it finishes.
+    const mediaId = res.mediaId;
+    const poll = async () => {
+      if (!aliveRef.current) return;
+      const s = await getRoomRenderStatus(mediaId);
+      if (!aliveRef.current) return;
+      if (s.status === "DONE") {
+        setStatus("done");
+      } else if (s.status === "FAILED") {
+        setError(s.error || "Render failed");
+        setStatus("error");
+      } else {
+        setTimeout(poll, 4000);
+      }
+    };
+    setTimeout(poll, 4000);
   }, [projectId, roomId, prep, checked]);
 
   return (
@@ -397,7 +420,8 @@ function RoomRenderReview({
             )}
             {status === "rendering" && (
               <p className="mt-3 text-sm text-orange-700 dark:text-orange-300">
-                Rendering… this takes ~30–60 seconds.
+                Rendering in the background… (~30–60s). You can prepare other
+                sections while this runs.
               </p>
             )}
             {status === "done" && (

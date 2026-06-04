@@ -87,7 +87,7 @@ function resolveWorkerUrl(): string {
 
 /** Lazy QStash client — instantiated on first publish so boot doesn't fail when env is missing (e.g. during `next build`). */
 let qstashClient: Client | null = null;
-function getQstashClient(): Client {
+export function getQstashClient(): Client {
   if (qstashClient) return qstashClient;
   const token = sanitizeEnv(process.env.QSTASH_TOKEN);
   if (!token) {
