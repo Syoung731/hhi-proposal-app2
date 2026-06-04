@@ -71,6 +71,7 @@ export function RoomRenderPanel({
   }, [state, load]);
 
   const photos = state?.photos ?? [];
+  const selectedPhoto = photos.find((p) => p.id === sourceId) ?? null;
   const rendersForSource = (state?.renders ?? []).filter(
     (r) => r.sourceMediaId === sourceId,
   );
@@ -215,6 +216,25 @@ export function RoomRenderPanel({
             ))}
           </div>
         </div>
+      )}
+
+      {/* Before photo (always visible) */}
+      {selectedPhoto ? (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Before
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={selectedPhoto.thumbnailUrl ?? selectedPhoto.url}
+            alt=""
+            className="h-44 w-auto max-w-full rounded border border-zinc-200 object-cover dark:border-zinc-700"
+          />
+        </div>
+      ) : (
+        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+          No before photo on this section yet — add photos above.
+        </p>
       )}
 
       {/* Render-new review (checklist) */}
