@@ -631,6 +631,13 @@ export interface ScopeOverviewContent extends SharedSlideFields {
    */
   scopeItems?: ScopeItem[];
   /**
+   * Which content source the layout renders: "items" (bullet items) or
+   * "description" (the paragraph). When unset, defaults by layout — legacy
+   * split-panel / image-row default to "description", all others to "items".
+   * Setting this lets ANY layout use either source.
+   */
+  contentMode?: "items" | "description" | null;
+  /**
    * Optional short intro/kicker rendered above the items on the structured
    * layouts (1–2 sentences). Distinct from the legacy `description` blob.
    */

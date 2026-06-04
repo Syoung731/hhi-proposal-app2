@@ -3082,12 +3082,43 @@ function ScopeOverviewInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {/* ── CONTENT SOURCE ─────────────────────────────────────────────── */}
+      <SectionLabel>Content</SectionLabel>
+      <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.5 }}>
+        Choose what this layout shows — the bullet items or the paragraph.
+      </p>
+      {(() => {
+        const defaultMode =
+          slide.layoutKey === "split-panel" || slide.layoutKey === "image-row"
+            ? "description"
+            : "items";
+        const activeMode = content.contentMode ?? defaultMode;
+        const opt = (val: "items" | "description", label: string) => (
+          <button
+            onClick={() => updateContent({ contentMode: val })}
+            style={{
+              flex: 1, padding: "6px 8px", fontSize: 11, fontWeight: 600,
+              cursor: "pointer", borderRadius: 4,
+              border: `1px solid ${activeMode === val ? branding.accentColor : "#D1D5DB"}`,
+              background: activeMode === val ? branding.accentColor + "1A" : "#FFFFFF",
+              color: activeMode === val ? branding.textColor : "#6B7280",
+            }}
+          >
+            {label}
+          </button>
+        );
+        return (
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {opt("items", "Bullet items")}
+            {opt("description", "Paragraph")}
+          </div>
+        );
+      })()}
+
       {/* ── SCOPE ITEMS (structured) ───────────────────────────────────── */}
       <SectionLabel>Scope Items</SectionLabel>
       <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
-        {usesStructuredItems
-          ? "Powers this layout — each item is a short title + one line."
-          : "Used by the Editorial / Numbered / Checklist / Gallery layouts. (Current layout uses the Description below.)"}
+        The bullet items below — used when &quot;Content&quot; is set to Bullet items.
       </p>
 
       <FieldGroup label="Intro (optional)">
@@ -3228,7 +3259,7 @@ function ScopeOverviewInspector({
       {/* ── DESCRIPTION ────────────────────────────────────────────────── */}
       <SectionLabel>Description</SectionLabel>
       <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
-        Paragraph form — used by the Split Panel &amp; Image Row layouts.
+        Paragraph form — shown when &quot;Content&quot; above is set to Paragraph.
       </p>
       <FieldGroup label="Text">
         <TextArea

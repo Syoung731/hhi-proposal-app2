@@ -159,6 +159,46 @@ function ScopeGlyph({ item, color, scale = 1 }: { item: ScopeItem; color: string
   return <ScopeIcon name={item.icon} size={Math.round(26 * scale)} color={color} strokeWidth={1.5} />;
 }
 
+/** Resolve which content source a layout should render. */
+function effectiveScopeMode(
+  content: ScopeOverviewContent,
+  layoutKey: string,
+): "items" | "description" {
+  if (content.contentMode === "items" || content.contentMode === "description") {
+    return content.contentMode;
+  }
+  return layoutKey === "split-panel" || layoutKey === "image-row" ? "description" : "items";
+}
+
+/** Compact bulleted scope-item list for the legacy (paragraph) layouts. */
+function LegacyBulletList({
+  items,
+  accent,
+  ink,
+  itemScale,
+  style,
+}: {
+  items: ScopeItem[];
+  accent: string;
+  ink: string;
+  itemScale: number;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.55em", ...style }}>
+      {items.map((it, i) => (
+        <div key={i} style={{ display: "flex", gap: "0.5em", alignItems: "flex-start" }}>
+          <span style={{ color: accent, fontWeight: 700, lineHeight: 1.5, fontSize: `${0.7 * itemScale}em` }}>•</span>
+          <p style={{ fontSize: `${0.7 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: 0, lineHeight: 1.5 }}>
+            {it.title && <span style={{ fontWeight: 700, color: ink }}>{it.title}{it.detail ? ": " : ""}</span>}
+            {it.detail}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Eyebrow({ accent, color }: { accent: string; color?: string }) {
   return (
     <p
@@ -188,6 +228,9 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 2);
   const title = slide.headline ?? "Scope Overview";
   const description = content.description ?? "";
+  const items = deriveScopeItems(content, 6);
+  const itemScale = content.scopeItemsSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
   const photoPanelPct = content.panelSplitRatio ?? 50;
   const textPanelPct = 100 - photoPanelPct;
@@ -283,7 +326,7 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
         <TitleAccentRule accentColor={accent} marginTop="0" />
       </div>
 
-      {/* ── Description (absolutely positioned) ───────────────────────────── */}
+      {/* ── Body: description paragraph OR bullet items ───────────────────── */}
       <div
         style={{
           position: "absolute",
@@ -294,7 +337,9 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           zIndex: 2,
         }}
       >
-        {description ? (
+        {mode === "items" && items.length > 0 ? (
+          <LegacyBulletList items={items} accent={accent} ink={titleColor} itemScale={itemScale} />
+        ) : description ? (
           <p style={descStyle}>
             {description}
           </p>
@@ -328,6 +373,9 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 4);
   const title = slide.headline ?? "Scope Overview";
   const description = content.description ?? "";
+  const items = deriveScopeItems(content, 6);
+  const itemScale = content.scopeItemsSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   // Per-field: Title
@@ -418,7 +466,7 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
         <TitleAccentRule accentColor={accent} marginTop="0" />
       </div>
 
-      {/* ── Description (absolutely positioned) ───────────────────────────── */}
+      {/* ── Body: description paragraph OR bullet items ───────────────────── */}
       <div
         style={{
           position: "absolute",
@@ -429,7 +477,9 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
           zIndex: 2,
         }}
       >
-        {description ? (
+        {mode === "items" && items.length > 0 ? (
+          <LegacyBulletList items={items} accent={accent} ink={titleColor} itemScale={itemScale} />
+        ) : description ? (
           <p style={descStyle}>
             {description}
           </p>
@@ -466,6 +516,8 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
   const intro = (content.intro ?? "").trim();
   const itemScale = content.scopeItemsSize ?? 1;
   const iconScale = content.scopeIconSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
+  const description = (content.description ?? "").trim();
   const showIcons = (content.showItemIcons ?? true) && items.some((it) => it.icon || it.iconImageUrl);
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const panelPct = 40;
@@ -496,6 +548,11 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
           {title}
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, marginTop: "0.9em", marginBottom: "1.4em" }} />
+        {mode === "description" && description ? (
+          <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.82)", lineHeight: 1.7, margin: 0 }}>
+            {description}
+          </p>
+        ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {items.map((it, i) => (
             <div
@@ -528,6 +585,7 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Right framed photo */}
@@ -580,6 +638,8 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "Scope of Work";
   const itemScale = content.scopeItemsSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
+  const description = (content.description ?? "").trim();
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const photoPct = 48;
 
@@ -600,6 +660,11 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
           {title}
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, margin: "0.8em 0 1.3em" }} />
+        {mode === "description" && description ? (
+          <p style={{ fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", lineHeight: 1.7, margin: 0 }}>
+            {description}
+          </p>
+        ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {items.map((it, i) => (
             <div
@@ -624,6 +689,7 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       <LogoOverlay
@@ -648,6 +714,8 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "Scope Alignment";
   const itemScale = content.scopeItemsSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
+  const description = (content.description ?? "").trim();
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const textPct = 58;
 
@@ -664,6 +732,11 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
           {title}
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, margin: "0.8em 0 1.3em" }} />
+        {mode === "description" && description ? (
+          <p style={{ fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", lineHeight: 1.7, margin: 0 }}>
+            {description}
+          </p>
+        ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.9em" }}>
           {items.map((it, i) => (
             <div key={i} style={{ display: "flex", gap: "0.7em", alignItems: "flex-start" }}>
@@ -677,6 +750,7 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       <div style={{ position: "absolute", left: `${textPct}%`, right: 0, top: 0, bottom: 0, overflow: "hidden" }}>
@@ -706,6 +780,8 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
   const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 3);
   const title = slide.headline ?? "Scope Alignment";
   const itemScale = content.scopeItemsSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
+  const description = (content.description ?? "").trim();
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
 
   return (
@@ -732,7 +808,12 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
         )}
       </div>
 
-      {/* 2×2 item grid */}
+      {/* Body: description paragraph OR 2×2 item grid */}
+      {mode === "description" && description ? (
+        <p style={{ flex: "0 0 auto", fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", lineHeight: 1.7, borderTop: "1px solid #ECE9E3", paddingTop: "1em", margin: 0 }}>
+          {description}
+        </p>
+      ) : (
       <div style={{ flex: "0 0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto auto", columnGap: "2.2em", rowGap: "0.8em", borderTop: "1px solid #ECE9E3", paddingTop: "1em" }}>
         {items.map((it, i) => (
           <div key={i} style={{ paddingLeft: i % 2 === 1 ? "2.2em" : 0, borderLeft: i % 2 === 1 ? "1px solid #ECE9E3" : "none" }}>
@@ -749,6 +830,7 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
           </div>
         ))}
       </div>
+      )}
 
       <LogoOverlay
         show={content.showLogo ?? false}
@@ -777,6 +859,8 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
   const stat = (content.stat ?? "").trim();
   const itemScale = content.scopeItemsSize ?? 1;
   const iconScale = content.scopeIconSize ?? 1;
+  const mode = effectiveScopeMode(content, slide.layoutKey);
+  const description = (content.description ?? "").trim();
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const showGrid = (content.backgroundSkin ?? "blueprint") !== "none";
   const photoPct = 46;
@@ -827,7 +911,12 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
             </p>
           )}
 
-          {/* Icon rows with a left measurement guide */}
+          {/* Body: description paragraph OR icon rows */}
+          {mode === "description" && description ? (
+            <p style={{ marginTop: "1.4em", fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", lineHeight: 1.7, maxWidth: "92%" }}>
+              {description}
+            </p>
+          ) : (
           <div style={{ marginTop: "1.6em", paddingLeft: "1.4em", borderLeft: `1px solid ${markColor}`, display: "flex", flexDirection: "column", gap: "1.15em" }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", gap: "1.1em", alignItems: "flex-start", position: "relative" }}>
@@ -848,6 +937,7 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
               </div>
             ))}
           </div>
+          )}
         </div>
       </div>
 
