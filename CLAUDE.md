@@ -375,3 +375,13 @@ drift or lost writes, so they can be wired into a CI gate later if desired.
 - If a prompt is ambiguous, ask for clarification rather than guessing
 - When modifying shared utilities, verify all callers still work
 - After completing a task, summarize what was changed and what to test
+
+## Training Docs (standing convention)
+End-user training lives in `docs/training/` (NOT developer docs). When a
+user-facing feature or slide type is added or meaningfully changed, add or
+update its training module in `docs/training/` IN THE SAME COMMIT as the code,
+and keep the index at `docs/training/README.md` current.
+- Audience: the people who USE the app (salespeople, admins), not developers.
+- Style: step-by-step with "In the app:" click-paths, plus "Tip" / "Heads-up"
+  callouts. Match the tone of `docs/training/deck-scope-slide.md`.
+- Goal: at any point the docs can be assembled into a complete user training.
