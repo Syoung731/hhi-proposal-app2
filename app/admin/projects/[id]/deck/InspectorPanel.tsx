@@ -74,6 +74,7 @@ import { BrandingColorRow } from "@/components/ui/BrandingColorRow";
 import { SLIDE_FONTS } from "@/app/lib/slide-constants";
 import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
 import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction } from "./actions";
+import { SCOPE_ICON_OPTIONS } from "@/app/lib/deck/scope-icon-keys";
 
 interface Props {
   slide: ProposalSlide | null;
@@ -2869,6 +2870,7 @@ function ScopeOverviewInspector({
   // the legacy layouts use 2 / 4.
   const PHOTO_CAP: Record<string, number> = {
     "editorial-split": 1,
+    "blueprint-icons": 1,
     "photo-numbered": 1,
     "photo-checklist": 1,
     "gallery-grid": 3,
@@ -2879,6 +2881,7 @@ function ScopeOverviewInspector({
   // Layouts driven by the structured scope-items editor (vs. the legacy paragraph).
   const usesStructuredItems =
     slide.layoutKey === "editorial-split" ||
+    slide.layoutKey === "blueprint-icons" ||
     slide.layoutKey === "photo-numbered" ||
     slide.layoutKey === "photo-checklist" ||
     slide.layoutKey === "gallery-grid";
@@ -3000,6 +3003,26 @@ function ScopeOverviewInspector({
         />
       </FieldGroup>
 
+      {/* Blueprint + Icons specifics */}
+      <FieldGroup label="Stat subtitle (Blueprint layout)">
+        <TextInput
+          value={content.stat ?? ""}
+          onChange={(v) => updateContent({ stat: v || null })}
+          placeholder="e.g. 168 square feet of extended living space"
+        />
+      </FieldGroup>
+      {slide.layoutKey === "blueprint-icons" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "2px 0 10px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={(content.backgroundSkin ?? "blueprint") !== "none"}
+            onChange={(e) => updateContent({ backgroundSkin: e.target.checked ? "blueprint" : "none" })}
+            style={{ accentColor: branding.accentColor }}
+          />
+          Blueprint grid background + dimension marks
+        </label>
+      )}
+
       {scopeItems.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
           {scopeItems.map((item, idx) => (
@@ -3024,6 +3047,18 @@ function ScopeOverviewInspector({
                   onChange={(v) => updateItem(idx, { title: v })}
                   placeholder="Title — e.g. Primary Bath"
                 />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <span style={{ fontSize: 10, color: "#6B7280", flex: "0 0 auto" }}>Icon</span>
+                <select
+                  value={item.icon ?? "feature"}
+                  onChange={(e) => updateItem(idx, { icon: e.target.value })}
+                  style={{ flex: 1, fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#FFFFFF", color: "#374151" }}
+                >
+                  {SCOPE_ICON_OPTIONS.map((opt) => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
               <TextArea
                 value={item.detail ?? ""}

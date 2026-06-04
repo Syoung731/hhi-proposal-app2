@@ -56,6 +56,7 @@ export type WhyUsLayoutKey =
   | "testimonials-split";
 export type ScopeOverviewLayoutKey =
   | "editorial-split"
+  | "blueprint-icons"
   | "photo-numbered"
   | "photo-checklist"
   | "gallery-grid"
@@ -607,6 +608,12 @@ export interface ScopeItem {
   title: string;
   /** One-line supporting detail. Optional — title-only items render fine. */
   detail?: string | null;
+  /**
+   * Icon key from ScopeIcons (e.g. "fan", "shower", "roof"). Rendered by the
+   * blueprint-icons layout. Unknown/empty falls back to a neutral "feature"
+   * glyph. See app/.../slides/shared/ScopeIcons.tsx for the full key list.
+   */
+  icon?: string | null;
 }
 
 export interface ScopeOverviewContent extends SharedSlideFields {
@@ -621,6 +628,17 @@ export interface ScopeOverviewContent extends SharedSlideFields {
    * layouts (1–2 sentences). Distinct from the legacy `description` blob.
    */
   intro?: string | null;
+  /**
+   * Bold accent-colored stat subtitle for the blueprint-icons layout,
+   * e.g. "168 square feet of extended living space". Optional.
+   */
+  stat?: string | null;
+  /**
+   * Background treatment for the structured panel. "blueprint" paints the
+   * graph-paper grid + corner dimension marks (Poolside reference); "none"
+   * (default) leaves it clean. Currently consumed by blueprint-icons.
+   */
+  backgroundSkin?: "none" | "blueprint" | null;
   /** 3–4 sentence description of the project scope. */
   description?: string | null;
   /**
@@ -2068,6 +2086,7 @@ export const WHY_US_LAYOUTS: { key: WhyUsLayoutKey; label: string }[] = [
 
 export const SCOPE_OVERVIEW_LAYOUTS: { key: ScopeOverviewLayoutKey; label: string }[] = [
   { key: "editorial-split", label: "Editorial Split" },
+  { key: "blueprint-icons", label: "Blueprint + Icons" },
   { key: "photo-numbered",  label: "Numbered + Photo" },
   { key: "photo-checklist", label: "Checklist + Photo" },
   { key: "gallery-grid",    label: "Gallery + Grid" },

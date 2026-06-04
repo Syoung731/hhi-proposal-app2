@@ -8,6 +8,7 @@ import type {
   ScopeItem,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { ScopeIcon } from "./shared/ScopeIcons";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
 
@@ -714,10 +715,106 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
   );
 }
 
+// ─── Layout 7: blueprint-icons ───────────────────────────────────────────────
+// Left full-bleed photo, right "drafting" panel: graph-paper grid, corner
+// dimension brackets, a bold title, an accent stat subtitle, and icon rows.
+// Matches the Poolside reference.
+
+function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
+  const content = (slide.content ?? {}) as ScopeOverviewContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const ink = content.titleColor ?? branding.textColor ?? "#1A2332";
+  const items = deriveScopeItems(content, 5);
+  const photo = (content.selectedPhotos ?? []).find((p) => p.url);
+  const title = slide.headline ?? "Scope of Work";
+  const stat = (content.stat ?? "").trim();
+  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const showGrid = (content.backgroundSkin ?? "blueprint") !== "none";
+  const photoPct = 46;
+  const gridLine = "rgba(26,35,50,0.07)";
+  const markColor = "rgba(26,35,50,0.28)";
+
+  return (
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF" }}>
+      {/* Left photo */}
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${photoPct}%`, overflow: "hidden" }}>
+        <PhotoOrPlaceholder photo={photo} />
+      </div>
+
+      {/* Right drafting panel */}
+      <div style={{ position: "absolute", left: `${photoPct}%`, right: 0, top: 0, bottom: 0, overflow: "hidden" }}>
+        {/* Graph-paper grid */}
+        {showGrid && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage: `linear-gradient(${gridLine} 1px, transparent 1px), linear-gradient(90deg, ${gridLine} 1px, transparent 1px)`,
+              backgroundSize: "26px 26px",
+            }}
+          />
+        )}
+
+        {/* Corner dimension brackets */}
+        {showGrid && (
+          <>
+            <svg className="absolute pointer-events-none" style={{ top: "7%", right: "6%" }} width="64" height="20" viewBox="0 0 64 20" fill="none" stroke={markColor} strokeWidth="1" aria-hidden>
+              <path d="M2 2v6M62 2v6M2 5h60" />
+            </svg>
+            <svg className="absolute pointer-events-none" style={{ bottom: "7%", right: "6%" }} width="64" height="20" viewBox="0 0 64 20" fill="none" stroke={markColor} strokeWidth="1" aria-hidden>
+              <path d="M2 18v-6M62 18v-6M2 15h60" />
+            </svg>
+          </>
+        )}
+
+        {/* Content */}
+        <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", padding: "7% 7%" }}>
+          {(content.showSectionLabel ?? false) && <Eyebrow accent={accent} />}
+          <h2 style={{ fontSize: `${1.95 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: ink, lineHeight: 1.08, margin: 0 }}>
+            {title}
+          </h2>
+          {stat && (
+            <p style={{ fontSize: "0.95em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, color: accent, margin: "0.5em 0 0", lineHeight: 1.25 }}>
+              {stat}
+            </p>
+          )}
+
+          {/* Icon rows with a left measurement guide */}
+          <div style={{ marginTop: "1.6em", paddingLeft: "1.4em", borderLeft: `1px solid ${markColor}`, display: "flex", flexDirection: "column", gap: "1.15em" }}>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: "flex", gap: "1.1em", alignItems: "flex-start", position: "relative" }}>
+                {/* tick on the guide */}
+                <span style={{ position: "absolute", left: "calc(-1.4em - 1px)", top: "0.9em", width: "0.7em", height: 1, background: markColor }} />
+                <div style={{ flex: "0 0 auto", width: "2em", display: "flex", justifyContent: "center" }}>
+                  <ScopeIcon name={it.icon} size={32} color={ink} strokeWidth={1.5} />
+                </div>
+                <p style={{ fontSize: "0.82em", fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.4, paddingTop: "0.15em" }}>
+                  {it.title && <span style={{ fontWeight: 700, color: ink }}>{it.title}{it.detail ? ": " : ""}</span>}
+                  {it.detail}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 export function ScopeOverviewSlide({ slide, branding, hasAiBackground }: LayoutProps) {
   switch (slide.layoutKey) {
+    case "blueprint-icons":
+      return <BlueprintIconsLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "editorial-split":
       return <EditorialSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "photo-numbered":

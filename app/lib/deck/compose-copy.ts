@@ -4,6 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/app/lib/prisma";
 import { callClaude } from "@/app/lib/ai/model";
 import { generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
+import { SCOPE_ICON_KEY_LIST, isScopeIconKey } from "@/app/lib/deck/scope-icon-keys";
 
 /**
  * AI deck composer (Phase 3).
@@ -37,33 +38,35 @@ export type ComposeCopyResult = {
   errors: { type: string; error: string }[];
 };
 
-type DraftScopeItem = { title: string; detail: string };
+type DraftScopeItem = { title: string; detail: string; icon: string | null };
 
 /**
- * Drafts structured scope lines ({title, detail}) from room scope narratives.
- * This is what powers the NotebookLM-style scope layouts (numbered / checklist
- * / gallery / editorial-split). Returns 4–6 concise items, or [] on failure so
- * the caller can fall back to the legacy paragraph.
+ * Drafts structured scope lines ({title, detail, icon}) + an intro + a stat
+ * from room scope narratives. Powers all the NotebookLM-style scope layouts
+ * (blueprint-icons uses the icons + stat; the others use title/detail). Returns
+ * empty on failure so the caller can fall back to the legacy paragraph.
  */
 async function draftScopeItems(
   rooms: { name: string; scopeNarrative: string; bucket: string }[],
-): Promise<{ items: DraftScopeItem[]; intro: string | null }> {
+): Promise<{ items: DraftScopeItem[]; intro: string | null; stat: string | null }> {
   const scoped = rooms.filter((r) => (r.scopeNarrative ?? "").trim().length >= 20);
   const source = (scoped.length > 0 ? scoped : rooms)
     .map((r) => `${r.name} [${r.bucket}]: ${r.scopeNarrative || "(no detail)"}`)
     .join("\n");
-  if (!source.trim()) return { items: [], intro: null };
+  if (!source.trim()) return { items: [], intro: null, stat: null };
 
   const response = await callClaude({
-    max_tokens: 900,
+    max_tokens: 1100,
     temperature: 0.4,
     system:
       "You write client-facing scope summaries for a luxury design-build remodeling firm. " +
       "Given room-by-room scope notes, produce a compact, scannable scope list for a single slide. " +
       "Return ONLY valid minified JSON of the shape " +
-      '{"intro":"<1 short sentence framing the project, =16 words>","items":[{"title":"<2-4 word bold lead>","detail":"<one specific, benefit-forward line, =18 words, no period>"}]}. ' +
+      '{"intro":"<1 short framing sentence, =16 words>","stat":"<optional headline metric like \'168 square feet of extended living space\' or \'\' if none is obvious>","items":[{"title":"<2-4 word bold lead>","detail":"<one specific, benefit-forward line, =18 words, no trailing period>","icon":"<one icon key>"}]}. ' +
       "Produce 4 to 6 items. Group related rooms/work into a single item where natural. " +
       "Titles are Title Case noun phrases (e.g. 'Primary Bath', 'Custom Cabinetry'). " +
+      `The "icon" MUST be exactly one key from this list (choose the best visual match): ${SCOPE_ICON_KEY_LIST}. Use "feature" when nothing fits. ` +
+      "Only include a stat if a concrete number appears in the notes (square footage, counts); otherwise use an empty string. " +
       "No markdown, no code fences, no commentary — JSON only.",
     messages: [
       {
@@ -81,16 +84,25 @@ async function draftScopeItems(
     .replace(/^```(?:json)?\s*|\s*```$/g, "");
 
   try {
-    const parsed = JSON.parse(raw) as { intro?: string; items?: DraftScopeItem[] };
-    const items = (parsed.items ?? [])
+    const parsed = JSON.parse(raw) as {
+      intro?: string;
+      stat?: string;
+      items?: { title?: string; detail?: string; icon?: string }[];
+    };
+    const items: DraftScopeItem[] = (parsed.items ?? [])
       .filter((it) => it && typeof it.title === "string")
-      .map((it) => ({ title: it.title.trim(), detail: (it.detail ?? "").trim() }))
+      .map((it) => ({
+        title: (it.title ?? "").trim(),
+        detail: (it.detail ?? "").trim(),
+        icon: isScopeIconKey(it.icon) ? it.icon : null,
+      }))
       .filter((it) => it.title.length > 0)
       .slice(0, 6);
     const intro = (parsed.intro ?? "").trim() || null;
-    return { items, intro };
+    const stat = (parsed.stat ?? "").trim() || null;
+    return { items, intro, stat };
   } catch {
-    return { items: [], intro: null };
+    return { items: [], intro: null, stat: null };
   }
 }
 
@@ -230,14 +242,18 @@ export async function composeDeckCopy(
               ? [{ id: hero.id, url: hero.url, thumbnailUrl: hero.thumbnailUrl }]
               : [];
 
-        // Pick the layout the composer "likes": editorial-split when we have a
-        // photo (premium), gallery-grid when 3 photos exist, numbered otherwise.
+        // Pick the layout the composer "likes": blueprint-icons when we have a
+        // photo + icons (the designed look), gallery-grid for 3 photos,
+        // editorial-split as a photo fallback, numbered when photo-less.
         const photoCount = selectedPhotos.length;
+        const hasIcons = structured.items.some((it) => it.icon);
         const layoutKey =
           photoCount >= 3
             ? "gallery-grid"
             : photoCount >= 1
-              ? "editorial-split"
+              ? hasIcons
+                ? "blueprint-icons"
+                : "editorial-split"
               : "photo-numbered";
 
         await prisma.deckSlide.update({
@@ -249,6 +265,8 @@ export async function composeDeckCopy(
               ...(description ? { description } : {}),
               ...(structured.items.length > 0 ? { scopeItems: structured.items } : {}),
               ...(structured.intro ? { intro: structured.intro } : {}),
+              ...(structured.stat ? { stat: structured.stat } : {}),
+              backgroundSkin: layoutKey === "blueprint-icons" ? "blueprint" : "none",
               selectedPhotos,
             },
             source: "auto",
