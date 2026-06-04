@@ -6,6 +6,7 @@ import { prisma } from "@/app/lib/prisma";
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
 import { getGeminiImageModel } from "@/app/lib/ai/gemini-models";
 import { publishStudioRenderMessage } from "@/app/lib/media/studio-render-job";
+import { renderRoomCore } from "@/app/lib/gemini/render-room-core";
 import {
   signBulkUploadUrls,
   commitMediaBatch,
@@ -300,25 +301,63 @@ export async function queueStudioRender(
     data: { selectedRenderMediaId: created.id },
   });
 
-  try {
-    await publishStudioRenderMessage({
-      projectId,
-      roomId,
-      sourceMediaId,
-      createdMediaId: created.id,
-      checkedBullets: confirmedItems,
-    });
-  } catch (e) {
-    await prisma.media.update({
-      where: { id: created.id },
-      data: {
-        renderStatus: RenderStatus.FAILED,
-        renderError: (e instanceof Error ? e.message : "Queue failed").slice(0, 500),
-      },
-    });
-    return {
-      error: `Could not queue render: ${e instanceof Error ? e.message : "unknown"}`,
-    };
+  // Prefer the background QStash worker. If QStash isn't configured or the
+  // publish can't connect (e.g. local dev without the qstash-cli proxy), fall
+  // back to rendering synchronously inline so the feature still works — the
+  // studio's status poll will simply see DONE on its next tick.
+  const qstashConfigured = !!(process.env.QSTASH_TOKEN ?? "")
+    .replace(/['"]/g, "")
+    .trim();
+  let queued = false;
+  if (qstashConfigured) {
+    try {
+      await publishStudioRenderMessage({
+        projectId,
+        roomId,
+        sourceMediaId,
+        createdMediaId: created.id,
+        checkedBullets: confirmedItems,
+      });
+      queued = true;
+    } catch {
+      queued = false; // fall through to synchronous render
+    }
+  }
+
+  if (!queued) {
+    try {
+      await prisma.media.update({
+        where: { id: created.id },
+        data: { renderStatus: RenderStatus.RENDERING, renderError: null },
+      });
+      const { publicUrl, fileKey, tags } = await renderRoomCore({
+        projectId,
+        roomId,
+        sourceMediaId,
+        createdMediaId: created.id,
+        checkedBullets: confirmedItems,
+      });
+      await prisma.media.update({
+        where: { id: created.id },
+        data: {
+          url: publicUrl,
+          fileKey,
+          tags,
+          renderStatus: RenderStatus.DONE,
+          renderError: null,
+          roomId,
+        },
+      });
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "Render failed";
+      await prisma.media
+        .update({
+          where: { id: created.id },
+          data: { renderStatus: RenderStatus.FAILED, renderError: reason.slice(0, 500), roomId },
+        })
+        .catch(() => {});
+      return { error: `Render failed: ${reason}` };
+    }
   }
 
   revalidatePath(`/admin/projects/${projectId}`);

@@ -98,3 +98,18 @@ Canonical slide arc (the composer's default order): Cover → Objective → Proc
 Design Experience → Design-Build Advantage (Zero Change Order / Zero Mark-Up /
 Freedom / Designs That Work) → Scope by room → HHI-vs-Traditional → Timeline →
 Design Retainer → Investment (range) → Testimonials → Core Values → Closing/CTA.
+
+## Backlog / follow-ups from testing
+
+- **Phase 2c — multiple before/after renders per room.** Today `prepareRoomRender`
+  uses only the FIRST before photo, and one render per room. Requested:
+  1. When a room has multiple photos, show a selector to pick which photo(s) to
+     render (multi-select); generate a before/after for each selected photo.
+  2. Support multiple before/after renders per room (the render cap is already 3).
+  3. On the deck: choose which before/after is the room's MAIN-page slide; the
+     rest go on a secondary page. Requires extending `syncBeforeAfterSlides`
+     (currently one slide per room via `selectedRenderMediaId`) to emit a
+     primary + overflow slide(s) per room, plus a "set as main" control.
+- **Render execution:** `queueStudioRender` falls back to a synchronous inline
+  render when QStash isn't configured/reachable (local dev), and uses the
+  background worker when it is. (Fixed during testing.)
