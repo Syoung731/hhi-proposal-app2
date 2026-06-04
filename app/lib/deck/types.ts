@@ -649,9 +649,14 @@ export interface ScopeOverviewContent extends SharedSlideFields {
   scopeItemsSize?: number | null;
   /**
    * Size multiplier (0.5–2.0, default 1.0) for the per-item icons on the
-   * blueprint-icons layout. Independent of the text size.
+   * blueprint-icons / editorial-split layouts. Independent of the text size.
    */
   scopeIconSize?: number | null;
+  /**
+   * Whether to show per-item icons on the editorial-split layout (default true).
+   * Blueprint always shows icons; this toggle lets Editorial opt out.
+   */
+  showItemIcons?: boolean | null;
   /**
    * Background treatment for the structured panel. "blueprint" paints the
    * graph-paper grid + corner dimension marks (Poolside reference); "none"

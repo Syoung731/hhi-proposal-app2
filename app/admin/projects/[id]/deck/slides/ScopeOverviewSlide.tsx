@@ -128,6 +128,37 @@ function PhotoOrPlaceholder({ photo }: { photo?: ScopeOverviewSelectedPhoto }) {
   return <PositionedPhoto photo={photo} />;
 }
 
+/**
+ * Renders a scope item's glyph in any color. For a BrandIcon PNG it uses a CSS
+ * mask so a monochrome icon can be tinted (e.g. white on a dark panel); for the
+ * built-in vector icon it passes the color through. `scale` multiplies the
+ * ~1.7em box.
+ */
+function ScopeGlyph({ item, color, scale = 1 }: { item: ScopeItem; color: string; scale?: number }) {
+  if (item.iconImageUrl) {
+    return (
+      <span
+        aria-hidden
+        style={{
+          display: "inline-block",
+          width: `${1.7 * scale}em`,
+          height: `${1.7 * scale}em`,
+          backgroundColor: color,
+          WebkitMaskImage: `url(${item.iconImageUrl})`,
+          maskImage: `url(${item.iconImageUrl})`,
+          WebkitMaskRepeat: "no-repeat",
+          maskRepeat: "no-repeat",
+          WebkitMaskPosition: "center",
+          maskPosition: "center",
+          WebkitMaskSize: "contain",
+          maskSize: "contain",
+        }}
+      />
+    );
+  }
+  return <ScopeIcon name={item.icon} size={Math.round(26 * scale)} color={color} strokeWidth={1.5} />;
+}
+
 function Eyebrow({ accent, color }: { accent: string; color?: string }) {
   return (
     <p
@@ -434,6 +465,8 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
   const title = slide.headline ?? "The Scope";
   const intro = (content.intro ?? "").trim();
   const itemScale = content.scopeItemsSize ?? 1;
+  const iconScale = content.scopeIconSize ?? 1;
+  const showIcons = (content.showItemIcons ?? true) && items.some((it) => it.icon || it.iconImageUrl);
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const panelPct = 40;
 
@@ -468,20 +501,30 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
             <div
               key={i}
               style={{
+                display: "flex",
+                gap: "0.85em",
+                alignItems: "flex-start",
                 padding: "0.7em 0",
                 borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.13)",
               }}
             >
-              {it.title && (
-                <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: "#FFFFFF", margin: 0, lineHeight: 1.3 }}>
-                  {it.title}
-                </p>
+              {showIcons && (
+                <div style={{ flex: "0 0 auto", width: `${1.7 * iconScale}em`, height: `${1.7 * iconScale}em`, display: "flex", justifyContent: "center", alignItems: "center", marginTop: "0.1em" }}>
+                  <ScopeGlyph item={it} color="#FFFFFF" scale={iconScale} />
+                </div>
               )}
-              {it.detail && (
-                <p style={{ fontSize: `${0.72 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.74)", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
-                  {it.detail}
-                </p>
-              )}
+              <div style={{ flex: 1 }}>
+                {it.title && (
+                  <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: "#FFFFFF", margin: 0, lineHeight: 1.3 }}>
+                    {it.title}
+                  </p>
+                )}
+                {it.detail && (
+                  <p style={{ fontSize: `${0.72 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.74)", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
+                    {it.detail}
+                  </p>
+                )}
+              </div>
             </div>
           ))}
         </div>

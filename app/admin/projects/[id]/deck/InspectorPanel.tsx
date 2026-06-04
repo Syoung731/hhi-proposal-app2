@@ -3108,7 +3108,19 @@ function ScopeOverviewInspector({
           />
         </FieldGroup>
       )}
-      {slide.layoutKey === "blueprint-icons" && (
+      {slide.layoutKey === "editorial-split" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "2px 0 8px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={content.showItemIcons ?? true}
+            onChange={(e) => updateContent({ showItemIcons: e.target.checked })}
+            style={{ accentColor: branding.accentColor }}
+          />
+          Show item icons
+        </label>
+      )}
+      {(slide.layoutKey === "blueprint-icons" ||
+        (slide.layoutKey === "editorial-split" && (content.showItemIcons ?? true))) && (
         <FieldGroup label={`Icon Size — ${(content.scopeIconSize ?? 1.0).toFixed(1)}×`}>
           <PSizeSlider
             accentColor={branding.accentColor}
