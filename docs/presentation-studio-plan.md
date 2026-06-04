@@ -1,5 +1,61 @@
 # Presentation Studio — Plan
 
+---
+
+## ⏱️ SESSION HANDOFF / CURRENT STATE (read this first after a compaction)
+
+**Where we are:** Building the Presentation Studio on branch **`presentation-studio`**
+(off `proposal-v2`), all pushed to origin (Vercel builds a preview per push).
+The whole Studio is gated behind `NEXT_PUBLIC_STUDIO_ENABLED` so the live app is
+untouched. Steve tests on **localhost** (his local working tree IS this branch —
+edits land on disk immediately; he restarts/HMR to test).
+
+**Standing permissions (granted by Steve):**
+- I COMMIT directly (Conventional Commits + `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>` trailer).
+- I PUSH directly. The `git push` deny rule was removed from `.claude/settings.json`
+  (commit e59e922). Push feature branches freely; **call out any push to
+  `proposal-v2` (production / app.hhi-builders.com) before doing it.**
+
+**Built & committed on `presentation-studio` (newest last):**
+- Phase 0 scaffold (flag + `/admin/projects/[id]/studio` route + nav tab)
+- Phase 1 media wizard (per-room photo collection + hero) — `studio/studio-tab.tsx`, `studio/actions.ts`
+- Phase 2 scope-aware before/after: `gemini.ts` `detectPhotoFixtures`, `lib/media/render-scope-reconcile.ts`
+- Phase 2b background render: `lib/media/studio-render-job.ts`, `api/jobs/studio-render/route.ts`, `lib/gemini/render-room-core.ts` (extracted, shared with `startRoomRenderAction`); falls back to SYNC render if QStash unavailable
+- Phase 3 AI copy composer: `lib/deck/compose-copy.ts` (scope-overview + cover tagline)
+- Phase 2c render-panel rework: `studio/RoomRenderPanel.tsx` (multi-photo select, render new/update/set-as-main/delete; reuses media render actions)
+- Deck reset: "Delete entire deck — start over" in the deck editor's regenerate modal (`deck/actions.ts` `deleteProjectDeckAction`, `DeckEditorClient.tsx`)
+- Phase 4A FONT FIX: `slide-constants.ts` SLIDE_FONTS now use `var(--font-*)` (the serif was silently falling back — biggest plain-look cause)
+- Phase 4C start: warm linen default bg behind no-background slides (`SlideCard.tsx`)
+
+**Already on `proposal-v2` (live, earlier this session):** sales-stage scope-review
+questions (`ai-review` prompts → `lib/ai/review-prompts.ts`), phone/QR upload
+(`PhotoUploadToken` model + `/api/phone-upload/*` + `/m/[token]`), Google Drive
+import (`DriveImportModal` + `/api/drive-import`), thumbnail + rollup-timeout fixes.
+
+**▶ IMMEDIATE NEXT STEP (awaiting Steve):** The deck still doesn't look like the
+NotebookLM reference decks. Plan: perfect ONE slide to the target look, iterate
+via Steve's screenshots, then propagate. **Waiting on Steve to pick which slide**
+(Cover / Scope Overview / Before-After / Investment) **and optionally point to a
+specific slide in a reference PDF** (`C:\Users\syoun\Desktop\reference-decks\`,
+7 PDFs) to match. Then rebuild that slide to the NotebookLM bar.
+
+**Remaining roadmap:** 4B theme picker/storage (`deckTheme` on `ProposalDeck` +
+snapshot + picker), 4C full background palette per theme, 4D hero-slide layout
+upgrades (Cover/Objective/Investment/Closing — replace hardcoded colors with
+theme tokens), 2c-2 deck "main + 2-up overflow page" for multiple before/afters,
+Phase 5 cutover (flip `NEXT_PUBLIC_STUDIO_ENABLED=true` in prod — Steve's call).
+
+**Key gotchas:** fonts load as CSS vars in `app/layout.tsx`, `globals.css` only
+maps `--font-sans/mono`; deck render chokepoint is `lib/deck/SlideCard.tsx` →
+`SlideRenderer.tsx`; before/after slide builds from `Room.selectedRenderMediaId`
+via `syncBeforeAfterSlides` in `lib/deck/db.ts`; the `(node:...) SSL mode` console
+line is a benign pg deprecation warning, not an error. Migration
+`add_photo_upload_token` is applied to dev DB; runs in prod on deploy via
+`vercel-build`. NEVER run `prisma db pull`. Run `npx tsc --noEmit` after changes.
+
+---
+
+
 > Status: **approved**, in progress on branch `presentation-studio`, gated behind
 > `NEXT_PUBLIC_STUDIO_ENABLED`. Nothing here ships to the live app until the flag
 > is turned on in production.
