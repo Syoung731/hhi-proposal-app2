@@ -80,8 +80,9 @@ export async function resolveScopeIconImages(
       try {
         const gen = await generateBrandIconPngAction({
           name: label,
-          visual: `Simple, clean line-art icon of a ${label}, minimal, centered, even padding`,
+          visual: `Simple monochrome line-art icon of a ${label}, single dark color, even stroke weight, minimal, centered`,
           description: `Scope icon for a remodeling proposal representing "${label}".`,
+          monochrome: true,
         });
         if (gen.error || !gen.imageUrl || !gen.imageKey) return;
 

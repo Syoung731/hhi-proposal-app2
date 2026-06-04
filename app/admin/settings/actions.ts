@@ -2275,7 +2275,7 @@ Hard constraints:
 }
 
 export async function generateBrandIconPngAction(
-  input: { name: string; visual: string; description?: string | null }
+  input: { name: string; visual: string; description?: string | null; monochrome?: boolean }
 ): Promise<{ error?: string; imageUrl?: string; imageKey?: string; width?: number; height?: number }> {
   await requireAdmin();
 
@@ -2284,6 +2284,7 @@ export async function generateBrandIconPngAction(
   const name = (input.name ?? "").toString().trim();
   const visual = (input.visual ?? "").toString().trim();
   const description = (input.description ?? "").toString().trim();
+  const monochrome = input.monochrome === true;
 
   if (!name) {
     return { error: "Name is required for PNG generation." };
@@ -2317,12 +2318,16 @@ ICON OUTPUT REQUIREMENTS (STRICT, MUST FOLLOW EXACTLY):
 - The icon must be a standalone subject on this solid white canvas only. Do NOT add a separate plate, tile, badge, circle, rounded rectangle, frame, or container shape behind it.
 - Only use visible strokes and filled shapes for the subject itself.
 - The icon subject must be centered on the canvas with even padding on all sides so strokes never touch the canvas edge.
-- Line-art inspired style: simple, clean outlines, with optional subtle flat fills.
+- ${monochrome ? "Strict line-art: clean outlines ONLY, no filled shapes, no shading." : "Line-art inspired style: simple, clean outlines, with optional subtle flat fills."}
 
 PALETTE:
-- Full color is allowed. You may use multiple colors for the icon details.
+${monochrome
+  ? `- STRICTLY MONOCHROME: use ONE single solid dark color (#1A2332) for ALL strokes. Absolutely no other colors, no fills, no gradients, no shading.
+- Even, consistent stroke weight throughout (like a Lucide / Feather line icon).
+- The result must read as a clean single-color line icon.`
+  : `- Full color is allowed. You may use multiple colors for the icon details.
 - Prefer a cohesive, professional palette that would look good on both light and dark UI backgrounds.
-- Avoid neon, extremely saturated, or visually noisy palettes.
+- Avoid neon, extremely saturated, or visually noisy palettes.`}
 - No photographic textures or photo-like elements.
 
 ADDITIONAL HARD CONSTRAINTS:
@@ -2818,6 +2823,57 @@ export async function listBrandIcons() {
   return prisma.brandIcon.findMany({
     orderBy: [{ name: "asc" }, { createdAt: "asc" }],
   });
+}
+
+/**
+ * Regenerates every scope-category / scope-tagged BrandIcon in clean monochrome
+ * line-art (replacing each icon's image in place). Used to bring the existing
+ * full-color scope icons in line with the Blueprint scope layout's aesthetic.
+ * Runs in small parallel batches to limit Gemini load. Admin-only.
+ */
+export async function regenerateScopeIconsMonochromeAction(): Promise<{
+  updated: number;
+  failed: number;
+  total: number;
+  error?: string;
+}> {
+  await requireAdmin();
+  const icons = await prisma.brandIcon.findMany({
+    where: { OR: [{ category: "scope" }, { tags: { has: "scope" } }] },
+    select: { id: true, name: true },
+  });
+  let updated = 0;
+  let failed = 0;
+  const CHUNK = 4;
+  for (let i = 0; i < icons.length; i += CHUNK) {
+    const batch = icons.slice(i, i + CHUNK);
+    await Promise.all(
+      batch.map(async (ic) => {
+        try {
+          const gen = await generateBrandIconPngAction({
+            name: ic.name,
+            visual: `Simple monochrome line-art icon of ${ic.name}, single dark color, even stroke weight, minimal, centered`,
+            description: `Scope icon for a remodeling proposal: ${ic.name}`,
+            monochrome: true,
+          });
+          if (gen.error || !gen.imageUrl || !gen.imageKey) {
+            failed += 1;
+            return;
+          }
+          const res = await updateBrandIcon(ic.id, {
+            imageUrl: gen.imageUrl,
+            imageKey: gen.imageKey,
+          });
+          if (res.error) failed += 1;
+          else updated += 1;
+        } catch {
+          failed += 1;
+        }
+      }),
+    );
+  }
+  revalidatePath("/admin/settings/branding/icons");
+  return { updated, failed, total: icons.length };
 }
 
 export async function createBrandIconUploadAction(input: {

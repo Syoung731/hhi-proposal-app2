@@ -14,6 +14,7 @@ import {
   suggestBrandIconsAction,
   generateBrandIconPngAction,
   createBrandIconUploadAction,
+  regenerateScopeIconsMonochromeAction,
 } from "../../actions";
 import { normalizeIconKey } from "@/app/lib/brand-icons";
 
@@ -74,6 +75,9 @@ export function IconLibraryClient({
   const [activeSuggestionKey, setActiveSuggestionKey] = useState<string | null>(
     null
   );
+
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [regenMsg, setRegenMsg] = useState<string | null>(null);
 
   const [aiDescription, setAiDescription] = useState("");
   const [aiSuggesting, setAiSuggesting] = useState<Status>("idle");
@@ -744,6 +748,34 @@ export function IconLibraryClient({
           >
             Generate Icons with AI
           </button>
+          <button
+            type="button"
+            disabled={regenBusy}
+            title="Re-generate every scope-tagged icon in clean monochrome line-art (matches the Blueprint scope slide). May take a minute."
+            onClick={async () => {
+              setRegenBusy(true);
+              setRegenMsg(null);
+              try {
+                const res = await regenerateScopeIconsMonochromeAction();
+                setRegenMsg(
+                  res.error
+                    ? res.error
+                    : `Regenerated ${res.updated}/${res.total} scope icons${res.failed ? ` · ${res.failed} failed` : ""}`,
+                );
+                router.refresh();
+              } catch {
+                setRegenMsg("Regeneration failed.");
+              } finally {
+                setRegenBusy(false);
+              }
+            }}
+            className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {regenBusy ? "Regenerating…" : "Scope icons → line-art"}
+          </button>
+          {regenMsg && (
+            <span className="w-full text-[11px] text-zinc-500 dark:text-zinc-400">{regenMsg}</span>
+          )}
         </div>
       ) : (
         <>
