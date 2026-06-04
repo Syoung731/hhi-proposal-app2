@@ -22,7 +22,11 @@ import {
   generateUploadToken,
   PHOTO_UPLOAD_TOKEN_TTL_MS,
 } from "@/app/lib/media/photo-upload-token";
-import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
+import { generateRenderEdit, compareSourceAndRenderImages } from "@/app/lib/gemini";
+import {
+  getEffectiveStylePromptForProject,
+  renderRoomCore,
+} from "@/app/lib/gemini/render-room-core";
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
 import { callClaude } from "@/app/lib/ai/model";
 import { getRendrSpaceDetail, streamRendrPhoto } from "@/app/lib/rendr/rendrClient";
@@ -964,124 +968,11 @@ function simpleHash(str: string): string {
   return h.toString(36);
 }
 
-/**
- * Resolve effective style prompt for Media rendering: project-level preset only.
- * Returns null if no project preset; otherwise returns project.stylePreset.prompt.
- * When null, render must not inject any style guidance (scope + photo only).
- */
-function getEffectiveStylePromptForProject(project: {
-  stylePresetId: string | null;
-  stylePreset: { id: string; prompt: string } | null;
-}): string | null {
-  if (!project.stylePresetId || !project.stylePreset?.prompt) return null;
-  return project.stylePreset.prompt.trim() || null;
-}
-
-/** Phrases that indicate non-visual / construction language; exclude these from the render prompt.
- *  Server-side safety net — anything invisible in a finished photo gets stripped before Gemini sees it. */
-const NON_VISUAL_PATTERNS = [
-  // status-quo
-  /\bto\s+remain\b/i,
-  /\bno\s+change\b/i,
-  /\bno\s+work\b/i,
-  // demolition & protection
-  /\bdemolition\b/i,
-  /\bdemo\s/i,
-  /\bprotect(?:ion)?\b/i,
-  /\bclean-?up\b/i,
-  /\bdebris\b/i,
-  /\bhaul-?(?:off|away)\b/i,
-  // plumbing behind-wall
-  /\brough-?in\b/i,
-  /\bsupply\s+line/i,
-  /\bdrain\s+line/i,
-  /\bp-?trap\b/i,
-  /\bshut-?off\s+valve/i,
-  /\bwater\s+supply\b/i,
-  /\bwater\s+line\b/i,
-  /\bwater\s+heater\b/i,
-  /\breconnect\s+plumbing\b/i,
-  /\bplumbing\s+(?:rough|connection|hook-?up|tie-?in|reroute|relocat)/i,
-  /\bgas\s+line\b/i,
-  /\bvent(?:ing)?\s+(?:pipe|stack|line)\b/i,
-  // electrical behind-wall
-  /\belectrical\s+(?:rough|circuit|panel|wire|wiring|hook-?up|connection|service)\b/i,
-  /\bjunction\s+box\b/i,
-  /\bGFCI\b/i,
-  // structural / framing
-  /\bframing\b/i,
-  /\bblocking\b/i,
-  /\bsistering\b/i,
-  /\bstructural\b/i,
-  /\bsub-?floor\b/i,
-  /\bjoist\b/i,
-  // substrate / prep
-  /\bsubstrate\b/i,
-  /\bwaterproofing\b/i,
-  /\bmembrane\b/i,
-  /\bunderlayment\b/i,
-  /\bbacker\s*board\b/i,
-  /\bdrywall\s+(?:repair|patch|tape|mud|finish|hang)\b/i,
-  /\bskim\s+coat\b/i,
-  /\bleveling\s+compound\b/i,
-  // HVAC / mechanical
-  /\bHVAC\b/i,
-  /\bductwork\b/i,
-  /\binsulation\b/i,
-  /\bvapor\s+barrier\b/i,
-  // permits / code
-  /\bpermit\b/i,
-  /\binspection\b/i,
-  /\bper\s+code\b/i,
-  /\bcode\s+complian/i,
-  /\b(?:as\s+)?required\b/i,
-  /\b(?:as\s+)?specified\b/i,
-  /\bto\s+be\s+performed\b/i,
-  /\bper\s+manufacturer\b/i,
-  // procedural / labor
-  /\binstallation\s+activities\b/i,
-  /\bconstruction\s+impacts?\b/i,
-  /\bdue\s+to\s+construction\b/i,
-  /\bcoordinate\s+with\b/i,
-  /\bfield\s+(?:verify|measure)\b/i,
-  /\btouch-?up\s+(?:as\s+)?needed\b/i,
-  /\bpaint\s+to\s+be\s+performed\b/i,
-  /\bpunch\s*list\b/i,
-  /\bfinal\s+clean\b/i,
-  // caulk / sealant
-  /\bcaulk(?:ing)?\b/i,
-  /\bsealant\b/i,
-  // misc
-  /\bshoring\b/i,
-  /\bflashing\b/i,
-  /\bas\s+needed\b/i,
-];
-
-/**
- * Filter checklist items to prompt-safe visual actions only. Excludes construction/remain language
- * that would not be useful (or could mislead) the image model.
- */
-function filterChecklistToPromptSafeVisualActions(bullets: string[]): string[] {
-  return bullets.filter((b) => {
-    const t = b.trim();
-    if (t.length < 4) return false;
-    const lower = t.toLowerCase();
-    const isNonVisual = NON_VISUAL_PATTERNS.some((re) => re.test(lower));
-    return !isNonVisual;
-  });
-}
-
-/**
- * Sanitize room name for rendering: strip parenthetical metadata (e.g. "(hall Bath With Shower)")
- * so Gemini does not infer unseen fixtures from the label.
- */
-function sanitizeRoomNameForRender(roomName: string): string {
-  if (!roomName?.trim()) return "";
-  let s = roomName.trim();
-  s = s.replace(/\s*\([^)]*\)\s*/g, " ").trim();
-  s = s.replace(/\s*[-–—]\s*.*$/g, " ").trim();
-  return s.replace(/\s+/g, " ").trim() || roomName.trim();
-}
+// Render helpers (getEffectiveStylePromptForProject, the NON_VISUAL_PATTERNS
+// safety net + filterChecklistToPromptSafeVisualActions, sanitizeRoomNameForRender)
+// and the render core now live in @/app/lib/gemini/render-room-core so the QStash
+// background worker can reuse them. getEffectiveStylePromptForProject and
+// renderRoomCore are imported at the top of this file.
 
 /** Which prompt sections to include when building the Gemini render prompt. Omitted or true = include; false = exclude. */
 export type RenderPromptIncludes = {
@@ -1154,38 +1045,17 @@ export async function startRoomRenderAction(
     return { error: "Source must be an existing photo" };
   }
 
-  const stylePresetPrompt = getEffectiveStylePromptForProject(project) ?? "";
   const effectivePresetId = project.stylePresetId;
-  const effectivePreset = project.stylePreset;
   const promptVersion = 1;
 
-  // REQUIRED: When renderOptions.checkedBullets is provided (Media tab "Render New"), use ONLY those items for remodel instructions. Do NOT add full room scope or project transcript.
-  const hasChecklistPayload =
+  const checkedBullets =
     renderOptions != null &&
     typeof renderOptions === "object" &&
-    Array.isArray(renderOptions.checkedBullets);
-  const checkedBullets = hasChecklistPayload
-    ? (renderOptions.checkedBullets as string[]).filter((b) => typeof b === "string" && b.trim().length > 0)
-    : [];
-  const promptSafeBullets = hasChecklistPayload ? filterChecklistToPromptSafeVisualActions(checkedBullets) : [];
-  const roomNameForPrompt = sanitizeRoomNameForRender(room.name);
-  const scopeNarrativeForPrompt = hasChecklistPayload
-    ? promptSafeBullets.join(". ")
-    : (room.scopeNarrative ?? "");
-  const transcriptTextForPrompt = hasChecklistPayload ? undefined : (project.transcriptText ?? undefined);
-  const stylePresetPromptForPrompt = stylePresetPrompt;
-
-  // DEBUG: verify only prompt-safe checked items and sanitized room name reach Gemini
-  if (process.env.NODE_ENV !== "production") {
-    console.log("[startRoomRenderAction] render payload:", {
-      hasChecklistPayload,
-      originalCheckedBullets: hasChecklistPayload ? checkedBullets : "(not using checklist)",
-      filteredPromptSafeBullets: hasChecklistPayload ? promptSafeBullets : "(n/a)",
-      sanitizedRoomName: roomNameForPrompt,
-      scopeNarrativeForPrompt: scopeNarrativeForPrompt.slice(0, 200) + (scopeNarrativeForPrompt.length > 200 ? "…" : ""),
-      transcriptIncluded: transcriptTextForPrompt != null && transcriptTextForPrompt.length > 0,
-    });
-  }
+    Array.isArray(renderOptions.checkedBullets)
+      ? (renderOptions.checkedBullets as string[]).filter(
+          (b) => typeof b === "string" && b.trim().length > 0,
+        )
+      : null;
 
   const maxOrder = await prisma.media
     .aggregate({
@@ -1217,28 +1087,18 @@ export async function startRoomRenderAction(
     // Mark as actively rendering while we call the provider.
     await prisma.media.update({
       where: { id: created.id },
-      data: {
-        renderStatus: RenderStatus.RENDERING,
-        renderError: null,
-      },
+      data: { renderStatus: RenderStatus.RENDERING, renderError: null },
     });
 
-    const { bytes, mimeType } = await generateRoomRendering({
-      imageUrl: sourceMedia.url,
-      roomName: roomNameForPrompt,
-      scopeNarrative: scopeNarrativeForPrompt,
-      transcriptText: transcriptTextForPrompt,
-      stylePresetPrompt: stylePresetPromptForPrompt || undefined,
-      promptVersion,
+    // Prompt build + Gemini + R2 upload — shared with the QStash worker.
+    const { publicUrl, fileKey, tags } = await renderRoomCore({
+      projectId,
+      roomId,
+      sourceMediaId: sourceMedia.id,
+      createdMediaId: created.id,
+      checkedBullets,
     });
 
-    const ext = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "jpg" : "png";
-    const fileKey = `projects/${projectId}/rooms/${roomId}/renderings/${created.id}.${ext}`;
-    const contentType = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "image/jpeg" : "image/png";
-
-    const { publicUrl } = await uploadBuffer(fileKey, bytes, contentType);
-
-    const tags = ["AI_RENDERED", ...(effectivePreset?.name ? [`STYLE:${effectivePreset.name}`] : [])];
     await prisma.media.update({
       where: { id: created.id },
       data: {
