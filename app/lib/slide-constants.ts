@@ -71,35 +71,43 @@ export const LOGO_POSITION_DEFAULTS = {
   content: { x: 85, y: 88 },
 } as const;
 
-/** Curated font families for slide headline/body font selectors. */
+/**
+ * Curated font families for slide headline/body font selectors.
+ *
+ * IMPORTANT: values use the next/font CSS variables (declared in app/layout.tsx
+ * on <body>), NOT raw family names. next/font serves each Google font under a
+ * hashed family name, so a literal like "Cormorant Garamond" does NOT resolve —
+ * it silently falls back to a generic serif (in the client viewer and the
+ * headless-Chromium PDF especially). Referencing the var fixes that everywhere.
+ */
 export const SLIDE_FONTS = {
   headline: [
-    { label: "Classic Serif",  value: "Cormorant Garamond, serif" },
-    { label: "Refined Serif",  value: "Playfair Display, serif" },
-    { label: "Editorial Bold", value: "DM Serif Display, serif" },
-    { label: "Architectural",  value: "Libre Baskerville, serif" },
-    { label: "Warm Humanist",  value: "Lora, serif" },
-    { label: "Luxury Minimal", value: "Raleway, sans-serif" },
-    { label: "Clean Sans",     value: "Jost, sans-serif" },
-    { label: "Modern Sans",    value: "Inter, sans-serif" },
-    { label: "Geometric",      value: "Geist Sans, sans-serif" },
-    { label: "Monospace",      value: "Geist Mono, monospace" },
+    { label: "Classic Serif",  value: "var(--font-cormorant), serif" },
+    { label: "Refined Serif",  value: "var(--font-playfair), serif" },
+    { label: "Editorial Bold", value: "var(--font-dm-serif), serif" },
+    { label: "Architectural",  value: "var(--font-libre-baskerville), serif" },
+    { label: "Warm Humanist",  value: "var(--font-lora), serif" },
+    { label: "Luxury Minimal", value: "var(--font-raleway), sans-serif" },
+    { label: "Clean Sans",     value: "var(--font-jost), sans-serif" },
+    { label: "Modern Sans",    value: "var(--font-inter), sans-serif" },
+    { label: "Geometric",      value: "var(--font-geist-sans), sans-serif" },
+    { label: "Monospace",      value: "var(--font-geist-mono), monospace" },
   ],
   body: [
-    { label: "Clean Sans",     value: "Jost, sans-serif" },
-    { label: "Modern Sans",    value: "Inter, sans-serif" },
-    { label: "Warm Humanist",  value: "Lora, serif" },
-    { label: "Luxury Minimal", value: "Raleway, sans-serif" },
-    { label: "Classic Serif",  value: "Cormorant Garamond, serif" },
-    { label: "Refined Serif",  value: "Playfair Display, serif" },
-    { label: "Architectural",  value: "Libre Baskerville, serif" },
-    { label: "Editorial Bold", value: "DM Serif Display, serif" },
-    { label: "Geometric",      value: "Geist Sans, sans-serif" },
-    { label: "Monospace",      value: "Geist Mono, monospace" },
+    { label: "Clean Sans",     value: "var(--font-jost), sans-serif" },
+    { label: "Modern Sans",    value: "var(--font-inter), sans-serif" },
+    { label: "Warm Humanist",  value: "var(--font-lora), serif" },
+    { label: "Luxury Minimal", value: "var(--font-raleway), sans-serif" },
+    { label: "Classic Serif",  value: "var(--font-cormorant), serif" },
+    { label: "Refined Serif",  value: "var(--font-playfair), serif" },
+    { label: "Architectural",  value: "var(--font-libre-baskerville), serif" },
+    { label: "Editorial Bold", value: "var(--font-dm-serif), serif" },
+    { label: "Geometric",      value: "var(--font-geist-sans), sans-serif" },
+    { label: "Monospace",      value: "var(--font-geist-mono), monospace" },
   ],
   defaults: {
-    headline: "Cormorant Garamond, serif",
-    body: "Jost, sans-serif",
-    label: "Jost, sans-serif", // section labels — not configurable
+    headline: "var(--font-cormorant), serif",
+    body: "var(--font-jost), sans-serif",
+    label: "var(--font-jost), sans-serif", // section labels — not configurable
   },
 } as const;
