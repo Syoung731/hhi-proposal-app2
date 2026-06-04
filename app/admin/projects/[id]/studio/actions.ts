@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { MediaKind, MediaPlacement, MediaType } from "@/app/generated/prisma";
@@ -10,7 +11,16 @@ import {
   type CommitMediaItem,
   type CommitMediaResult,
 } from "@/app/lib/media/upload-pipeline";
-import { setProjectHeroMediaAction } from "../media/actions";
+import {
+  setProjectHeroMediaAction,
+  startRoomRenderAction,
+  extractRenderChecklistAction,
+} from "../media/actions";
+import { detectPhotoFixtures } from "@/app/lib/gemini";
+import {
+  reconcileScopeWithPhoto,
+  type AnnotatedRenderItem,
+} from "@/app/lib/media/render-scope-reconcile";
 
 /**
  * Server actions for the Presentation Studio "Build Presentation" wizard
@@ -159,4 +169,87 @@ export async function commitStudioHeroPhoto(
   }
 
   return { ...result, heroSet };
+}
+
+// ─── Before/After render: scope-aware, photo-aware (Phase 2) ─────────────────────
+
+export type RoomRenderPrep = {
+  roomId: string;
+  /** Primary before photo to render from (null = no photos → Additional Room). */
+  beforeMedia: { id: string; url: string } | null;
+  /** Scope items annotated with photo visibility + render recommendation. */
+  items: AnnotatedRenderItem[];
+};
+
+/**
+ * Prepare the before/after render review for one room: pick its before photo,
+ * get the scope checklist (generates/caches via extractRenderChecklistAction),
+ * run a Gemini vision pass to see what's actually in the photo, and reconcile
+ * the two so the UI can ask "render the shower/vanity?" only where it makes
+ * sense — never hallucinating fixtures that aren't visible.
+ */
+export async function prepareRoomRender(
+  projectId: string,
+  roomId: string,
+): Promise<RoomRenderPrep | { error: string }> {
+  await requireAdmin();
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, projectId },
+    select: {
+      id: true,
+      media: {
+        where: { type: MediaType.EXISTING },
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, url: true },
+      },
+    },
+  });
+  if (!room) return { error: "Room not found in this project" };
+
+  const before =
+    room.media.find((m) => m.url && m.url.trim() !== "") ?? null;
+
+  // Scope checklist (cached on the room; generated from scope if needed).
+  const checklist = await extractRenderChecklistAction(roomId);
+
+  // Vision pass only when we have a photo to look at.
+  const detected = before
+    ? (await detectPhotoFixtures(before.url)).fixtures
+    : [];
+
+  return {
+    roomId,
+    beforeMedia: before ? { id: before.id, url: before.url } : null,
+    items: reconcileScopeWithPhoto(checklist, detected),
+  };
+}
+
+/**
+ * Generate a before/after render for a room from the confirmed scope items, then
+ * select it so the deck's before/after slide auto-builds. Reuses the existing
+ * render path (anti-hallucination guardrails + prompt-safe filtering). Runs
+ * synchronously per room — fine for one-at-a-time studio use.
+ */
+export async function renderRoomFromStudio(
+  projectId: string,
+  roomId: string,
+  sourceMediaId: string,
+  confirmedItems: string[],
+): Promise<{ ok: true; mediaId: string } | { error: string }> {
+  await requireAdmin();
+
+  const res = await startRoomRenderAction(projectId, roomId, sourceMediaId, {
+    checkedBullets: confirmedItems,
+  });
+  if ("error" in res) return { error: res.error };
+
+  // Select the new render so syncBeforeAfterSlides builds the slide.
+  await prisma.room.update({
+    where: { id: roomId },
+    data: { selectedRenderMediaId: res.createdMediaId },
+  });
+  revalidatePath(`/admin/projects/${projectId}`);
+
+  return { ok: true, mediaId: res.createdMediaId };
 }

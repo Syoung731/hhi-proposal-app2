@@ -10,6 +10,10 @@ export const metadata: Metadata = {
   title: "Build Presentation — HHI Builders",
 };
 
+// Studio server actions include a synchronous Gemini render (~30-60s) and a
+// vision pass; give the route generous headroom so they don't time out.
+export const maxDuration = 300;
+
 // Server-side gate: even with the route present, it 404s unless the flag is on,
 // so the in-development Studio is invisible in production until we flip it.
 const STUDIO_ENABLED = process.env.NEXT_PUBLIC_STUDIO_ENABLED === "true";

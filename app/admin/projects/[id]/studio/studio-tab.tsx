@@ -13,7 +13,10 @@ import {
   requestStudioPresignedUrls,
   commitStudioRoomPhotos,
   commitStudioHeroPhoto,
+  prepareRoomRender,
+  renderRoomFromStudio,
   type StudioReadiness,
+  type RoomRenderPrep,
 } from "./actions";
 
 /**
@@ -241,6 +244,173 @@ function PhotoTarget({
   );
 }
 
+function RoomRenderReview({
+  projectId,
+  roomId,
+  roomName,
+}: {
+  projectId: string;
+  roomId: string;
+  roomName: string;
+}) {
+  const [prep, setPrep] = useState<RoomRenderPrep | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState<
+    "idle" | "preparing" | "prepared" | "rendering" | "done" | "error"
+  >("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const prepare = useCallback(async () => {
+    setStatus("preparing");
+    setError(null);
+    const res = await prepareRoomRender(projectId, roomId);
+    if ("error" in res) {
+      setError(res.error);
+      setStatus("error");
+      return;
+    }
+    setPrep(res);
+    setChecked(
+      new Set(res.items.filter((i) => i.defaultChecked).map((i) => i.itemText)),
+    );
+    setStatus("prepared");
+  }, [projectId, roomId]);
+
+  const toggle = useCallback((item: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(item)) next.delete(item);
+      else next.add(item);
+      return next;
+    });
+  }, []);
+
+  const render = useCallback(async () => {
+    if (!prep?.beforeMedia) return;
+    setStatus("rendering");
+    setError(null);
+    const res = await renderRoomFromStudio(
+      projectId,
+      roomId,
+      prep.beforeMedia.id,
+      [...checked],
+    );
+    if ("error" in res) {
+      setError(res.error);
+      setStatus("error");
+      return;
+    }
+    setStatus("done");
+  }, [projectId, roomId, prep, checked]);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium text-zinc-900 dark:text-zinc-100">{roomName}</span>
+        {status === "idle" && (
+          <button
+            type="button"
+            onClick={prepare}
+            className="shrink-0 rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+          >
+            Prepare before/after
+          </button>
+        )}
+        {status === "done" && (
+          <span className="shrink-0 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            ✓ Rendered
+          </span>
+        )}
+      </div>
+
+      {status === "preparing" && (
+        <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          Analyzing the photo and scope…
+        </p>
+      )}
+
+      {error && (
+        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
+      )}
+
+      {prep && (status === "prepared" || status === "rendering" || status === "done") && (
+        <div className="mt-3 flex gap-4">
+          {prep.beforeMedia && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={prep.beforeMedia.url}
+              alt=""
+              className="h-28 w-40 shrink-0 rounded object-cover"
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              What should we render?
+            </p>
+            {prep.items.length === 0 ? (
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                No scope items found for this section.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {prep.items.map((item) => {
+                  const isChecked = checked.has(item.itemText);
+                  const warn = item.recommendation === "confirm";
+                  return (
+                    <li key={item.itemText} className="flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={status !== "prepared"}
+                        onChange={() => toggle(item.itemText)}
+                        className="mt-0.5 accent-[#F47216]"
+                      />
+                      <span className="min-w-0">
+                        <span className="text-zinc-800 dark:text-zinc-200">{item.itemText}</span>
+                        <span
+                          className={
+                            "ml-2 text-xs " +
+                            (warn
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-zinc-400")
+                          }
+                        >
+                          {item.visibleInPhoto === false ? "⚠ " : ""}
+                          {item.reason}
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {status === "prepared" && prep.beforeMedia && (
+              <button
+                type="button"
+                onClick={render}
+                className="mt-3 rounded bg-[#F47216] px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-700"
+              >
+                Generate before/after
+              </button>
+            )}
+            {status === "rendering" && (
+              <p className="mt-3 text-sm text-orange-700 dark:text-orange-300">
+                Rendering… this takes ~30–60 seconds.
+              </p>
+            )}
+            {status === "done" && (
+              <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">
+                Done — open the deck to see the before/after slide.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function StudioTab({
   projectId,
   rooms,
@@ -336,6 +506,35 @@ export function StudioTab({
             {roomList.length === 0 && (
               <p className="text-sm text-zinc-500 dark:text-zinc-400">
                 No sections yet — add and price sections first.
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* Before/after renders */}
+        <section>
+          <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Before / after renders
+          </h3>
+          <p className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">
+            For sections with photos, generate an AI &ldquo;after.&rdquo; We check
+            what&rsquo;s actually visible in your photo first, so it never invents
+            fixtures that aren&rsquo;t there.
+          </p>
+          <div className="space-y-2">
+            {roomList
+              .filter((r) => r.status === "ready")
+              .map((r) => (
+                <RoomRenderReview
+                  key={r.id}
+                  projectId={projectId}
+                  roomId={r.id}
+                  roomName={r.name}
+                />
+              ))}
+            {roomList.filter((r) => r.status === "ready").length === 0 && (
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Add photos to a section above to enable before/after renders.
               </p>
             )}
           </div>
