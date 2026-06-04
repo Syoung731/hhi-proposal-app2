@@ -32,12 +32,37 @@ questions (`ai-review` prompts → `lib/ai/review-prompts.ts`), phone/QR upload
 (`PhotoUploadToken` model + `/api/phone-upload/*` + `/m/[token]`), Google Drive
 import (`DriveImportModal` + `/api/drive-import`), thumbnail + rollup-timeout fixes.
 
-**▶ IMMEDIATE NEXT STEP (awaiting Steve):** The deck still doesn't look like the
-NotebookLM reference decks. Plan: perfect ONE slide to the target look, iterate
-via Steve's screenshots, then propagate. **Waiting on Steve to pick which slide**
-(Cover / Scope Overview / Before-After / Investment) **and optionally point to a
-specific slide in a reference PDF** (`C:\Users\syoun\Desktop\reference-decks\`,
-7 PDFs) to match. Then rebuild that slide to the NotebookLM bar.
+**▶ VISUAL LOOP — Scope slide chosen as the pilot. Status:**
+- **Part 1 DONE (commits 541ad05, 477b494):** Scope-overview rebuilt around a
+  structured `scopeItems` model ({title, detail, icon}) instead of one paragraph.
+  Six layouts now: `editorial-split` (dark panel + framed photo + floating card),
+  `blueprint-icons` (Poolside reference — left photo, right graph-paper panel
+  with corner dimension marks + per-item line-art icons + orange `stat`
+  subtitle), `photo-numbered`, `photo-checklist`, `gallery-grid`, plus legacy
+  `split-panel`/`image-row`. Icon set: `app/lib/deck/scope-icon-keys.ts` (plain,
+  server-importable) + `slides/shared/ScopeIcons.tsx` (35 hand-rolled SVGs, no
+  dep). Composer (`compose-copy.ts`) drafts items, picks an icon per item from
+  the allowed set, writes a stat when a metric exists, attaches a hero photo,
+  and auto-selects the layout. Inspector: per-item icon dropdown, stat field,
+  blueprint toggle, reorder/remove.
+- **Part 2 DONE — "AI Edit" box** (`aiEditScopeSlide` in compose-copy.ts +
+  `aiEditScopeSlideAction` in deck/actions.ts + UI atop ScopeOverviewInspector):
+  plain-language slide editing with two gating checkboxes — **Change copy & items**
+  (headline/intro/stat/scopeItems incl. icons) and **Change layout & style**
+  (layoutKey/backgroundSkin). Returns a patch applied via onUpdate (autosave +
+  isUserModified); never touches photos. Mirrors the rendering-edit UX.
+- **NEXT:** Steve screenshots Part 1 layouts + tries the AI Edit box, then we
+  tune (spacing, grid weight, icon size, dark-panel tone). After the Scope slide
+  is dialed in, propagate the structured-items + icons + AI-Edit pattern to the
+  other slide types.
+
+**▶ FUTURE PHASE (Steve's vision, recorded for later):** NotebookLM doesn't just
+edit slides — it *decides which slides to build*. Steve wants: a few fixed/core
+slides + the ability for the AI to **propose & build its own slide types** for a
+personalized deck (e.g. invent a "Zone tour" or "Material palette" slide when the
+project calls for it). That's a deck-composition layer above the per-slide editor:
+AI returns a slide PLAN (types + order + which to invent), then composes each.
+Build AFTER the per-slide AI Edit + structured layouts prove out.
 
 **Remaining roadmap:** 4B theme picker/storage (`deckTheme` on `ProposalDeck` +
 snapshot + picker), 4C full background palette per theme, 4D hero-slide layout

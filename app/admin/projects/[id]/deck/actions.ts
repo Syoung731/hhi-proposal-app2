@@ -7,6 +7,7 @@ import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import type { ProposalSlide, WhyUsPillarItem, WhyUsContent, AdditionBullet } from "@/app/lib/deck/types";
 import { callClaude } from "@/app/lib/ai/model";
+import { aiEditScopeSlide, type ScopeAiEditResult } from "@/app/lib/deck/compose-copy";
 
 // ─── fetchProjectScopeOverviewAction ─────────────────────────────────────────
 
@@ -42,6 +43,27 @@ export async function deleteProjectDeckAction(
     return { ok: true };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to delete deck" };
+  }
+}
+
+// ─── aiEditScopeSlideAction ──────────────────────────────────────────────────
+
+/**
+ * Prompt-driven "AI Edit" for a scope slide. Returns a patch the client applies
+ * via onUpdate (so it flows through autosave + isUserModified). The two flags
+ * gate scope: copy (text/items/icons) and layout (layoutKey/background skin).
+ */
+export async function aiEditScopeSlideAction(params: {
+  slideId: string;
+  prompt: string;
+  changeCopy: boolean;
+  changeLayout: boolean;
+}): Promise<ScopeAiEditResult> {
+  await requireAdmin();
+  try {
+    return await aiEditScopeSlide(params);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "AI edit failed" };
   }
 }
 

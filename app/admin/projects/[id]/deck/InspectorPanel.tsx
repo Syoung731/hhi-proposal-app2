@@ -73,7 +73,7 @@ import { analyzeBackgroundTextZoneAction } from "@/app/admin/settings/branding/b
 import { BrandingColorRow } from "@/components/ui/BrandingColorRow";
 import { SLIDE_FONTS } from "@/app/lib/slide-constants";
 import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
-import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction } from "./actions";
+import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction, aiEditScopeSlideAction } from "./actions";
 import { SCOPE_ICON_OPTIONS } from "@/app/lib/deck/scope-icon-keys";
 
 interface Props {
@@ -2888,6 +2888,51 @@ function ScopeOverviewInspector({
   const [pickerOpen, setPickerOpen] = useState(false);
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
 
+  // ── AI Edit (prompt-driven redesign) ──────────────────────────────────────
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiCopy, setAiCopy] = useState(true);
+  const [aiLayout, setAiLayout] = useState(true);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function runAiEdit() {
+    if (!aiPrompt.trim()) {
+      setAiMsg({ kind: "err", text: "Type what you'd like changed." });
+      return;
+    }
+    if (!aiCopy && !aiLayout) {
+      setAiMsg({ kind: "err", text: "Check at least one: Copy and/or Layout." });
+      return;
+    }
+    setAiBusy(true);
+    setAiMsg(null);
+    try {
+      const res = await aiEditScopeSlideAction({
+        slideId: slide.id,
+        prompt: aiPrompt,
+        changeCopy: aiCopy,
+        changeLayout: aiLayout,
+      });
+      if (!res.ok) {
+        setAiMsg({ kind: "err", text: res.error });
+        return;
+      }
+      const next: ProposalSlide = {
+        ...slide,
+        content: { ...content, ...res.contentPatch },
+        isUserModified: true,
+      };
+      if (res.headline !== null) next.headline = res.headline;
+      if (res.layoutKey !== null) next.layoutKey = res.layoutKey;
+      onUpdate(next);
+      setAiMsg({ kind: "ok", text: res.note ?? "Slide updated." });
+    } catch {
+      setAiMsg({ kind: "err", text: "AI edit failed. Try again." });
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   function updateContent(patch: Partial<ScopeOverviewContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
@@ -2942,6 +2987,57 @@ function ScopeOverviewInspector({
 
   return (
     <>
+      {/* ── AI EDIT ────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          border: `1px solid ${branding.accentColor}55`,
+          background: branding.accentColor + "0E",
+          borderRadius: 8,
+          padding: 10,
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: branding.textColor }}>✦ AI Edit</span>
+        </div>
+        <p style={{ fontSize: 10, color: "#6B7280", lineHeight: 1.5, marginBottom: 8 }}>
+          Describe the change in plain language — e.g. &quot;make this blueprint style with icons and pull the square footage into an orange subtitle.&quot;
+        </p>
+        <TextArea
+          value={aiPrompt}
+          onChange={(v) => setAiPrompt(v)}
+          placeholder="Tell the AI what to change…"
+          rows={3}
+        />
+        <div style={{ display: "flex", gap: 14, margin: "8px 0" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#374151", cursor: "pointer" }}>
+            <input type="checkbox" checked={aiCopy} onChange={(e) => setAiCopy(e.target.checked)} style={{ accentColor: branding.accentColor }} />
+            Change copy &amp; items
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#374151", cursor: "pointer" }}>
+            <input type="checkbox" checked={aiLayout} onChange={(e) => setAiLayout(e.target.checked)} style={{ accentColor: branding.accentColor }} />
+            Change layout &amp; style
+          </label>
+        </div>
+        <button
+          onClick={runAiEdit}
+          disabled={aiBusy}
+          style={{
+            width: "100%", padding: "8px 10px",
+            background: aiBusy ? "#9CA3AF" : branding.accentColor,
+            color: "#FFFFFF", border: "none", borderRadius: 5,
+            cursor: aiBusy ? "default" : "pointer", fontSize: 12, fontWeight: 600,
+          }}
+        >
+          {aiBusy ? "Editing…" : "Apply AI Edit"}
+        </button>
+        {aiMsg && (
+          <p style={{ fontSize: 10, lineHeight: 1.4, marginTop: 6, color: aiMsg.kind === "ok" ? "#15803D" : "#DC2626" }}>
+            {aiMsg.text}
+          </p>
+        )}
+      </div>
+
       {/* ── TITLE ──────────────────────────────────────────────────────── */}
       <SectionLabel>Title</SectionLabel>
       <FieldGroup label="Text">
