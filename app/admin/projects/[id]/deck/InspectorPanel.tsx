@@ -3146,11 +3146,21 @@ function ScopeOverviewInspector({
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                 <span style={{ fontSize: 10, color: "#6B7280", flex: "0 0 auto" }}>Icon</span>
+                {item.iconImageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={item.iconImageUrl}
+                    alt="AI icon"
+                    title="AI-generated icon (used on Blueprint layout). Pick a built-in below to override."
+                    style={{ width: 22, height: 22, objectFit: "contain", flex: "0 0 auto", border: "1px solid #E5E7EB", borderRadius: 4, background: "#fff" }}
+                  />
+                )}
                 <select
-                  value={item.icon ?? "feature"}
-                  onChange={(e) => updateItem(idx, { icon: e.target.value })}
+                  value={item.iconImageUrl ? "" : item.icon ?? "feature"}
+                  onChange={(e) => updateItem(idx, { icon: e.target.value, iconImageUrl: null })}
                   style={{ flex: 1, fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#FFFFFF", color: "#374151" }}
                 >
+                  {item.iconImageUrl && <option value="">AI-generated (custom)</option>}
                   {SCOPE_ICON_OPTIONS.map((opt) => (
                     <option key={opt.key} value={opt.key}>{opt.label}</option>
                   ))}

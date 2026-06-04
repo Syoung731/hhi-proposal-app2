@@ -1,12 +1,14 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { Prisma } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
 import { callClaude } from "@/app/lib/ai/model";
 import { generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
 import { SCOPE_ICON_KEY_LIST, isScopeIconKey } from "@/app/lib/deck/scope-icon-keys";
 import { SCOPE_OVERVIEW_LAYOUTS } from "@/app/lib/deck/types";
 import type { ScopeOverviewContent, ScopeOverviewLayoutKey, ScopeItem } from "@/app/lib/deck/types";
+import { resolveScopeIconImages, scopeIconSlug } from "@/app/lib/deck/scope-icon-resolver";
 
 /**
  * AI deck composer (Phase 3).
@@ -40,7 +42,7 @@ export type ComposeCopyResult = {
   errors: { type: string; error: string }[];
 };
 
-type DraftScopeItem = { title: string; detail: string; icon: string | null };
+type DraftScopeItem = { title: string; detail: string; icon: string | null; iconConcept: string };
 
 /**
  * Drafts structured scope lines ({title, detail, icon}) + an intro + a stat
@@ -64,10 +66,11 @@ async function draftScopeItems(
       "You write client-facing scope summaries for a luxury design-build remodeling firm. " +
       "Given room-by-room scope notes, produce a compact, scannable scope list for a single slide. " +
       "Return ONLY valid minified JSON of the shape " +
-      '{"intro":"<1 short framing sentence, =16 words>","stat":"<optional headline metric like \'168 square feet of extended living space\' or \'\' if none is obvious>","items":[{"title":"<2-4 word bold lead>","detail":"<one specific, benefit-forward line, =18 words, no trailing period>","icon":"<one icon key>"}]}. ' +
+      '{"intro":"<1 short framing sentence, =16 words>","stat":"<optional headline metric like \'168 square feet of extended living space\' or \'\' if none is obvious>","items":[{"title":"<2-4 word bold lead>","detail":"<one specific, benefit-forward line, =18 words, no trailing period>","icon":"<one icon key>","iconConcept":"<2-3 word concrete noun for the icon, e.g. ceiling fan, walk-in shower, composite deck>"}]}. ' +
       "Produce 4 to 6 items. Group related rooms/work into a single item where natural. " +
       "Titles are Title Case noun phrases (e.g. 'Primary Bath', 'Custom Cabinetry'). " +
-      `The "icon" MUST be exactly one key from this list (choose the best visual match): ${SCOPE_ICON_KEY_LIST}. Use "feature" when nothing fits. ` +
+      `The "icon" MUST be exactly one key from this list (closest built-in match): ${SCOPE_ICON_KEY_LIST}. Use "feature" when nothing fits. ` +
+      'The "iconConcept" is a plain concrete noun describing the icon subject (used to find or generate a custom icon). ' +
       "Only include a stat if a concrete number appears in the notes (square footage, counts); otherwise use an empty string. " +
       "No markdown, no code fences, no commentary — JSON only.",
     messages: [
@@ -89,7 +92,7 @@ async function draftScopeItems(
     const parsed = JSON.parse(raw) as {
       intro?: string;
       stat?: string;
-      items?: { title?: string; detail?: string; icon?: string }[];
+      items?: { title?: string; detail?: string; icon?: string; iconConcept?: string }[];
     };
     const items: DraftScopeItem[] = (parsed.items ?? [])
       .filter((it) => it && typeof it.title === "string")
@@ -97,6 +100,7 @@ async function draftScopeItems(
         title: (it.title ?? "").trim(),
         detail: (it.detail ?? "").trim(),
         icon: isScopeIconKey(it.icon) ? it.icon : null,
+        iconConcept: (it.iconConcept ?? "").trim() || (it.title ?? "").trim(),
       }))
       .filter((it) => it.title.length > 0)
       .slice(0, 6);
@@ -132,6 +136,35 @@ function asObject(content: unknown): Record<string, unknown> {
   return content && typeof content === "object"
     ? (content as Record<string, unknown>)
     : {};
+}
+
+/** Map draft items → ScopeItem (vector-icon only, no image resolution). */
+function itemsToScopeItems(items: DraftScopeItem[]): ScopeItem[] {
+  return items.map((it) => ({
+    title: it.title,
+    detail: it.detail || null,
+    icon: it.icon,
+  }));
+}
+
+/**
+ * Map draft items → ScopeItem, resolving an AI-generated BrandIcon PNG per item
+ * (matching the library or generating + persisting on a miss). Used for the
+ * blueprint-icons layout, which renders the PNG; vector `icon` stays as fallback.
+ */
+async function itemsWithIconImages(items: DraftScopeItem[]): Promise<ScopeItem[]> {
+  const imageMap = await resolveScopeIconImages(
+    items.map((it) => it.iconConcept || it.title),
+  );
+  return items.map((it) => {
+    const url = imageMap.get(scopeIconSlug(it.iconConcept || it.title));
+    return {
+      title: it.title,
+      detail: it.detail || null,
+      icon: it.icon,
+      ...(url ? { iconImageUrl: url } : {}),
+    };
+  });
 }
 
 async function draftCoverTagline(params: {
@@ -258,6 +291,14 @@ export async function composeDeckCopy(
                 : "editorial-split"
               : "photo-numbered";
 
+        // Resolve AI-generated icon PNGs only for the layout that shows them.
+        const scopeItemsForWrite =
+          structured.items.length === 0
+            ? []
+            : layoutKey === "blueprint-icons"
+              ? await itemsWithIconImages(structured.items)
+              : itemsToScopeItems(structured.items);
+
         await prisma.deckSlide.update({
           where: { id: slide.id },
           data: {
@@ -265,12 +306,12 @@ export async function composeDeckCopy(
             content: {
               ...existing,
               ...(description ? { description } : {}),
-              ...(structured.items.length > 0 ? { scopeItems: structured.items } : {}),
+              ...(scopeItemsForWrite.length > 0 ? { scopeItems: scopeItemsForWrite } : {}),
               ...(structured.intro ? { intro: structured.intro } : {}),
               ...(structured.stat ? { stat: structured.stat } : {}),
               backgroundSkin: layoutKey === "blueprint-icons" ? "blueprint" : "none",
               selectedPhotos,
-            },
+            } as unknown as Prisma.InputJsonObject,
             source: "auto",
           },
         });
@@ -473,6 +514,20 @@ export async function aiEditScopeSlide(params: {
 
   if (headline === null && layoutKey === null && Object.keys(contentPatch).length === 0) {
     return { ok: false, error: "The AI didn't return any applicable changes. Try being more specific." };
+  }
+
+  // When the slide will be (or stays) blueprint-icons, resolve a BrandIcon PNG
+  // per item — matching the library or generating + persisting on a miss.
+  const finalLayout = layoutKey ?? (slide.layoutKey as ScopeOverviewLayoutKey);
+  if (finalLayout === "blueprint-icons") {
+    const baseItems: ScopeItem[] = contentPatch.scopeItems ?? content.scopeItems ?? [];
+    if (baseItems.length > 0) {
+      const imageMap = await resolveScopeIconImages(baseItems.map((it) => it.title));
+      contentPatch.scopeItems = baseItems.map((it) => {
+        const url = imageMap.get(scopeIconSlug(it.title));
+        return { ...it, ...(url ? { iconImageUrl: url } : {}) };
+      });
+    }
   }
 
   return {

@@ -609,11 +609,18 @@ export interface ScopeItem {
   /** One-line supporting detail. Optional — title-only items render fine. */
   detail?: string | null;
   /**
-   * Icon key from ScopeIcons (e.g. "fan", "shower", "roof"). Rendered by the
-   * blueprint-icons layout. Unknown/empty falls back to a neutral "feature"
-   * glyph. See app/.../slides/shared/ScopeIcons.tsx for the full key list.
+   * Icon key from ScopeIcons (e.g. "fan", "shower", "roof"). Built-in vector
+   * fallback — recolorable, used on dark panels and whenever no BrandIcon image
+   * is set. See app/.../slides/shared/ScopeIcons.tsx for the full key list.
    */
   icon?: string | null;
+  /**
+   * Public URL of a BrandIcon PNG (AI-generated, transparent) chosen for this
+   * item by the self-growing icon resolver. When present, the light-background
+   * layouts render this image instead of the vector `icon`. Cleared when the
+   * user manually picks a built-in icon from the dropdown.
+   */
+  iconImageUrl?: string | null;
 }
 
 export interface ScopeOverviewContent extends SharedSlideFields {
