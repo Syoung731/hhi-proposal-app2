@@ -15,6 +15,11 @@ const BASE_TABS: TabDef[] = [
   { slug: "publish", label: "Preview & Publish" },
 ];
 
+// Presentation Studio (new AI deck builder) — in development, hidden unless the
+// feature flag is on. NEXT_PUBLIC_ vars are inlined at build time, so this is
+// readable in this client component.
+const STUDIO_ENABLED = process.env.NEXT_PUBLIC_STUDIO_ENABLED === "true";
+
 export function ProjectTabNav({
   projectId,
   currentTab,
@@ -31,9 +36,18 @@ export function ProjectTabNav({
 }) {
   const base = `/admin/projects/${projectId}`;
 
-  const tabs: TabDef[] = rendrConfigured
+  const baseTabs: TabDef[] = rendrConfigured
     ? [BASE_TABS[0], { slug: "rendr", label: "Rendr" }, ...BASE_TABS.slice(1)]
     : BASE_TABS;
+
+  // Insert the flag-gated "Build Presentation" (Studio) tab just before Deck.
+  const tabs: TabDef[] = STUDIO_ENABLED
+    ? baseTabs.flatMap((t) =>
+        t.slug === "deck"
+          ? [{ slug: "studio", label: "Build Presentation", hrefOnly: true }, t]
+          : [t],
+      )
+    : baseTabs;
 
   return (
     <nav
