@@ -370,6 +370,117 @@ Do not include any other text, headers, or numbering. Only the bullets or NONE.`
   };
 }
 
+// ─── Photo fixture detection (for scope-aware before/after) ─────────────────────
+
+/**
+ * Items we ask the vision model to confirm presence of in a before photo. These
+ * are the renovation elements most prone to AI "hallucination" if rendered when
+ * they aren't actually in the source image (e.g. adding a shower to a wall that
+ * has none). Surface finishes (paint, flooring) are intentionally NOT gated this
+ * hard — they apply to whatever surfaces are visible.
+ */
+export const PHOTO_FIXTURE_TAXONOMY = [
+  "shower",
+  "bathtub",
+  "tub/shower combo",
+  "vanity",
+  "bathroom sink",
+  "toilet",
+  "mirror",
+  "kitchen cabinets",
+  "kitchen island",
+  "countertops",
+  "backsplash",
+  "kitchen sink",
+  "range or stove",
+  "wall oven",
+  "refrigerator",
+  "dishwasher",
+  "range hood",
+  "fireplace",
+  "windows",
+  "interior door",
+  "staircase",
+  "built-in shelving",
+] as const;
+
+export type DetectedFixture = { name: string; visible: boolean; confidence: number };
+export type DetectPhotoFixturesResult = { fixtures: DetectedFixture[] };
+
+/**
+ * Ask Gemini vision which taxonomy fixtures are CLEARLY VISIBLE in a single
+ * source photo. Returns one entry per taxonomy item. On any failure (API error,
+ * unparseable response) returns an empty list — callers treat "no detection"
+ * as "unknown" and fall back to asking the user rather than auto-rendering.
+ */
+export async function detectPhotoFixtures(
+  imageUrl: string,
+): Promise<DetectPhotoFixturesResult> {
+  const ai = await getGeminiClient();
+  const img = await fetchImageAsBase64(imageUrl);
+
+  const textPrompt = `You are a renovation estimator examining ONE room photo. For EACH item in the list, decide whether it is CLEARLY VISIBLE within this photo's frame. Do NOT guess about things that might exist outside the frame or behind walls.
+
+Items: ${PHOTO_FIXTURE_TAXONOMY.join(", ")}.
+
+Return ONLY valid JSON (no markdown, no prose) of exactly this shape:
+{"fixtures":[{"name":"<item>","visible":true,"confidence":0.0}]}
+- Include one entry for EVERY item in the list, using the item's exact text as "name".
+- "visible" is true only if you can actually see it in the image.
+- "confidence" is 0.0 to 1.0.`;
+
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
+  try {
+    response = await ai.models.generateContent({
+      model: await getGeminiImageModel(),
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: img.mimeType, data: img.data } },
+            { text: textPrompt },
+          ],
+        },
+      ],
+      config: { responseModalities: ["TEXT"] },
+    });
+  } catch {
+    return { fixtures: [] };
+  }
+
+  const candidates = (response as { candidates?: unknown[] })?.candidates;
+  const parts = (candidates?.[0] as { content?: { parts?: { text?: string }[] } })
+    ?.content?.parts;
+  const textPart = parts?.find(
+    (p): p is { text: string } => typeof (p as { text?: string }).text === "string",
+  );
+  const raw = textPart?.text?.trim() ?? "";
+  if (!raw) return { fixtures: [] };
+
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*\n?/m, "")
+    .replace(/\n?```\s*$/m, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as { fixtures?: unknown };
+    const list = Array.isArray(parsed.fixtures) ? parsed.fixtures : [];
+    const fixtures: DetectedFixture[] = list
+      .map((f) => {
+        const o = (f ?? {}) as Record<string, unknown>;
+        return {
+          name: typeof o.name === "string" ? o.name : "",
+          visible: o.visible === true,
+          confidence: typeof o.confidence === "number" ? o.confidence : 0,
+        };
+      })
+      .filter((f) => f.name.length > 0);
+    return { fixtures };
+  } catch {
+    return { fixtures: [] };
+  }
+}
+
 // ─── CAD Overlay generation (image-in → image-out) ─────────────────────────────
 
 export type GenerateCadOverlayParams = {
