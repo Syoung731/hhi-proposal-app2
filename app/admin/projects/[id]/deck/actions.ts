@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/app/lib/prisma";
+import { requireAdmin } from "@/app/lib/auth";
 import { getDeckForProject, regenerateDefaultDeck, saveAllSlides } from "@/app/lib/deck/db";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
@@ -21,6 +22,27 @@ export async function fetchProjectScopeOverviewAction(
     select: { scopeOverview: true },
   });
   return { scopeOverview: project?.scopeOverview ?? null };
+}
+
+// ─── deleteProjectDeckAction ─────────────────────────────────────────────────
+
+/**
+ * Delete the entire deck for a project so the user can start over. Removes the
+ * ProposalDeck row, which cascades to all DeckSlide rows (schema onDelete:
+ * Cascade). Does NOT touch media/renders/rooms — only the slide deck. After
+ * this, the deck editor shows the empty "Generate Default Deck" state again.
+ */
+export async function deleteProjectDeckAction(
+  projectId: string,
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  if (!projectId) return { error: "Missing projectId" };
+  try {
+    await prisma.proposalDeck.deleteMany({ where: { projectId } });
+    return { ok: true };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to delete deck" };
+  }
 }
 
 // ─── saveDeckSlidesAction ────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ import type {
   ScopeBreakdownRoom,
   TextZoneSetting,
 } from "@/app/lib/deck/types";
-import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction } from "./actions";
+import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction, deleteProjectDeckAction } from "./actions";
 import { DEFAULT_SPEC_SLIDE_TYPES } from "@/app/lib/deck/default-spec";
 import { SlideRail } from "./SlideRail";
 import { SlideCanvas } from "./SlideCanvas";
@@ -356,10 +356,12 @@ function ConfirmRegenerateModal({
   onClose,
   onKeepManual,
   onReplaceAll,
+  onDeleteAll,
 }: {
   onClose: () => void;
   onKeepManual: () => void;
   onReplaceAll: () => void;
+  onDeleteAll: () => void;
 }) {
   return (
     <div
@@ -426,6 +428,25 @@ function ConfirmRegenerateModal({
             <div style={{ fontWeight: 600 }}>Replace everything</div>
             <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>
               Deletes all slides and re-seeds from the default spec. User edits are lost.
+            </div>
+          </button>
+          <button
+            onClick={onDeleteAll}
+            style={{
+              padding: "10px 14px",
+              background: "#3A1F1F",
+              color: "#FECACA",
+              border: "1px solid #7F1D1D",
+              borderRadius: 6,
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: 13,
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>Delete entire deck — start over</div>
+            <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>
+              Removes ALL slides and the deck itself, leaving an empty deck. Photos
+              &amp; renders are kept. Use this to re-test from scratch.
             </div>
           </button>
           <button
@@ -510,6 +531,30 @@ export function DeckEditorClient({
     }
     setConfirmOpen(true);
   }, [slides.length, runGeneration]);
+
+  const runDeleteDeck = useCallback(async () => {
+    setConfirmOpen(false);
+    if (
+      !window.confirm(
+        "Delete the entire deck? This removes all slides and cannot be undone. (Your photos and renders are kept.)",
+      )
+    ) {
+      return;
+    }
+    setGenerating(true);
+    setGenerateStatus(null);
+    const result = await deleteProjectDeckAction(projectId);
+    setGenerating(false);
+    if ("error" in result) {
+      setGenerateStatus(`Error: ${result.error}`);
+      setTimeout(() => setGenerateStatus(null), 5000);
+      return;
+    }
+    setSlides([]);
+    setActiveSlideId("");
+    setGenerateStatus("Deck deleted — use Generate Default Deck to start over.");
+    setTimeout(() => setGenerateStatus(null), 5000);
+  }, [projectId]);
 
   const preconditions = canGenerateDefaultDeck ?? { ok: true, missing: [] };
   const generateDisabled = !preconditions.ok;
@@ -1235,6 +1280,7 @@ export function DeckEditorClient({
           onClose={() => setConfirmOpen(false)}
           onKeepManual={() => void runGeneration("keep-manual")}
           onReplaceAll={() => void runGeneration("replace-all")}
+          onDeleteAll={() => void runDeleteDeck()}
         />
       )}
     </div>
