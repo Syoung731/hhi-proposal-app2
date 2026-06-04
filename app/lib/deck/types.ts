@@ -54,7 +54,13 @@ export type WhyUsLayoutKey =
   | "editorial-cards"
   | "stacked-list"
   | "testimonials-split";
-export type ScopeOverviewLayoutKey = "split-panel" | "image-row";
+export type ScopeOverviewLayoutKey =
+  | "editorial-split"
+  | "photo-numbered"
+  | "photo-checklist"
+  | "gallery-grid"
+  | "split-panel"
+  | "image-row";
 export type BeforeAfterLayoutKey = "side-by-side" | "after-emphasis";
 // LEGACY: "three-pillars" caps at 3 rooms and offers no value with the new pagination model. Remove from the union and from ScopeBreakdownSlide.tsx in cleanup pass.
 export type ScopeBreakdownLayoutKey = "text-grid" | "dark-table" | "icon-columns" | "cards-split" | "photo-grid" | "three-pillars";
@@ -590,7 +596,31 @@ export interface ScopeOverviewSelectedPhoto {
  * Images are selected via the Photo Library picker and stored as
  * ScopeOverviewSelectedPhoto[] so the renderer is fully self-contained.
  */
+/**
+ * A single structured scope line — a short bold lead + a one-line detail.
+ * Renders as a numbered row, a checklist row, or a grid cell depending on the
+ * chosen layout. This is what gives the scope slide its scannable,
+ * NotebookLM-style structure (vs. the legacy single `description` paragraph).
+ */
+export interface ScopeItem {
+  /** Short bold lead, e.g. "Kitchen Remodel" or "Screened Porch Addition". */
+  title: string;
+  /** One-line supporting detail. Optional — title-only items render fine. */
+  detail?: string | null;
+}
+
 export interface ScopeOverviewContent extends SharedSlideFields {
+  /**
+   * Structured scope lines (preferred). When present, the editorial-split,
+   * photo-numbered, photo-checklist, and gallery-grid layouts render these.
+   * The legacy split-panel / image-row layouts use `description` instead.
+   */
+  scopeItems?: ScopeItem[];
+  /**
+   * Optional short intro/kicker rendered above the items on the structured
+   * layouts (1–2 sentences). Distinct from the legacy `description` blob.
+   */
+  intro?: string | null;
   /** 3–4 sentence description of the project scope. */
   description?: string | null;
   /**
@@ -2037,8 +2067,12 @@ export const WHY_US_LAYOUTS: { key: WhyUsLayoutKey; label: string }[] = [
 ];
 
 export const SCOPE_OVERVIEW_LAYOUTS: { key: ScopeOverviewLayoutKey; label: string }[] = [
-  { key: "split-panel", label: "Split Panel" },
-  { key: "image-row",   label: "Image Row"   },
+  { key: "editorial-split", label: "Editorial Split" },
+  { key: "photo-numbered",  label: "Numbered + Photo" },
+  { key: "photo-checklist", label: "Checklist + Photo" },
+  { key: "gallery-grid",    label: "Gallery + Grid" },
+  { key: "split-panel",     label: "Split Panel" },
+  { key: "image-row",       label: "Image Row"   },
 ];
 
 export const BEFORE_AFTER_LAYOUTS: { key: BeforeAfterLayoutKey; label: string }[] = [

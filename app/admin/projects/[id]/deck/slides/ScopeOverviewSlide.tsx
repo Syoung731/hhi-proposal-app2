@@ -5,6 +5,7 @@ import type {
   DeckBranding,
   ScopeOverviewContent,
   ScopeOverviewSelectedPhoto,
+  ScopeItem,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
@@ -93,6 +94,54 @@ function PositionedPhoto({ photo }: { photo: ScopeOverviewSelectedPhoto }) {
         backgroundColor: "#1A1A1A",
       }}
     />
+  );
+}
+
+// ─── Structured-item helpers ──────────────────────────────────────────────────
+
+const DARK_PANEL = "#27323B"; // slate used by the editorial-split dark column
+
+/**
+ * Returns the structured scope items for the rich layouts. Prefers
+ * `content.scopeItems`; if absent, gracefully derives detail-only items by
+ * splitting the legacy `description` paragraph into sentences (capped at 6) so
+ * the new layouts still render something sensible before the composer runs.
+ */
+function deriveScopeItems(content: ScopeOverviewContent, cap = 6): ScopeItem[] {
+  const items = (content.scopeItems ?? []).filter((it) => it && (it.title || it.detail));
+  if (items.length > 0) return items.slice(0, cap);
+
+  const desc = (content.description ?? "").trim();
+  if (!desc) return [];
+  return desc
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, cap)
+    .map((sentence) => ({ title: "", detail: sentence }));
+}
+
+/** Full-bleed photo for a slot, with a graceful placeholder when empty. */
+function PhotoOrPlaceholder({ photo }: { photo?: ScopeOverviewSelectedPhoto }) {
+  if (!photo?.url) return <ImagePlaceholder label="Add a photo in the inspector" />;
+  return <PositionedPhoto photo={photo} />;
+}
+
+function Eyebrow({ accent, color }: { accent: string; color?: string }) {
+  return (
+    <p
+      style={{
+        fontSize: SECTION_LABEL_SIZE,
+        fontFamily: SLIDE_FONTS.defaults.label,
+        fontWeight: 600,
+        letterSpacing: "0.16em",
+        textTransform: "uppercase",
+        color: color ?? accent,
+        marginBottom: "0.9em",
+      }}
+    >
+      Project Scope
+    </p>
   );
 }
 
@@ -371,14 +420,317 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   );
 }
 
+// ─── Layout 3: editorial-split ───────────────────────────────────────────────
+// Dark slate left column (eyebrow + large serif title + hairline-divided item
+// list) and a framed full-bleed photo on the right, with an optional floating
+// white caption card. The premium "Editorial" hero layout.
+
+function EditorialSplitLayout({ slide, branding }: LayoutProps) {
+  const content = (slide.content ?? {}) as ScopeOverviewContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const items = deriveScopeItems(content, 6);
+  const photo = (content.selectedPhotos ?? []).find((p) => p.url);
+  const title = slide.headline ?? "The Scope";
+  const intro = (content.intro ?? "").trim();
+  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const panelPct = 40;
+
+  return (
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FAFAF8" }}>
+      {/* Left dark column */}
+      <div
+        style={{
+          position: "absolute", left: 0, top: 0, bottom: 0, width: `${panelPct}%`,
+          background: DARK_PANEL,
+          padding: "7% 6%",
+          display: "flex", flexDirection: "column", justifyContent: "center",
+          zIndex: 2,
+        }}
+      >
+        <Eyebrow accent={accent} color={accent} />
+        <h2
+          style={{
+            fontSize: `${3.0 * (content.titleSize ?? 1)}em`,
+            fontFamily: titleFont,
+            fontWeight: 300,
+            color: "#FFFFFF",
+            lineHeight: 1.05,
+            margin: 0,
+          }}
+        >
+          {title}
+        </h2>
+        <div style={{ width: "2.6em", height: 2, background: accent, marginTop: "0.9em", marginBottom: "1.4em" }} />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {items.map((it, i) => (
+            <div
+              key={i}
+              style={{
+                padding: "0.7em 0",
+                borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.13)",
+              }}
+            >
+              {it.title && (
+                <p style={{ fontSize: "0.8em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: "#FFFFFF", margin: 0, lineHeight: 1.3 }}>
+                  {it.title}
+                </p>
+              )}
+              {it.detail && (
+                <p style={{ fontSize: "0.72em", fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.74)", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
+                  {it.detail}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right framed photo */}
+      <div style={{ position: "absolute", left: `${panelPct}%`, top: 0, right: 0, bottom: 0, padding: "3.5%", zIndex: 1 }}>
+        <div style={{ width: "100%", height: "100%", overflow: "hidden", boxShadow: "0 8px 30px rgba(0,0,0,0.18)", background: "#FFFFFF", padding: 6 }}>
+          <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
+            <PhotoOrPlaceholder photo={photo} />
+          </div>
+        </div>
+      </div>
+
+      {/* Optional floating caption card */}
+      {intro && (
+        <div
+          style={{
+            position: "absolute", right: "5%", bottom: "7%", maxWidth: "34%",
+            background: "#FFFFFF", padding: "1.1em 1.3em",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.20)", zIndex: 3,
+          }}
+        >
+          <p style={{ fontSize: "1.05em", fontFamily: titleFont, fontWeight: 500, color: branding.textColor, margin: 0, lineHeight: 1.15 }}>
+            The Vision
+          </p>
+          <p style={{ fontSize: "0.72em", fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: "0.4em 0 0", lineHeight: 1.5 }}>
+            {intro}
+          </p>
+        </div>
+      )}
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
+// ─── Layout 4: photo-numbered ────────────────────────────────────────────────
+// Left full-bleed photo, right white column with eyebrow + title + accent rule
+// then numbered rows (orange square chips).
+
+function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
+  const content = (slide.content ?? {}) as ScopeOverviewContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const items = deriveScopeItems(content, 6);
+  const photo = (content.selectedPhotos ?? []).find((p) => p.url);
+  const title = slide.headline ?? "Scope of Work";
+  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const photoPct = 48;
+
+  return (
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF" }}>
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${photoPct}%`, overflow: "hidden" }}>
+        <PhotoOrPlaceholder photo={photo} />
+      </div>
+
+      <div
+        style={{
+          position: "absolute", left: `${photoPct}%`, right: 0, top: 0, bottom: 0,
+          padding: "6% 5%", display: "flex", flexDirection: "column", justifyContent: "center",
+        }}
+      >
+        {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
+        <h2 style={{ fontSize: `${2.0 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: content.titleColor ?? branding.textColor, lineHeight: 1.12, margin: 0 }}>
+          {title}
+        </h2>
+        <div style={{ width: "2.6em", height: 2, background: accent, margin: "0.8em 0 1.3em" }} />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {items.map((it, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex", gap: "0.9em", alignItems: "flex-start",
+                padding: "0.6em 0",
+                borderTop: i === 0 ? "none" : "1px solid #ECE9E3",
+              }}
+            >
+              <div style={{ flex: "0 0 auto", width: "1.8em", height: "1.8em", background: accent, color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, fontSize: "0.8em" }}>
+                {i + 1}
+              </div>
+              <div style={{ flex: 1 }}>
+                {it.title && (
+                  <p style={{ fontSize: "0.82em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, color: branding.textColor, margin: 0, lineHeight: 1.3 }}>{it.title}</p>
+                )}
+                {it.detail && (
+                  <p style={{ fontSize: "0.74em", fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.45 }}>{it.detail}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
+// ─── Layout 5: photo-checklist ───────────────────────────────────────────────
+// Left white column with title + accent check rows, right full-bleed photo.
+
+function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
+  const content = (slide.content ?? {}) as ScopeOverviewContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const items = deriveScopeItems(content, 6);
+  const photo = (content.selectedPhotos ?? []).find((p) => p.url);
+  const title = slide.headline ?? "Scope Alignment";
+  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const textPct = 58;
+
+  return (
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF" }}>
+      <div
+        style={{
+          position: "absolute", left: 0, top: 0, bottom: 0, width: `${textPct}%`,
+          padding: "6% 4.5%", display: "flex", flexDirection: "column", justifyContent: "center",
+        }}
+      >
+        {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
+        <h2 style={{ fontSize: `${2.1 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: content.titleColor ?? branding.textColor, lineHeight: 1.1, margin: 0 }}>
+          {title}
+        </h2>
+        <div style={{ width: "2.6em", height: 2, background: accent, margin: "0.8em 0 1.3em" }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.9em" }}>
+          {items.map((it, i) => (
+            <div key={i} style={{ display: "flex", gap: "0.7em", alignItems: "flex-start" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "0 0 auto", marginTop: "0.15em" }} aria-hidden>
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <p style={{ fontSize: "0.78em", fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.45 }}>
+                {it.title && <span style={{ fontWeight: 700, color: branding.textColor }}>{it.title}{it.detail ? ": " : ""}</span>}
+                {it.detail}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ position: "absolute", left: `${textPct}%`, right: 0, top: 0, bottom: 0, overflow: "hidden" }}>
+        <PhotoOrPlaceholder photo={photo} />
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
+// ─── Layout 6: gallery-grid ──────────────────────────────────────────────────
+// Compact title bar, a row of up to 3 photos, then a 2×2 grid of titled item
+// groups divided by a center rule.
+
+function GalleryGridLayout({ slide, branding }: LayoutProps) {
+  const content = (slide.content ?? {}) as ScopeOverviewContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const items = deriveScopeItems(content, 4);
+  const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 3);
+  const title = slide.headline ?? "Scope Alignment";
+  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+
+  return (
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF", padding: "4% 4.5%", display: "flex", flexDirection: "column" }}>
+      {/* Title bar */}
+      <div style={{ flex: "0 0 auto", marginBottom: "0.9em" }}>
+        {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
+        <h2 style={{ fontSize: `${1.9 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: content.titleColor ?? branding.textColor, lineHeight: 1.05, margin: 0 }}>
+          {title}
+        </h2>
+        <div style={{ width: "2.6em", height: 2, background: accent, marginTop: "0.6em" }} />
+      </div>
+
+      {/* Photo row */}
+      <div style={{ flex: "1 1 0", minHeight: 0, display: "flex", gap: 6, marginBottom: "1em" }}>
+        {photos.length === 0 ? (
+          <ImagePlaceholder label="Add up to 3 photos" />
+        ) : (
+          photos.map((p, i) => (
+            <div key={i} style={{ flex: 1, overflow: "hidden" }}>
+              <PositionedPhoto photo={p} />
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* 2×2 item grid */}
+      <div style={{ flex: "0 0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto auto", columnGap: "2.2em", rowGap: "0.8em", borderTop: "1px solid #ECE9E3", paddingTop: "1em" }}>
+        {items.map((it, i) => (
+          <div key={i} style={{ paddingLeft: i % 2 === 1 ? "2.2em" : 0, borderLeft: i % 2 === 1 ? "1px solid #ECE9E3" : "none" }}>
+            {it.title && (
+              <p style={{ fontSize: "0.86em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: branding.textColor, margin: 0, lineHeight: 1.2 }}>
+                {it.title}
+              </p>
+            )}
+            {it.detail && (
+              <p style={{ fontSize: "0.74em", fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: it.title ? "0.2em 0 0" : 0, lineHeight: 1.4 }}>
+                {it.detail}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 export function ScopeOverviewSlide({ slide, branding, hasAiBackground }: LayoutProps) {
   switch (slide.layoutKey) {
+    case "editorial-split":
+      return <EditorialSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    case "photo-numbered":
+      return <PhotoNumberedLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    case "photo-checklist":
+      return <PhotoChecklistLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    case "gallery-grid":
+      return <GalleryGridLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "image-row":
       return <ImageRowLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "split-panel":
-    default:
       return <SplitPanelLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    default:
+      return <EditorialSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
 }

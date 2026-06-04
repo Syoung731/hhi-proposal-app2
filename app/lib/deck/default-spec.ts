@@ -66,7 +66,7 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
     {
       type: "scope-overview",
       order: 300,
-      layoutKey: "split-panel",
+      layoutKey: "editorial-split",
     },
   ];
 

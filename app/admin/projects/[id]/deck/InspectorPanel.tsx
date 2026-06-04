@@ -15,6 +15,7 @@ import type {
   WhyUsTestimonial,
   ScopeOverviewContent,
   ScopeOverviewSelectedPhoto,
+  ScopeItem,
   BeforeAfterContent,
   RoomWithMedia,
   RoomMediaItem,
@@ -2862,8 +2863,25 @@ function ScopeOverviewInspector({
 }) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const selectedPhotos = content.selectedPhotos ?? [];
+  const scopeItems = content.scopeItems ?? [];
   const isSplitPanel = slide.layoutKey === "split-panel";
-  const maxPhotos = isSplitPanel ? 2 : 4;
+  // Per-layout photo capacity. The structured layouts use 1 (or 3 for gallery);
+  // the legacy layouts use 2 / 4.
+  const PHOTO_CAP: Record<string, number> = {
+    "editorial-split": 1,
+    "photo-numbered": 1,
+    "photo-checklist": 1,
+    "gallery-grid": 3,
+    "split-panel": 2,
+    "image-row": 4,
+  };
+  const maxPhotos = PHOTO_CAP[slide.layoutKey] ?? 4;
+  // Layouts driven by the structured scope-items editor (vs. the legacy paragraph).
+  const usesStructuredItems =
+    slide.layoutKey === "editorial-split" ||
+    slide.layoutKey === "photo-numbered" ||
+    slide.layoutKey === "photo-checklist" ||
+    slide.layoutKey === "gallery-grid";
   const [pickerOpen, setPickerOpen] = useState(false);
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
 
@@ -2898,6 +2916,25 @@ function ScopeOverviewInspector({
 
   function removePhoto(id: string) {
     updateContent({ selectedPhotos: selectedPhotos.filter((p) => p.id !== id) });
+  }
+
+  function updateItem(idx: number, patch: Partial<ScopeItem>) {
+    updateContent({
+      scopeItems: scopeItems.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
+    });
+  }
+  function addItem() {
+    updateContent({ scopeItems: [...scopeItems, { title: "", detail: "" }] });
+  }
+  function removeItem(idx: number) {
+    updateContent({ scopeItems: scopeItems.filter((_, i) => i !== idx) });
+  }
+  function moveItem(idx: number, dir: -1 | 1) {
+    const next = [...scopeItems];
+    const target = idx + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    updateContent({ scopeItems: next });
   }
 
   return (
@@ -2946,8 +2983,81 @@ function ScopeOverviewInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {/* ── SCOPE ITEMS (structured) ───────────────────────────────────── */}
+      <SectionLabel>Scope Items</SectionLabel>
+      <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
+        {usesStructuredItems
+          ? "Powers this layout — each item is a short title + one line."
+          : "Used by the Editorial / Numbered / Checklist / Gallery layouts. (Current layout uses the Description below.)"}
+      </p>
+
+      <FieldGroup label="Intro (optional)">
+        <TextArea
+          value={content.intro ?? ""}
+          onChange={(v) => updateContent({ intro: v || null })}
+          placeholder="One short framing sentence (shown on the Editorial card)…"
+          rows={2}
+        />
+      </FieldGroup>
+
+      {scopeItems.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+          {scopeItems.map((item, idx) => (
+            <div
+              key={idx}
+              style={{ border: "1px solid #E5E7EB", borderRadius: 6, padding: 8, background: "#FAFAFA" }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: "#6B7280" }}>Item {idx + 1}</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => moveItem(idx, -1)} disabled={idx === 0}
+                    style={{ fontSize: 11, color: idx === 0 ? "#D1D5DB" : "#6B7280", background: "none", border: "none", cursor: idx === 0 ? "default" : "pointer", padding: "0 2px" }}>↑</button>
+                  <button onClick={() => moveItem(idx, 1)} disabled={idx === scopeItems.length - 1}
+                    style={{ fontSize: 11, color: idx === scopeItems.length - 1 ? "#D1D5DB" : "#6B7280", background: "none", border: "none", cursor: idx === scopeItems.length - 1 ? "default" : "pointer", padding: "0 2px" }}>↓</button>
+                  <button onClick={() => removeItem(idx)}
+                    style={{ fontSize: 10, color: "#EF4444", background: "none", border: "none", cursor: "pointer", padding: "0 2px" }}>Remove</button>
+                </div>
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <TextInput
+                  value={item.title}
+                  onChange={(v) => updateItem(idx, { title: v })}
+                  placeholder="Title — e.g. Primary Bath"
+                />
+              </div>
+              <TextArea
+                value={item.detail ?? ""}
+                onChange={(v) => updateItem(idx, { detail: v || null })}
+                placeholder="One-line detail…"
+                rows={2}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={addItem}
+        style={{
+          width: "100%", padding: "7px 10px", marginBottom: 4,
+          background: branding.accentColor + "18", color: branding.textColor,
+          border: `1px solid ${branding.accentColor}`, borderRadius: 4,
+          cursor: "pointer", fontSize: 12, fontWeight: 500, textAlign: "center" as const,
+        }}
+      >
+        + Add Scope Item
+      </button>
+      <p style={{ fontSize: 10, color: "#C4C0BB", lineHeight: 1.4, marginBottom: 4 }}>
+        Tip: use the &quot;Compose AI Copy&quot; button in the Studio to auto-fill these from room scopes.
+      </p>
+
+      {PF_GROUP_DIVIDER}
+
       {/* ── DESCRIPTION ────────────────────────────────────────────────── */}
       <SectionLabel>Description</SectionLabel>
+      <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
+        Paragraph form — used by the Split Panel &amp; Image Row layouts.
+      </p>
       <FieldGroup label="Text">
         <TextArea
           value={content.description ?? ""}
@@ -3041,7 +3151,9 @@ function ScopeOverviewInspector({
       {/* ── Photo picker ────────────────────────────────────────────────── */}
       <SectionLabel>Photos</SectionLabel>
       <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
-        {isSplitPanel ? "Up to 2 photos (Split Panel)." : "Up to 4 photos (Image Row)."}
+        {maxPhotos === 1
+          ? "1 photo for this layout."
+          : `Up to ${maxPhotos} photos for this layout.`}
       </p>
 
       {/* Panel split ratio — Split Panel only */}
