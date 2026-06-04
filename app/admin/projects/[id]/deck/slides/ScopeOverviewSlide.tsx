@@ -433,6 +433,7 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "The Scope";
   const intro = (content.intro ?? "").trim();
+  const itemScale = content.scopeItemsSize ?? 1;
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const panelPct = 40;
 
@@ -472,12 +473,12 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
               }}
             >
               {it.title && (
-                <p style={{ fontSize: "0.8em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: "#FFFFFF", margin: 0, lineHeight: 1.3 }}>
+                <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: "#FFFFFF", margin: 0, lineHeight: 1.3 }}>
                   {it.title}
                 </p>
               )}
               {it.detail && (
-                <p style={{ fontSize: "0.72em", fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.74)", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
+                <p style={{ fontSize: `${0.72 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.74)", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
                   {it.detail}
                 </p>
               )}
@@ -535,6 +536,7 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
   const items = deriveScopeItems(content, 6);
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "Scope of Work";
+  const itemScale = content.scopeItemsSize ?? 1;
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const photoPct = 48;
 
@@ -570,10 +572,10 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
               </div>
               <div style={{ flex: 1 }}>
                 {it.title && (
-                  <p style={{ fontSize: "0.82em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, color: branding.textColor, margin: 0, lineHeight: 1.3 }}>{it.title}</p>
+                  <p style={{ fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, color: branding.textColor, margin: 0, lineHeight: 1.3 }}>{it.title}</p>
                 )}
                 {it.detail && (
-                  <p style={{ fontSize: "0.74em", fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.45 }}>{it.detail}</p>
+                  <p style={{ fontSize: `${0.74 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.45 }}>{it.detail}</p>
                 )}
               </div>
             </div>
@@ -602,6 +604,7 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
   const items = deriveScopeItems(content, 6);
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "Scope Alignment";
+  const itemScale = content.scopeItemsSize ?? 1;
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const textPct = 58;
 
@@ -624,7 +627,7 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "0 0 auto", marginTop: "0.15em" }} aria-hidden>
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <p style={{ fontSize: "0.78em", fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.45 }}>
+              <p style={{ fontSize: `${0.78 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.45 }}>
                 {it.title && <span style={{ fontWeight: 700, color: branding.textColor }}>{it.title}{it.detail ? ": " : ""}</span>}
                 {it.detail}
               </p>
@@ -659,6 +662,7 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
   const items = deriveScopeItems(content, 4);
   const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 3);
   const title = slide.headline ?? "Scope Alignment";
+  const itemScale = content.scopeItemsSize ?? 1;
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
 
   return (
@@ -690,12 +694,12 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
         {items.map((it, i) => (
           <div key={i} style={{ paddingLeft: i % 2 === 1 ? "2.2em" : 0, borderLeft: i % 2 === 1 ? "1px solid #ECE9E3" : "none" }}>
             {it.title && (
-              <p style={{ fontSize: "0.86em", fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: branding.textColor, margin: 0, lineHeight: 1.2 }}>
+              <p style={{ fontSize: `${0.86 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: branding.textColor, margin: 0, lineHeight: 1.2 }}>
                 {it.title}
               </p>
             )}
             {it.detail && (
-              <p style={{ fontSize: "0.74em", fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: it.title ? "0.2em 0 0" : 0, lineHeight: 1.4 }}>
+              <p style={{ fontSize: `${0.74 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#4B5563", margin: it.title ? "0.2em 0 0" : 0, lineHeight: 1.4 }}>
                 {it.detail}
               </p>
             )}
@@ -728,6 +732,7 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "Scope of Work";
   const stat = (content.stat ?? "").trim();
+  const itemScale = content.scopeItemsSize ?? 1;
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const showGrid = (content.backgroundSkin ?? "blueprint") !== "none";
   const photoPct = 46;
@@ -792,7 +797,7 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
                     <ScopeIcon name={it.icon} size={32} color={ink} strokeWidth={1.5} />
                   )}
                 </div>
-                <p style={{ fontSize: "0.82em", fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.4, paddingTop: "0.15em" }}>
+                <p style={{ fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.4, paddingTop: "0.15em" }}>
                   {it.title && <span style={{ fontWeight: 700, color: ink }}>{it.title}{it.detail ? ": " : ""}</span>}
                   {it.detail}
                 </p>

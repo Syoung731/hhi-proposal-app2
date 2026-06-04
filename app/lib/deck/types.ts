@@ -641,6 +641,13 @@ export interface ScopeOverviewContent extends SharedSlideFields {
    */
   stat?: string | null;
   /**
+   * Font-size multiplier (0.5–2.0, default 1.0) applied to the scope ITEM
+   * title + detail text on all structured layouts (editorial-split,
+   * blueprint-icons, photo-numbered, photo-checklist, gallery-grid). Lets the
+   * user scale the bullet copy up/down independent of the slide title.
+   */
+  scopeItemsSize?: number | null;
+  /**
    * Background treatment for the structured panel. "blueprint" paints the
    * graph-paper grid + corner dimension marks (Poolside reference); "none"
    * (default) leaves it clean. Currently consumed by blueprint-icons.

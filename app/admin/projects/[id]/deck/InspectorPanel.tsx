@@ -3099,6 +3099,16 @@ function ScopeOverviewInspector({
         />
       </FieldGroup>
 
+      {usesStructuredItems && (
+        <FieldGroup label={`Item Text Size — ${(content.scopeItemsSize ?? 1.0).toFixed(1)}×`}>
+          <PSizeSlider
+            accentColor={branding.accentColor}
+            value={content.scopeItemsSize ?? 1.0}
+            onChange={(v) => updateContent({ scopeItemsSize: v })}
+          />
+        </FieldGroup>
+      )}
+
       {/* Blueprint + Icons specifics */}
       <FieldGroup label="Stat subtitle (Blueprint layout)">
         <TextInput
