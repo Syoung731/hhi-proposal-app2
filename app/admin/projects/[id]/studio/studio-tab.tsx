@@ -15,6 +15,7 @@ import {
   commitStudioHeroPhoto,
   prepareRoomRender,
   renderRoomFromStudio,
+  composeDeckCopyAction,
   type StudioReadiness,
   type RoomRenderPrep,
 } from "./actions";
@@ -411,6 +412,47 @@ function RoomRenderReview({
   );
 }
 
+function ComposeCopyButton({ projectId }: { projectId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const compose = useCallback(async () => {
+    setBusy(true);
+    setMsg(null);
+    const res = await composeDeckCopyAction(projectId);
+    setBusy(false);
+    if ("error" in res) {
+      setMsg(res.error);
+      return;
+    }
+    setMsg(
+      `Drafted copy on ${res.updated} slide${res.updated === 1 ? "" : "s"}` +
+        (res.errors.length ? ` · ${res.errors.length} skipped on error` : ""),
+    );
+  }, [projectId]);
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={compose}
+        disabled={busy}
+        className={
+          "rounded border px-4 py-2 text-sm font-medium " +
+          (busy
+            ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800"
+            : "border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800")
+        }
+      >
+        {busy ? "Drafting copy…" : "Draft slide copy with AI"}
+      </button>
+      {msg && (
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">{msg}</span>
+      )}
+    </span>
+  );
+}
+
 export function StudioTab({
   projectId,
   rooms,
@@ -550,12 +592,15 @@ export function StudioTab({
             with photos get before/after slides (rendering comes in the next
             phase); rooms without are grouped into Additional Rooms.
           </p>
-          <Link
-            href={`/admin/projects/${projectId}/deck`}
-            className="mt-3 inline-block rounded bg-[#F47216] px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
-          >
-            Open Presentation Deck →
-          </Link>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Link
+              href={`/admin/projects/${projectId}/deck`}
+              className="inline-block rounded bg-[#F47216] px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+            >
+              Open Presentation Deck →
+            </Link>
+            <ComposeCopyButton projectId={projectId} />
+          </div>
         </section>
       </div>
     </div>

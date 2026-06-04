@@ -21,6 +21,7 @@ import {
   reconcileScopeWithPhoto,
   type AnnotatedRenderItem,
 } from "@/app/lib/media/render-scope-reconcile";
+import { composeDeckCopy, type ComposeCopyResult } from "@/app/lib/deck/compose-copy";
 
 /**
  * Server actions for the Presentation Studio "Build Presentation" wizard
@@ -252,4 +253,16 @@ export async function renderRoomFromStudio(
   revalidatePath(`/admin/projects/${projectId}`);
 
   return { ok: true, mediaId: res.createdMediaId };
+}
+
+/**
+ * AI deck composer (Phase 3): draft client-facing slide copy from project data.
+ * Non-destructive — skips sync-owned + user-edited slides. Requires the deck to
+ * exist (open the Presentation Deck once first).
+ */
+export async function composeDeckCopyAction(
+  projectId: string,
+): Promise<ComposeCopyResult | { error: string }> {
+  await requireAdmin();
+  return composeDeckCopy(projectId);
 }
