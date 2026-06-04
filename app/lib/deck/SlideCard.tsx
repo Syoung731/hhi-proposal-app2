@@ -108,6 +108,20 @@ export function SlideCard({
 
   return (
     <>
+      {/* Warm linen default behind slides with no brand/AI background, so
+          transparent slides read as designed paper instead of flat white.
+          Slides that paint their own opaque (navy/charcoal/white) surface
+          cover this, so it only affects the otherwise-blank ones. */}
+      {!activeBg && !slide.aiBackground && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(120% 120% at 0% 0%, #FAF7F1 0%, #F4EDE1 55%, #EFE7D8 100%)",
+          }}
+        />
+      )}
+
       {activeBg && (
         <div className="absolute inset-0 pointer-events-none" style={getBgLayerStyle()} />
       )}
