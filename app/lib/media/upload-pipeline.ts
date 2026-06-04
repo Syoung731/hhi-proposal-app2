@@ -155,8 +155,21 @@ export async function commitMediaBatch(params: {
   projectId: string;
   items: CommitMediaItem[];
   tags: string[];
+  /** Assign the created media to a room (default null = project-level). */
+  roomId?: string | null;
+  /** Placement (default UNASSIGNED). Use SECTION when assigning to a room. */
+  placement?: MediaPlacement;
+  /** MediaKind (default OTHER). e.g. BEFORE for room walkthrough photos. */
+  kind?: MediaKind;
 }): Promise<CommitMediaResult> {
-  const { projectId, items, tags } = params;
+  const {
+    projectId,
+    items,
+    tags,
+    roomId = null,
+    placement = MediaPlacement.UNASSIGNED,
+    kind = MediaKind.OTHER,
+  } = params;
   if (!items.length) return { success: [], failed: [] };
 
   const baseline = await prisma.media
@@ -164,8 +177,8 @@ export async function commitMediaBatch(params: {
       where: {
         projectId,
         type: MediaType.EXISTING,
-        roomId: null,
-        placement: MediaPlacement.UNASSIGNED,
+        roomId,
+        placement,
       },
       _max: { sortOrder: true },
     })
@@ -202,8 +215,8 @@ export async function commitMediaBatch(params: {
       const media = await prisma.media.create({
         data: {
           projectId,
-          roomId: null,
-          kind: MediaKind.OTHER,
+          roomId,
+          kind,
           type: MediaType.EXISTING,
           url: item.publicUrl,
           fileKey: item.fileKey,
@@ -211,7 +224,7 @@ export async function commitMediaBatch(params: {
           caption: item.originalName || null,
           tags,
           sortOrder,
-          placement: MediaPlacement.UNASSIGNED,
+          placement,
           width: item.width || null,
           height: item.height || null,
         },

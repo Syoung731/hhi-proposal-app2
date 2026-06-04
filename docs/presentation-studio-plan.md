@@ -69,7 +69,32 @@ present/export.
 - **Phase 5 — Cutover**: flip the flag on; `/studio` becomes primary; keep the
   deck editor for fine edits.
 
-## Open questions / inputs
+## Reference-deck analysis — decisions (locked)
 
-- Reference decks at `C:\Users\syoun\Desktop\reference-decks\` (7 PDFs) — analyzed
-  for Phases 3–4. Design questions to follow.
+Analyzed all 7 decks at `C:\Users\syoun\Desktop\reference-decks\`. Findings +
+owner decisions:
+
+- **Two themes, selectable per project:** "Editorial Linen" (Cormorant serif +
+  linen + bronze/terracotta; matches brand spec) and "Navy/Sans" (bold sans +
+  navy + bright orange). Build both over one shared component library.
+- **Clean CSS-native layouts first.** Defer bespoke "metaphor" art (3D investment
+  tower, Greek columns, honeycomb, umbrella, wave-arc connectors) to optional
+  pre-rendered SVG/image "skins" later. v1 defaults: segmented investment bar,
+  rail/node timeline, room-split scope, 2×2 value grid, big serif numerals,
+  floor-plan-with-pins, comparison table.
+- **Optional slides ON by default when content exists:** Testimonials, Core
+  Values, HHI-vs-Traditional comparison, COPE explainer.
+- **Investment presented BY ROOM/SPACE**, not BASE/ALTERNATE/ALLOWANCE buckets
+  (no deck shows buckets). Always low–high ranges, COPE broken out, Design/
+  Feasibility Retainer separated + "insurance policy / credited" framing, one
+  bold orange **Total Project Investment** range. Bracket with "Prepared
+  exclusively for [client]" + "valid 30 days". (Existing `investment-by-space`
+  slide already groups by room — reuse it.)
+- **No reference deck uses literal before/after pairs** — confirms photo-less
+  rooms are normal (→ Additional Rooms) and real-photo before/after is net-new.
+- Suppress the NotebookLM watermark (these were NotebookLM exports).
+
+Canonical slide arc (the composer's default order): Cover → Objective → Process/
+Design Experience → Design-Build Advantage (Zero Change Order / Zero Mark-Up /
+Freedom / Designs That Work) → Scope by room → HHI-vs-Traditional → Timeline →
+Design Retainer → Investment (range) → Testimonials → Core Values → Closing/CTA.
