@@ -733,6 +733,7 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
   const title = slide.headline ?? "Scope of Work";
   const stat = (content.stat ?? "").trim();
   const itemScale = content.scopeItemsSize ?? 1;
+  const iconScale = content.scopeIconSize ?? 1;
   const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
   const showGrid = (content.backgroundSkin ?? "blueprint") !== "none";
   const photoPct = 46;
@@ -789,12 +790,12 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
               <div key={i} style={{ display: "flex", gap: "1.1em", alignItems: "flex-start", position: "relative" }}>
                 {/* tick on the guide */}
                 <span style={{ position: "absolute", left: "calc(-1.4em - 1px)", top: "0.9em", width: "0.7em", height: 1, background: markColor }} />
-                <div style={{ flex: "0 0 auto", width: "2.2em", height: "2.2em", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                <div style={{ flex: "0 0 auto", width: `${2.2 * iconScale}em`, height: `${2.2 * iconScale}em`, display: "flex", justifyContent: "center", alignItems: "center" }}>
                   {it.iconImageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={it.iconImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                   ) : (
-                    <ScopeIcon name={it.icon} size={32} color={ink} strokeWidth={1.5} />
+                    <ScopeIcon name={it.icon} size={Math.round(32 * iconScale)} color={ink} strokeWidth={1.5} />
                   )}
                 </div>
                 <p style={{ fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.4, paddingTop: "0.15em" }}>

@@ -3108,6 +3108,15 @@ function ScopeOverviewInspector({
           />
         </FieldGroup>
       )}
+      {slide.layoutKey === "blueprint-icons" && (
+        <FieldGroup label={`Icon Size — ${(content.scopeIconSize ?? 1.0).toFixed(1)}×`}>
+          <PSizeSlider
+            accentColor={branding.accentColor}
+            value={content.scopeIconSize ?? 1.0}
+            onChange={(v) => updateContent({ scopeIconSize: v })}
+          />
+        </FieldGroup>
+      )}
 
       {/* Blueprint + Icons specifics */}
       <FieldGroup label="Stat subtitle (Blueprint layout)">
