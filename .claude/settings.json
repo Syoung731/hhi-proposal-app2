@@ -34,7 +34,6 @@
       "mcp__scheduled-tasks__*"
     ],
     "deny": [
-      "Bash(git push*)",
       "Bash(rm -rf /*)"
     ]
   }
