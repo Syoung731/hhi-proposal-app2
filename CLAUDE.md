@@ -74,7 +74,7 @@ Claude Code must NEVER:
 - Commit automatically at the end of a task
 - Use generic commit messages like `checkpoint: auto-commit after Claude Code task`
 - Run `git commit` without first showing the human the exact command and waiting for approval
-- Run `git push` under any circumstances — pushing is always the human's responsibility
+- Run `git push` on its own initiative — pushing is the human's responsibility by default, unless the human explicitly instructs a push in the prompt (see Override below)
 - Use `git add -A` or `git add .` — always use explicit file paths
 
 ### At End Of Every Task
@@ -138,16 +138,23 @@ If a task touches any of the following, include a ⚠️ warning in the commit r
 
 Example: `⚠️ This commit includes a Prisma migration. Human must decide whether to deploy migrations before or after this commit lands in production.`
 
-### Override — Explicit Permission To Commit Directly
+### Override — Explicit Permission To Commit And/Or Push Directly
 
 The human may explicitly instruct Claude Code to commit directly inside a specific prompt with language like:
 - "Commit this yourself when you're done"
 - "Stage and commit using [this exact message]"
 - "Auto-commit at the end"
 
-When this explicit override appears in the prompt, Claude Code MAY execute the commit — but still MUST NOT push, and still MUST use a meaningful Conventional Commits message (never the generic checkpoint message).
+When this explicit override appears in the prompt, Claude Code MAY execute the commit, and MUST use a meaningful Conventional Commits message (never the generic checkpoint message).
 
-Absent explicit override, the default is always: prepare the command, show it to the human, wait.
+The human may likewise explicitly instruct a push in the prompt with language like:
+- "Push it"
+- "Commit and push"
+- "Push when you're done"
+
+When the human explicitly instructs a push, Claude Code MAY run `git push` (commit first if needed). Push only what the instruction covers — do not force-push, and do not push unrelated local commits. Absent an explicit push instruction, never push on your own initiative.
+
+Absent any explicit override, the default is always: prepare the command, show it to the human, wait.
 
 ### If The Git History Is Already Polluted
 
