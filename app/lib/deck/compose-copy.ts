@@ -22,8 +22,8 @@ async function genObjectiveIllustration(scene: string, label: string): Promise<s
   try {
     const gen = await generateBrandIconPngAction({
       name: label,
-      visual: `Blueprint-style line drawing of ${visual}`,
-      description: `Objective slide illustration for a remodeling proposal: ${visual}`,
+      visual: `A detailed architectural line-art illustration of ${visual}. Confident, even-weight ink strokes; clean and uncluttered; depicts the full scene filling the frame`,
+      description: `Objective slide illustration for a luxury remodeling proposal: ${visual}`,
       monochrome: true,
       mode: "illustration",
     });

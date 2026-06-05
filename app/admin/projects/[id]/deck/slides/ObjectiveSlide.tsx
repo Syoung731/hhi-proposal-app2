@@ -665,9 +665,9 @@ function HubZone({
     <div style={{ textAlign: align, display: "flex", flexDirection: "column", alignItems }}>
       {pillar.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: `${9 * scale}em`, height: `${4.6 * scale}em`, objectFit: "contain", objectPosition: align === "right" ? "right" : align === "center" ? "center" : "left", marginBottom: "0.5em" }} />
+        <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: `${12 * scale}em`, height: `${6.6 * scale}em`, objectFit: "contain", objectPosition: align === "right" ? "right" : align === "center" ? "center" : "left", marginBottom: "0.6em" }} />
       ) : pillar.icon ? (
-        <ScopeIcon name={pillar.icon} size={Math.round(30 * scale)} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.4em" }} />
+        <ScopeIcon name={pillar.icon} size={Math.round(44 * scale)} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.5em" }} />
       ) : null}
       <p style={{ fontSize: `${0.82 * scale}em`, fontFamily: bodyFont, fontWeight: 700, color: accent, margin: 0, lineHeight: 1.2 }}>
         {pillar.title}
@@ -696,7 +696,7 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
   // Tunable geometry (inspector sliders).
   const hubSizeM = content.hubSize ?? 1;
   const zoneScale = content.zoneTextSize ?? 1;
-  const hubYpct = content.hubY ?? 0.56;
+  const hubYpct = content.hubY ?? 0.54;
   const hubTop = `${hubYpct * 100}%`;
   const arrowY = hubYpct * 90; // viewBox units (0–90)
   const hasHubImg = !!content.hubImageUrl;
@@ -740,7 +740,7 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
 
       {/* Central hub */}
       {hasHubImg ? (
-        <div style={{ position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)", width: `${8.5 * hubSizeM}em`, height: `${6 * hubSizeM}em`, zIndex: 2 }}>
+        <div style={{ position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)", width: `${11 * hubSizeM}em`, height: `${7.5 * hubSizeM}em`, zIndex: 2 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={content.hubImageUrl ?? ""} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
         </div>
@@ -748,29 +748,29 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
         <div
           style={{
             position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)",
-            width: `${5.4 * hubSizeM}em`, height: `${5.4 * hubSizeM}em`, borderRadius: "50%",
+            width: `${6.4 * hubSizeM}em`, height: `${6.4 * hubSizeM}em`, borderRadius: "50%",
             background: theme.color.panel, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
           }}
         >
-          <ScopeIcon name={content.hubIcon ?? "house"} size={Math.round(44 * hubSizeM)} color={theme.color.panelInk} strokeWidth={1.4} />
+          <ScopeIcon name={content.hubIcon ?? "house"} size={Math.round(52 * hubSizeM)} color={theme.color.panelInk} strokeWidth={1.4} />
         </div>
       )}
 
       {/* Zone 1 — left */}
       {z1 && (
-        <div style={{ position: "absolute", left: "4%", top: hubTop, transform: "translateY(-50%)", width: "23%", zIndex: 2 }}>
+        <div style={{ position: "absolute", left: "3.5%", top: hubTop, transform: "translateY(-50%)", width: "27%", zIndex: 2 }}>
           <HubZone pillar={z1} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="right" scale={zoneScale} />
         </div>
       )}
       {/* Zone 2 — right */}
       {z2 && (
-        <div style={{ position: "absolute", right: "4%", top: hubTop, transform: "translateY(-50%)", width: "23%", zIndex: 2 }}>
+        <div style={{ position: "absolute", right: "3.5%", top: hubTop, transform: "translateY(-50%)", width: "27%", zIndex: 2 }}>
           <HubZone pillar={z2} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="left" scale={zoneScale} />
         </div>
       )}
       {/* Zone 3 — bottom */}
       {z3 && (
-        <div style={{ position: "absolute", left: "50%", bottom: "4%", transform: "translateX(-50%)", width: "30%", zIndex: 2 }}>
+        <div style={{ position: "absolute", left: "50%", bottom: "3%", transform: "translateX(-50%)", width: "32%", zIndex: 2 }}>
           <HubZone pillar={z3} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="center" scale={zoneScale} />
         </div>
       )}
