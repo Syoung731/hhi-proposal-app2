@@ -512,6 +512,13 @@ export function DeckEditorClient({
   // ── Persist state ──────────────────────────────────────────────────────────
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // While an AI generation/compose/illustrate run is in flight, the debounced
+  // autosave below must NOT fire: it would persist the stale, pre-AI client
+  // `slides` state on top of the AI content the server is writing to the DB,
+  // silently reverting Generate Deck. All those flows end in a full reload, so
+  // the post-reload DB state is authoritative — there is nothing to autosave
+  // mid-run. (Root cause of the "objective/scope come out generic" bug.)
+  const suppressSaveRef = useRef(false);
 
   // ── Generate Deck state ───────────────────────────────────────────────────
   const [generating, setGenerating] = useState(false);
@@ -527,10 +534,17 @@ export function DeckEditorClient({
 
   const runGeneration = useCallback(
     async (mode: "keep-manual" | "replace-all") => {
+      // Block the debounced autosave for the whole run: setSlides() below would
+      // otherwise schedule a save of the pre-AI client state that lands on top
+      // of the AI content compose/visuals write server-side. Cleared only on the
+      // error path (success ends in a full reload).
+      suppressSaveRef.current = true;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setGenerating(true);
       setGenerateStatus(null);
       const result = await generateDefaultDeckAction(projectId, mode);
       if (result.error) {
+        suppressSaveRef.current = false;
         setGenerating(false);
         setGenerateStatus(`Error: ${result.error}`);
         setTimeout(() => setGenerateStatus(null), 5000);
@@ -559,6 +573,9 @@ export function DeckEditorClient({
         setTimeout(() => window.location.reload(), 8000);
         return;
       }
+      // No AI chain → no reload. The new deck is already persisted by
+      // generateDefaultDeckAction; re-enable autosave for subsequent edits.
+      suppressSaveRef.current = false;
       setGenerating(false);
       setConfirmOpen(false);
       setGenerateStatus(slides.length === 0 ? "Default deck generated" : "Default deck regenerated");
@@ -573,9 +590,15 @@ export function DeckEditorClient({
     setComposeBusy(true);
     setComposeMsg(null);
     try {
+      // Persist current edits FIRST so the AI reads the latest copy, then block
+      // the debounced autosave for the rest of the run so it can't overwrite the
+      // AI content compose writes server-side. Success ends in a reload.
       await saveDeckSlidesAction(projectId, slides);
+      suppressSaveRef.current = true;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const res = await composeDeckCopyAction(projectId);
       if ("error" in res) {
+        suppressSaveRef.current = false;
         setComposeMsg(`Error: ${res.error}`);
         setComposeBusy(false);
         return;
@@ -583,6 +606,7 @@ export function DeckEditorClient({
       setComposeMsg(`Drafted ${res.updated} slide${res.updated === 1 ? "" : "s"} — reloading…`);
       setTimeout(() => window.location.reload(), 700);
     } catch {
+      suppressSaveRef.current = false;
       setComposeMsg("Error: draft failed");
       setComposeBusy(false);
     }
@@ -592,9 +616,14 @@ export function DeckEditorClient({
     setIllustrateBusy(true);
     setIllustrateMsg(null);
     try {
+      // Same autosave-suppression contract as runComposeCopy: save edits first,
+      // then block autosave while visuals are written server-side.
       await saveDeckSlidesAction(projectId, slides);
+      suppressSaveRef.current = true;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const res = await generateDeckVisualsAction(projectId);
       if ("error" in res) {
+        suppressSaveRef.current = false;
         setIllustrateMsg(`Error: ${res.error}`);
         setIllustrateBusy(false);
         return;
@@ -602,6 +631,7 @@ export function DeckEditorClient({
       setIllustrateMsg(`${res.illustrations} illustration${res.illustrations === 1 ? "" : "s"}, ${res.icons} icon${res.icons === 1 ? "" : "s"} — reloading…`);
       setTimeout(() => window.location.reload(), 1000);
     } catch {
+      suppressSaveRef.current = false;
       setIllustrateMsg("Error: generation failed");
       setIllustrateBusy(false);
     }
@@ -648,7 +678,11 @@ export function DeckEditorClient({
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     // Skip auto-save on an empty deck — there's nothing to persist.
     if (slides.length === 0) return;
+    // Skip while an AI run is writing the deck server-side (see suppressSaveRef).
+    if (suppressSaveRef.current) return;
     saveTimerRef.current = setTimeout(async () => {
+      // Re-check at fire time: a run may have started during the debounce window.
+      if (suppressSaveRef.current) return;
       setSaveStatus("saving");
       const result = await saveDeckSlidesAction(projectId, slides);
       setSaveStatus(result.ok ? "saved" : "error");
