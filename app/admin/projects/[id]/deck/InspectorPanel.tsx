@@ -1543,20 +1543,22 @@ function ObjectiveInspector({
 
   // Resolve the active layout mode. Must mirror resolveObjectiveLayoutMode()
   // in ObjectiveSlide.tsx so the inspector and slide always agree.
-  const mode: "pillars" | "statement" = (() => {
-    if (content.layout === "pillars" || content.layout === "statement") {
+  const mode: "pillars" | "statement" | "hub-spoke" = (() => {
+    if (content.layout === "pillars" || content.layout === "statement" || content.layout === "hub-spoke") {
       return content.layout;
     }
     const ps = content.pillars ?? [];
-    const valid = ps.length === 3 && ps.every((p) => p?.title?.trim() && p?.body?.trim());
-    return valid ? "pillars" : "statement";
+    const valid = ps.length >= 2 && ps.length <= 6 && ps.every((p) => p?.title?.trim() && p?.body?.trim());
+    return valid ? "hub-spoke" : "statement";
   })();
+  // Both hub-spoke and pillars use the same Zones editor section.
+  const showZonesEditor = mode === "hub-spoke" || mode === "pillars";
 
   // Determine layout-aware headline color default
   const isLight = slide.layoutKey !== "dark-statement";
   const headlineColorDefault = isLight ? branding.textColor : "#FFFFFF";
 
-  function setMode(next: "pillars" | "statement") {
+  function setMode(next: "pillars" | "statement" | "hub-spoke") {
     // Clear any stale position values so the layout's built-in defaults apply
     // cleanly when switching modes. Users can still tune position via the Text
     // Position section afterwards; those explicit edits re-populate the fields.
@@ -1641,11 +1643,10 @@ function ObjectiveInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* LEGACY: Pillars vs Statement toggle. Once statement layouts are removed, this whole section + setMode + mode resolution can be deleted (always pillars). */}
-      {/* ── LAYOUT MODE (Pillars vs Statement) ─────────────────────────── */}
+      {/* ── LAYOUT MODE (Hub & Spoke / Pillars / Statement) ─────────────── */}
       <SectionLabel>Layout</SectionLabel>
       <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}`, borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
-        {(["pillars", "statement"] as const).map((m) => {
+        {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"], ["statement", "Statement"]] as const).map(([m, label], idx) => {
           const active = mode === m;
           return (
             <button
@@ -1653,26 +1654,24 @@ function ObjectiveInspector({
               onClick={() => setMode(m)}
               style={{
                 flex: 1,
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: active ? 600 : 400,
-                padding: "6px 10px",
+                padding: "6px 6px",
                 minHeight: 32,
                 cursor: "pointer",
                 background: active ? branding.accentColor : "#FFFFFF",
                 color: active ? "#FFFFFF" : "#374151",
-                borderTop: "none",
-                borderRight: "none",
-                borderBottom: "none",
-                borderLeft: m === "statement" ? `1px solid ${branding.accentColor}` : "none",
+                border: "none",
+                borderLeft: idx > 0 ? `1px solid ${branding.accentColor}` : "none",
               }}
             >
-              {m === "pillars" ? "Pillars" : "Statement"}
+              {label}
             </button>
           );
         })}
       </div>
 
-      {mode === "pillars" && (
+      {showZonesEditor && (
         <>
           {/* ── OBJECTIVE OPENER ──────────────────────────────────────────── */}
           <SectionLabel>Objective</SectionLabel>
@@ -1789,30 +1788,8 @@ function ObjectiveInspector({
 
           {PF_GROUP_DIVIDER}
 
-          {/* ── OBJECTIVE LAYOUT ───────────────────────────────────────────── */}
-          <SectionLabel>Objective Layout</SectionLabel>
-          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-            {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"]] as const).map(([val, label]) => {
-              const active = (content.layout ?? "hub-spoke") === val;
-              return (
-                <button
-                  key={val}
-                  onClick={() => updateContent({ layout: val })}
-                  style={{
-                    flex: 1, padding: "6px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 4,
-                    border: `1px solid ${active ? branding.accentColor : "#D1D5DB"}`,
-                    background: active ? branding.accentColor + "1A" : "#FFFFFF",
-                    color: active ? branding.textColor : "#6B7280",
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
           {/* Hub & Spoke tuning */}
-          {(content.layout ?? "hub-spoke") === "hub-spoke" && (
+          {mode === "hub-spoke" && (
             <>
               <FieldGroup label={`Hub Size — ${(content.hubSize ?? 1).toFixed(1)}×`}>
                 <PSizeSlider accentColor={branding.accentColor} value={content.hubSize ?? 1} onChange={(v) => updateContent({ hubSize: v })} />

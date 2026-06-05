@@ -513,7 +513,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
               ...biuStyle(content.objectiveBold, content.objectiveItalic, content.objectiveUnderline),
             }}
           >
-            {objective}
+            {renderEmphasis(objective)}
           </p>
         )}
 
