@@ -418,10 +418,6 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   // benefit from the pillar layout once pillars are set).
   const objective = (content.objective ?? content.statementText ?? "").trim();
   const pillars = (content.pillars ?? []).slice(0, 5);
-  // Highlight bullets fill the middle of the slide between the opener and
-  // the 3 pillars. Sourced from Project.bullets via the deck hydration in
-  // app/admin/projects/[id]/deck/page.tsx.
-  const bullets = (content.bullets ?? []).filter(Boolean).slice(0, 6);
 
   const headlineColor = content.headlineColor ?? theme.color.ink;
   const headlineShadow = makeOutlineShadow(content.headlineOutline);
@@ -438,12 +434,6 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   const pillarBodyFont = content.pillarBodyFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const pillarBodyColor = content.pillarBodyColor ?? content.supportingColor ?? theme.color.muted;
   const pillarBodyEm = (content.pillarBodySize ?? 1.0) * 0.78;
-
-  // Bullets typography (already wired in earlier task)
-  const bulletBodyFont = content.bulletsFont ?? content.supportingTextFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
-  const bulletTextColor = content.bulletColor ?? pillarBodyColor;
-  const bulletIconClr = content.bulletIconColor ?? accent;
-  const bulletsEm = (content.bulletsSize ?? 1.0) * 0.95;
 
   // Text Position + Card controls from the inspector. Defaults match the
   // legacy hardcoded box so existing slides render identically until the
@@ -506,7 +496,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
               fontSize: `${objectiveEm}em`,
               color: objectiveColor,
               lineHeight: 1.55,
-              marginBottom: bullets.length > 0 ? "3%" : "5%",
+              marginBottom: "5%",
               maxWidth: "82%",
               fontFamily: objectiveFont,
               textShadow: makeOutlineShadow(content.objectiveOutline),
@@ -515,50 +505,6 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
           >
             {renderEmphasis(objective)}
           </p>
-        )}
-
-        {/* Project highlight bullets — fill the middle of the slide. */}
-        {bullets.length > 0 && (
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              marginBottom: "4%",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.55em",
-              maxWidth: "88%",
-            }}
-          >
-            {bullets.map((b, i) => (
-              <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: "0.7em" }}>
-                <span
-                  style={{
-                    flexShrink: 0,
-                    width: "0.45em",
-                    height: "0.45em",
-                    background: bulletIconClr,
-                    borderRadius: "50%",
-                    marginTop: "0.55em",
-                    display: "block",
-                  }}
-                />
-                <span
-                  style={{
-                    fontSize: `${bulletsEm}em`,
-                    color: bulletTextColor,
-                    lineHeight: 1.55,
-                    fontFamily: bulletBodyFont,
-                    textShadow: makeOutlineShadow(content.bulletsOutline),
-                    ...biuStyle(content.bulletsBold, content.bulletsItalic, content.bulletsUnderline),
-                  }}
-                >
-                  {b}
-                </span>
-              </li>
-            ))}
-          </ul>
         )}
 
         {/* 3-column pillar grid */}
@@ -840,13 +786,9 @@ export function resolveObjectiveLayoutMode(
   ) {
     return content.layout;
   }
-  const pillars = content.pillars ?? [];
-  const pillarsValid =
-    pillars.length >= 2 &&
-    pillars.length <= 6 &&
-    pillars.every((p) => p?.title?.trim() && p?.body?.trim());
-  // Default to the hub-spoke "standard" when we have valid pillars.
-  return pillarsValid ? "hub-spoke" : "statement";
+  // Hub & Spoke is the standard default (even with no zones yet — it shows the
+  // headline + hub rather than a blank statement sheet).
+  return "hub-spoke";
 }
 
 export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {

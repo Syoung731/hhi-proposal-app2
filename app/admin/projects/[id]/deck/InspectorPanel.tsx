@@ -1548,9 +1548,7 @@ function ObjectiveInspector({
     if (content.layout === "pillars" || content.layout === "statement" || content.layout === "hub-spoke") {
       return content.layout;
     }
-    const ps = content.pillars ?? [];
-    const valid = ps.length >= 2 && ps.length <= 6 && ps.every((p) => p?.title?.trim() && p?.body?.trim());
-    return valid ? "hub-spoke" : "statement";
+    return "hub-spoke";
   })();
   // Both hub-spoke and pillars use the same Zones editor section.
   const showZonesEditor = mode === "hub-spoke" || mode === "pillars";
@@ -1647,7 +1645,7 @@ function ObjectiveInspector({
       {/* ── LAYOUT MODE (Hub & Spoke / Pillars / Statement) ─────────────── */}
       <SectionLabel>Layout</SectionLabel>
       <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}`, borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
-        {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"], ["statement", "Statement"]] as const).map(([m, label], idx) => {
+        {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"]] as const).map(([m, label], idx) => {
           const active = mode === m;
           return (
             <button
@@ -1718,78 +1716,6 @@ function ObjectiveInspector({
               onChangeFn={(v) => updateContent({ objectiveOutline: v })}
             />
           </FieldGroup>
-
-          {PF_GROUP_DIVIDER}
-
-          {mode === "pillars" && (
-          <>
-          {/* ── PROJECT HIGHLIGHT BULLETS (Pillars layout only) ───────────── */}
-          <SectionLabel>Project Highlights</SectionLabel>
-          <p style={{ fontSize: 10, color: "#9CA3AF", marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>
-            Up to 6 bullets. Render between the objective and the 3 pillars. Auto-populated from the Overview tab on Generate Overview; edit here to override.
-          </p>
-          {([0, 1, 2, 3, 4, 5] as const).map((i) => (
-            <FieldGroup key={i} label={`Bullet ${i + 1}`}>
-              <TextInput
-                value={pillarBulletSlots[i]}
-                onChange={(v) => updatePillarBullet(i, v)}
-                placeholder={
-                  i === 0 ? "Open kitchen reoriented to the water view"
-                    : i === 1 ? "Primary suite expansion with spa-grade bath"
-                    : i === 2 ? "Whole-home envelope rebuild for coastal durability"
-                    : i === 3 ? "Mechanical and electrical systems modernized throughout"
-                    : i === 4 ? "(optional)"
-                    : "(optional)"
-                }
-              />
-            </FieldGroup>
-          ))}
-          <FieldGroup label="Font">
-            <PFontSelect
-              value={content.bulletsFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body}
-              onChange={(v) => updateContent({ bulletsFont: v })}
-            />
-          </FieldGroup>
-          <FieldGroup label={`Size — ${(content.bulletsSize ?? 1.0).toFixed(1)}×`}>
-            <PSizeSlider accentColor={branding.accentColor}
-              value={content.bulletsSize ?? 1.0}
-              onChange={(v) => updateContent({ bulletsSize: v })}
-            />
-          </FieldGroup>
-          <PStyleButtons
-            bold={content.bulletsBold} italic={content.bulletsItalic} underline={content.bulletsUnderline}
-            onBold={(v) => updateContent({ bulletsBold: v })}
-            onItalic={(v) => updateContent({ bulletsItalic: v })}
-            onUnderline={(v) => updateContent({ bulletsUnderline: v })}
-          />
-          <div style={{ marginTop: 8 }}>
-            <FieldGroup label="Bullet Text Color">
-              <BrandingColorRow branding={branding}
-                value={content.bulletColor}
-                defaultVal="#374151"
-                onChange={(v) => updateContent({ bulletColor: v })}
-                onReset={() => updateContent({ bulletColor: null })}
-              />
-            </FieldGroup>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <FieldGroup label="Bullet Icon Color">
-              <BrandingColorRow branding={branding}
-                value={content.bulletIconColor}
-                defaultVal={branding.accentColor}
-                onChange={(v) => updateContent({ bulletIconColor: v })}
-                onReset={() => updateContent({ bulletIconColor: null })}
-              />
-            </FieldGroup>
-          </div>
-          <FieldGroup label="Outline">
-            <POutlineRow accentColor={branding.accentColor}
-              value={content.bulletsOutline}
-              onChangeFn={(v) => updateContent({ bulletsOutline: v })}
-            />
-          </FieldGroup>
-          </>
-          )}
 
           {PF_GROUP_DIVIDER}
 

@@ -44,11 +44,10 @@ central hub**.
   zones (the 94 Coggins style). Distinctive and project-specific.
 - **Pillars** — the three zones as a clean 3-column grid.
 
-Both use the same three items, so you can switch between them freely.
+Both use the same zones, so you can switch between them freely.
 
-> **Heads-up:** Both layouts need all **three** zones/pillars filled (title +
-> body). If they're empty, the slide falls back to a simpler text layout — run
-> "Draft slide copy with AI" or fill the three in the inspector.
+> **Heads-up:** Until you add zones, the slide just shows the headline + hub —
+> run "Draft slide copy with AI" or add zones in the inspector to fill it in.
 
 ---
 
