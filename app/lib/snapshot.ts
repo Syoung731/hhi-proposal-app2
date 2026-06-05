@@ -115,6 +115,8 @@ export type SnapshotData = {
  */
 export type SerializedDeck = {
   id: string;
+  /** Deck visual theme frozen at publish time. Older snapshots omit it. */
+  deckTheme?: string | null;
   slides: SerializedDeckSlide[];
 };
 

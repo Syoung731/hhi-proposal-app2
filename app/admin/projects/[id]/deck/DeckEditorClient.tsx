@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type {
   ProposalSlide,
   DeckBranding,
@@ -13,7 +13,7 @@ import type {
   ScopeBreakdownRoom,
   TextZoneSetting,
 } from "@/app/lib/deck/types";
-import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction, deleteProjectDeckAction } from "./actions";
+import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction, deleteProjectDeckAction, updateDeckThemeAction } from "./actions";
 import { DEFAULT_SPEC_SLIDE_TYPES } from "@/app/lib/deck/default-spec";
 import { SlideRail } from "./SlideRail";
 import { SlideCanvas } from "./SlideCanvas";
@@ -27,6 +27,8 @@ interface Props {
   /** Slides loaded from the database (post auto-sync). */
   initialSlides: ProposalSlide[];
   branding: DeckBranding;
+  /** Deck-level visual theme, loaded from ProposalDeck.deckTheme. */
+  initialDeckTheme?: "blueprint" | "editorial";
   projectId: string;
   projectTitle: string;
   /** Value pillars resolved from DB at SSR time. Used when "+ Why Us" is added. */
@@ -474,6 +476,7 @@ function ConfirmRegenerateModal({
 export function DeckEditorClient({
   initialSlides,
   branding,
+  initialDeckTheme = "blueprint",
   projectId,
   projectTitle,
   valuePillars,
@@ -486,6 +489,22 @@ export function DeckEditorClient({
 }: Props) {
   const [slides, setSlides] = useState<ProposalSlide[]>(
     [...initialSlides].sort((a, b) => a.order - b.order)
+  );
+
+  // ── Deck theme ───────────────────────────────────────────────────────────
+  const [deckTheme, setDeckTheme] = useState<"blueprint" | "editorial">(initialDeckTheme);
+  // Inject the live theme into branding so all render contexts (canvas, rail,
+  // inspector) pick it up via SlideRenderer's theme context.
+  const themedBranding: DeckBranding = useMemo(
+    () => ({ ...branding, deckTheme }),
+    [branding, deckTheme],
+  );
+  const handleThemeChange = useCallback(
+    async (next: "blueprint" | "editorial") => {
+      setDeckTheme(next);
+      await updateDeckThemeAction(projectId, next);
+    },
+    [projectId],
   );
   const [activeSlideId, setActiveSlideId] = useState<string>(
     initialSlides[0]?.id ?? ""
@@ -1105,6 +1124,24 @@ export function DeckEditorClient({
         onAutoGenScope={autoGenScopeBreakdown}
         accentColor={branding.accentColor}
       />
+      <select
+        value={deckTheme}
+        onChange={(e) => handleThemeChange(e.target.value as "blueprint" | "editorial")}
+        title="Deck visual theme"
+        style={{
+          fontSize: 11,
+          padding: "4px 8px",
+          borderRadius: 4,
+          border: "1px solid rgba(255,255,255,0.35)",
+          background: "transparent",
+          color: "#fff",
+          cursor: "pointer",
+          alignSelf: "center",
+        }}
+      >
+        <option value="blueprint" style={{ color: "#111" }}>Theme: Blueprint</option>
+        <option value="editorial" style={{ color: "#111" }}>Theme: Editorial</option>
+      </select>
       <GenerateDeckButton
         disabled={generateDisabled}
         disabledReason={generateDisabledReason}
@@ -1246,7 +1283,7 @@ export function DeckEditorClient({
           <SlideRail
             slides={visibleSlides}
             activeSlideId={activeSlideId}
-            branding={branding}
+            branding={themedBranding}
             onSelect={setActiveSlideId}
             onReorder={reorderSlides}
             onToggleEnabled={toggleEnabled}
@@ -1254,12 +1291,12 @@ export function DeckEditorClient({
           />
 
           {/* Center — canvas */}
-          <SlideCanvas slide={activeSlide} branding={branding} brandBackgrounds={brandBackgrounds} />
+          <SlideCanvas slide={activeSlide} branding={themedBranding} brandBackgrounds={brandBackgrounds} />
 
           {/* Right — inspector */}
           <InspectorPanel
             slide={activeSlide}
-            branding={branding}
+            branding={themedBranding}
             projectId={projectId}
             onUpdate={updateSlide}
             onDuplicate={duplicateSlide}

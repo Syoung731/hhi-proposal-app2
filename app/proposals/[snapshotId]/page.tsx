@@ -57,7 +57,10 @@ export default async function ProposalPublicRenderer({
     // Draft has no snapshot to read from — pull live branding via the
     // non-admin-gated helper so the headless-Chromium PDF flow can render
     // a draft preview without an admin session.
-    const branding = adaptBrandingForDeck(await getCompanyBrandingForRender());
+    const branding = {
+      ...adaptBrandingForDeck(await getCompanyBrandingForRender()),
+      deckTheme: draft.deckTheme,
+    };
 
     if (isPrint) {
       return (
@@ -109,7 +112,10 @@ export default async function ProposalPublicRenderer({
   //      next republish lifts them onto the frozen path.
   const brandingSource: SnapshotBranding =
     data.branding ?? (await getCompanyBrandingForRender());
-  const branding = adaptBrandingForDeck(brandingSource);
+  const branding = {
+    ...adaptBrandingForDeck(brandingSource),
+    deckTheme: data.deck.deckTheme ?? "blueprint",
+  };
 
   if (isPrint) {
     return (
@@ -140,6 +146,7 @@ async function loadDraftDeck(projectId: string): Promise<{
   slides: ProposalSlide[];
   projectTitle: string;
   nextVersion: number;
+  deckTheme: string;
 } | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -358,10 +365,16 @@ async function loadDraftDeck(projectId: string): Promise<{
     };
   }
 
+  const deckRow = await prisma.proposalDeck.findUnique({
+    where: { projectId },
+    select: { deckTheme: true },
+  });
+
   return {
     slides: slides.filter((s) => s.isEnabled !== false),
     projectTitle: project.title,
     nextVersion: (project.publishedVersion ?? 0) + 1,
+    deckTheme: deckRow?.deckTheme === "editorial" ? "editorial" : "blueprint",
   };
 }
 

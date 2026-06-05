@@ -53,6 +53,7 @@ export async function serializeDeckForSnapshot(
 
   return {
     id: deck.id,
+    deckTheme: deck.deckTheme ?? null,
     slides,
   };
 }

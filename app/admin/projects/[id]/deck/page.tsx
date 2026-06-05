@@ -316,6 +316,14 @@ export default async function DeckEditorPage({ params }: PageProps) {
     hasAddition: project.hasAddition,
   });
 
+  // Deck-level visual theme (getDeckForProject has upserted the ProposalDeck row).
+  const deckRow = await prisma.proposalDeck.findUnique({
+    where: { projectId: id },
+    select: { deckTheme: true },
+  });
+  const deckTheme: "blueprint" | "editorial" =
+    deckRow?.deckTheme === "editorial" ? "editorial" : "blueprint";
+
   // Inject the live cover hero URL into every cover slide.
   // We do this here (not in db.ts) because the hero image is managed
   // independently of the deck and should always reflect the latest value.
@@ -432,6 +440,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
     <DeckEditorClient
       initialSlides={slides}
       branding={branding}
+      initialDeckTheme={deckTheme}
       projectId={project.id}
       projectTitle={project.title}
       valuePillars={valuePillars}

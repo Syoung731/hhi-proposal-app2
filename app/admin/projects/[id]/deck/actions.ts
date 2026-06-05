@@ -67,6 +67,31 @@ export async function aiEditScopeSlideAction(params: {
   }
 }
 
+// ─── updateDeckThemeAction ───────────────────────────────────────────────────
+
+/**
+ * Persists the deck-level visual theme on ProposalDeck. Deck-level (not slide-
+ * level) setting, so it has its own tiny update action.
+ */
+export async function updateDeckThemeAction(
+  projectId: string,
+  deckTheme: "blueprint" | "editorial",
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  if (deckTheme !== "blueprint" && deckTheme !== "editorial") {
+    return { error: "Invalid theme" };
+  }
+  try {
+    await prisma.proposalDeck.update({
+      where: { projectId },
+      data: { deckTheme },
+    });
+    return { ok: true };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to update theme" };
+  }
+}
+
 // ─── saveDeckSlidesAction ────────────────────────────────────────────────────
 
 /**
