@@ -361,6 +361,8 @@ function GenerateDeckModal({
   generating,
   alsoDraftCopy,
   setAlsoDraftCopy,
+  alsoIllustrate,
+  setAlsoIllustrate,
   onGenerate,
   onDeleteAll,
   composeBusy,
@@ -376,6 +378,8 @@ function GenerateDeckModal({
   generating: boolean;
   alsoDraftCopy: boolean;
   setAlsoDraftCopy: (v: boolean) => void;
+  alsoIllustrate: boolean;
+  setAlsoIllustrate: (v: boolean) => void;
   onGenerate: (mode: "keep-manual" | "replace-all") => void;
   onDeleteAll: () => void;
   composeBusy: boolean;
@@ -432,9 +436,13 @@ function GenerateDeckModal({
             </>
           )}
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#CBD5E1", marginBottom: 20, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#CBD5E1", marginBottom: 6, cursor: "pointer" }}>
           <input type="checkbox" checked={alsoDraftCopy} onChange={(e) => setAlsoDraftCopy(e.target.checked)} style={{ accentColor: accent }} />
           Also draft slide copy with AI after generating
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#CBD5E1", marginBottom: 20, cursor: "pointer" }}>
+          <input type="checkbox" checked={alsoIllustrate} onChange={(e) => setAlsoIllustrate(e.target.checked)} style={{ accentColor: accent }} />
+          Also generate illustrations (full build — slower, ~1&nbsp;min)
         </label>
 
         {/* ── AI FILL ── */}
@@ -511,6 +519,7 @@ export function DeckEditorClient({
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
   // AI Fill (unified Generate Deck modal)
   const [alsoDraftCopy, setAlsoDraftCopy] = useState(false);
+  const [alsoIllustrate, setAlsoIllustrate] = useState(false);
   const [composeBusy, setComposeBusy] = useState(false);
   const [composeMsg, setComposeMsg] = useState<string | null>(null);
   const [illustrateBusy, setIllustrateBusy] = useState(false);
@@ -530,10 +539,16 @@ export function DeckEditorClient({
       const sorted = result.slides.sort((a, b) => a.order - b.order);
       setSlides(sorted);
       if (sorted[0]) setActiveSlideId(sorted[0].id);
-      // Optionally chain the AI copy draft, then reload to show it.
-      if (alsoDraftCopy) {
-        setGenerateStatus("Drafting copy with AI…");
-        await composeDeckCopyAction(projectId);
+      // Optionally chain the AI copy draft + illustrations, then reload to show them.
+      if (alsoDraftCopy || alsoIllustrate) {
+        if (alsoDraftCopy) {
+          setGenerateStatus("Drafting copy with AI…");
+          await composeDeckCopyAction(projectId);
+        }
+        if (alsoIllustrate) {
+          setGenerateStatus("Generating illustrations… (~1 min)");
+          await generateDeckVisualsAction(projectId);
+        }
         window.location.reload();
         return;
       }
@@ -542,7 +557,7 @@ export function DeckEditorClient({
       setGenerateStatus(slides.length === 0 ? "Default deck generated" : "Default deck regenerated");
       setTimeout(() => setGenerateStatus(null), 3000);
     },
-    [projectId, slides.length, alsoDraftCopy]
+    [projectId, slides.length, alsoDraftCopy, alsoIllustrate]
   );
 
   // Save current editor state first (so user edits persist), run the AI action,
@@ -1361,6 +1376,8 @@ export function DeckEditorClient({
           generating={generating}
           alsoDraftCopy={alsoDraftCopy}
           setAlsoDraftCopy={setAlsoDraftCopy}
+          alsoIllustrate={alsoIllustrate}
+          setAlsoIllustrate={setAlsoIllustrate}
           onGenerate={(mode) => void runGeneration(mode)}
           onDeleteAll={() => void runDeleteDeck()}
           composeBusy={composeBusy}

@@ -30,9 +30,11 @@ section):
    the hub (the home) and each zone (e.g. a screened porch, a garage among the
    site's trees). This is the slower, image-generation step.
 
-> **Tip:** On a brand-new deck, the modal can also build the slide structure
-> first — and there's a checkbox to *draft copy automatically right after
-> generating*.
+> **Tip:** On a brand-new deck, the modal can build the slide structure first —
+> with checkboxes to *also draft copy* and *also generate illustrations* right
+> after, so a full, illustrated deck is one click (the illustrations option adds
+> ~1 min). "Generate illustrations" also fills in a scope slide's items + icons
+> if they're missing.
 
 > **Heads-up:** "Generate illustrations" takes ~30–60s and can be re-run safely
 > (it only fills in what's missing). Until you run it, each zone shows a simple

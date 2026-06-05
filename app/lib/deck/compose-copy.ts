@@ -509,6 +509,17 @@ export type GenerateVisualsResult =
  * already exist so it can be re-run safely. Kept separate from composeDeckCopy
  * so the text draft stays fast and never blocks on image generation.
  */
+async function getProjectRooms(
+  projectId: string,
+): Promise<{ name: string; scopeNarrative: string; bucket: string }[]> {
+  const rooms = await prisma.room.findMany({
+    where: { projectId, isProjectOverhead: false },
+    select: { name: true, scopeNarrative: true, bucket: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  return rooms.map((r) => ({ name: r.name, scopeNarrative: r.scopeNarrative ?? "", bucket: String(r.bucket) }));
+}
+
 export async function generateDeckVisuals(projectId: string): Promise<GenerateVisualsResult> {
   const deck = await prisma.proposalDeck.findUnique({
     where: { projectId },
@@ -556,33 +567,63 @@ export async function generateDeckVisuals(projectId: string): Promise<GenerateVi
         }
       } else if (slide.type === "scope-overview" && slide.layoutKey === "blueprint-icons") {
         const content = asObject(slide.content);
-        const items = Array.isArray(content.scopeItems)
+        let items = Array.isArray(content.scopeItems)
           ? (content.scopeItems as Array<Record<string, unknown>>)
           : [];
-        const anyMissing = items.some(
+        let changed = false;
+
+        // 1. Create structured scope items from the project scope if there are
+        //    none (so the layout shows real items + icons instead of generic
+        //    description sentences). Runs even on user-modified slides — this is
+        //    an explicit "generate visuals" request.
+        if (items.length === 0) {
+          const rooms = await getProjectRooms(projectId);
+          const draft = await draftScopeItems(rooms);
+          if (draft.items.length > 0) {
+            items = draft.items.map((it) => ({ title: it.title, detail: it.detail || null, icon: it.icon }));
+            changed = true;
+          }
+        }
+        if (items.length === 0) continue;
+
+        // 2. Attach a hero photo if the slide has none (Blueprint needs one).
+        let selectedPhotos = Array.isArray(content.selectedPhotos)
+          ? (content.selectedPhotos as unknown[])
+          : [];
+        if (selectedPhotos.length === 0) {
+          const hero = await findScopeHeroPhoto(projectId);
+          if (hero) {
+            selectedPhotos = [{ id: hero.id, url: hero.url, thumbnailUrl: hero.thumbnailUrl }];
+            changed = true;
+          }
+        }
+
+        // 3. Draw a BrandIcon line-art per item that doesn't have one yet.
+        const needIcons = items.some(
           (it) => !(typeof it.iconImageUrl === "string" && it.iconImageUrl) && typeof it.title === "string",
         );
-        if (!anyMissing) continue;
-        const imageMap = await resolveScopeIconImages(
-          items.map((it) => String(it.title ?? "")),
-          { generateMissing: true },
-        );
-        let added = 0;
-        const newItems = items.map((it) => {
-          if (typeof it.iconImageUrl === "string" && it.iconImageUrl) return it;
-          const url = imageMap.get(scopeIconSlug(String(it.title ?? "")));
-          if (url) {
-            added += 1;
-            return { ...it, iconImageUrl: url };
-          }
-          return it;
-        });
-        if (added > 0) {
+        if (needIcons) {
+          const imageMap = await resolveScopeIconImages(
+            items.map((it) => String(it.title ?? "")),
+            { generateMissing: true },
+          );
+          items = items.map((it) => {
+            if (typeof it.iconImageUrl === "string" && it.iconImageUrl) return it;
+            const url = imageMap.get(scopeIconSlug(String(it.title ?? "")));
+            if (url) {
+              icons += 1;
+              changed = true;
+              return { ...it, iconImageUrl: url };
+            }
+            return it;
+          });
+        }
+
+        if (changed) {
           await prisma.deckSlide.update({
             where: { id: slide.id },
-            data: { content: { ...content, scopeItems: newItems } as unknown as Prisma.InputJsonObject },
+            data: { content: { ...content, scopeItems: items, selectedPhotos } as unknown as Prisma.InputJsonObject },
           });
-          icons += added;
         }
       }
     } catch {
