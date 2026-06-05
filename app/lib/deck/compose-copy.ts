@@ -9,6 +9,29 @@ import { SCOPE_ICON_KEY_LIST, isScopeIconKey } from "@/app/lib/deck/scope-icon-k
 import { SCOPE_OVERVIEW_LAYOUTS } from "@/app/lib/deck/types";
 import type { ScopeOverviewContent, ScopeOverviewLayoutKey, ScopeItem } from "@/app/lib/deck/types";
 import { resolveScopeIconImages, scopeIconSlug } from "@/app/lib/deck/scope-icon-resolver";
+import { generateBrandIconPngAction } from "@/app/admin/settings/actions";
+
+/**
+ * Generates one bespoke monochrome line-art SCENE illustration (project-specific)
+ * for a hub/zone. Returns the public URL, or null on failure (caller falls back
+ * to an icon). Does not persist a BrandIcon row — these are one-off, per-project.
+ */
+async function genObjectiveIllustration(scene: string, label: string): Promise<string | null> {
+  const visual = (scene || label).trim();
+  if (!visual) return null;
+  try {
+    const gen = await generateBrandIconPngAction({
+      name: label,
+      visual: `Blueprint-style line drawing of ${visual}`,
+      description: `Objective slide illustration for a remodeling proposal: ${visual}`,
+      monochrome: true,
+      mode: "illustration",
+    });
+    return gen.error || !gen.imageUrl ? null : gen.imageUrl;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * AI deck composer (Phase 3).
@@ -116,7 +139,8 @@ type DraftObjective = {
   headline: string | null;
   objective: string | null;
   hubIcon: string;
-  pillars: { title: string; body: string; icon: string }[];
+  hubScene: string;
+  pillars: { title: string; body: string; icon: string; scene: string }[];
 };
 
 /**
@@ -139,16 +163,17 @@ async function draftObjective(params: {
   if (!source.trim()) return null;
 
   const response = await callClaude({
-    max_tokens: 800,
-    temperature: 0.5,
+    max_tokens: 1000,
+    temperature: 0.8,
     system:
-      "You write the Objective slide for a luxury design-build remodeling proposal. " +
-      "It frames WHY the project matters before the deck covers what. " +
+      "You are a creative brand strategist writing the Objective slide for a LUXURY design-build remodeling proposal. " +
+      "It frames WHY the project matters before the deck covers what. Be genuinely creative and specific to THIS home — " +
+      "avoid generic, formulaic phrasing. " +
       "Return ONLY minified JSON of the shape " +
-      '{"headline":"<creative objective title, =6 words, e.g. The \'Living Outward\' Objective>","objective":"<1-2 sentence mission, =28 words, wrap 2-3 key phrases in **double asterisks** for emphasis>","hubIcon":"<one icon key for the home/project>","pillars":[{"title":"<2-4 word zone name, e.g. The Space / Zone 1 (Leisure)>","detail-as-body":"<one benefit line, =16 words, no trailing period>","icon":"<one icon key>"}]}. ' +
-      'Use the key "body" (not "detail-as-body") for the pillar body. ' +
-      "Produce EXACTLY 3 pillars that capture the project's main dimensions (group rooms/work meaningfully). " +
+      '{"headline":"<an evocative, distinctive objective name, =6 words, in the spirit of \'The Living Outward Objective\' or \'The Coastal Sanctuary Mandate\' — make it memorable and specific, NOT \'The X Objective\' boilerplate>","objective":"<1-2 sentence mission, =28 words, wrap 2-3 key phrases in **double asterisks** for emphasis>","hubIcon":"<one icon key for the home>","hubScene":"<short visual description of the existing home to illustrate, e.g. two-gable coastal home with covered porch>","pillars":[{"title":"<2-4 word zone name, evocative, e.g. The Poolside Retreat / Zone 1 (Leisure)>","body":"<one benefit line, =16 words, no trailing period>","icon":"<one icon key>","scene":"<concrete visual to illustrate this zone as a small line-art scene, e.g. screened porch with seating and ceiling fan / garage bay with car among mature trees / storage room with shelving and equipment>"}]}. ' +
+      "Produce EXACTLY 3 pillars capturing the project's main dimensions (group rooms/work meaningfully). " +
       `All icon values (hubIcon + each pillar.icon) MUST be exactly one key from this list: ${SCOPE_ICON_KEY_LIST}. Use "house" for hubIcon and "feature" for a pillar when unsure. ` +
+      "The scene/hubScene fields describe a drawing to generate — be concrete and project-specific. " +
       "No markdown fences, no commentary — JSON only.",
     messages: [
       {
@@ -170,7 +195,8 @@ async function draftObjective(params: {
       headline?: string;
       objective?: string;
       hubIcon?: string;
-      pillars?: { title?: string; body?: string; icon?: string }[];
+      hubScene?: string;
+      pillars?: { title?: string; body?: string; icon?: string; scene?: string }[];
     };
     const pillars = (parsed.pillars ?? [])
       .filter((p) => p && typeof p.title === "string" && typeof p.body === "string")
@@ -178,6 +204,7 @@ async function draftObjective(params: {
         title: (p.title ?? "").trim(),
         body: (p.body ?? "").trim(),
         icon: isScopeIconKey(p.icon) ? p.icon : "feature",
+        scene: (p.scene ?? "").trim(),
       }))
       .filter((p) => p.title && p.body)
       .slice(0, 3);
@@ -186,6 +213,7 @@ async function draftObjective(params: {
       headline: (parsed.headline ?? "").trim() || null,
       objective: (parsed.objective ?? "").trim() || null,
       hubIcon: isScopeIconKey(parsed.hubIcon) ? parsed.hubIcon : "house",
+      hubScene: (parsed.hubScene ?? "").trim(),
       pillars,
     };
   } catch {
@@ -404,6 +432,18 @@ export async function composeDeckCopy(
           projectAddress,
         });
         if (obj) {
+          // Generate bespoke line-art illustrations for the hub + each zone,
+          // in parallel. Falls back to icons when generation is unavailable.
+          const [hubImageUrl, ...zoneImages] = await Promise.all([
+            genObjectiveIllustration(obj.hubScene, "the home"),
+            ...obj.pillars.map((p) => genObjectiveIllustration(p.scene, p.title)),
+          ]);
+          const pillars = obj.pillars.map((p, i) => ({
+            title: p.title,
+            body: p.body,
+            icon: p.icon,
+            ...(zoneImages[i] ? { imageUrl: zoneImages[i] } : {}),
+          }));
           await prisma.deckSlide.update({
             where: { id: slide.id },
             data: {
@@ -411,8 +451,9 @@ export async function composeDeckCopy(
               content: {
                 ...asObject(slide.content),
                 ...(obj.objective ? { objective: obj.objective } : {}),
-                pillars: obj.pillars,
+                pillars,
                 hubIcon: obj.hubIcon,
+                ...(hubImageUrl ? { hubImageUrl } : {}),
                 layout: "hub-spoke",
               } as unknown as Prisma.InputJsonObject,
               source: "auto",

@@ -21,9 +21,15 @@ project.
 **In the app:** **Build Presentation** tab → **"Draft slide copy with AI."**
 
 It writes a creative headline, a one- or two-sentence mission statement, and
-**three zones** (each with a title, a one-line body, and a matching icon) pulled
-from *that project's* actual scope — so every job gets its own Objective. It
-defaults to the **Hub & Spoke** look (below).
+**three zones** (each with a title, a one-line body, and a **custom line-art
+illustration drawn for that zone** — e.g. a screened porch, a garage with the
+site's trees) pulled from *that project's* actual scope. The hub becomes a
+drawing of the home. So every job gets its own bespoke Objective. It defaults to
+the **Hub & Spoke** look (below).
+
+> **Heads-up:** Generating the illustrations adds ~30–60s the first time (it
+> draws the hub + 3 zones). If an illustration can't be generated, that zone
+> falls back to a simple icon.
 
 ## 3. The two layouts
 

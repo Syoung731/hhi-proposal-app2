@@ -1803,6 +1803,24 @@ function ObjectiveInspector({
             })}
           </div>
 
+          {/* Hub & Spoke tuning */}
+          {(content.layout ?? "hub-spoke") === "hub-spoke" && (
+            <>
+              <FieldGroup label={`Hub Size — ${(content.hubSize ?? 1).toFixed(1)}×`}>
+                <PSizeSlider accentColor={branding.accentColor} value={content.hubSize ?? 1} onChange={(v) => updateContent({ hubSize: v })} />
+              </FieldGroup>
+              <FieldGroup label={`Zone Text Size — ${(content.zoneTextSize ?? 1).toFixed(1)}×`}>
+                <PSizeSlider accentColor={branding.accentColor} value={content.zoneTextSize ?? 1} onChange={(v) => updateContent({ zoneTextSize: v })} />
+              </FieldGroup>
+              <FieldGroup label={`Hub Vertical Position — ${Math.round((content.hubY ?? 0.56) * 100)}%`}>
+                <input type="range" min={40} max={70} step={1}
+                  value={Math.round((content.hubY ?? 0.56) * 100)}
+                  onChange={(e) => updateContent({ hubY: parseInt(e.target.value) / 100 })}
+                  style={{ width: "100%", accentColor: branding.accentColor }} />
+              </FieldGroup>
+            </>
+          )}
+
           {/* ── PILLARS (3-column footer band) ─────────────────────────────── */}
           <SectionLabel>Pillars</SectionLabel>
           <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>

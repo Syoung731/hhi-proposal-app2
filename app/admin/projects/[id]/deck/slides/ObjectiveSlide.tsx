@@ -650,6 +650,7 @@ function HubZone({
   muted,
   bodyFont,
   align,
+  scale = 1,
 }: {
   pillar: ObjectivePillar;
   accent: string;
@@ -657,14 +658,21 @@ function HubZone({
   muted: string;
   bodyFont: string;
   align: "left" | "right" | "center";
+  scale?: number;
 }) {
+  const alignItems = align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start";
   return (
-    <div style={{ textAlign: align, display: "flex", flexDirection: "column", alignItems: align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start" }}>
-      {pillar.icon && <ScopeIcon name={pillar.icon} size={30} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.4em" }} />}
-      <p style={{ fontSize: "0.82em", fontFamily: bodyFont, fontWeight: 700, color: accent, margin: 0, lineHeight: 1.2 }}>
+    <div style={{ textAlign: align, display: "flex", flexDirection: "column", alignItems }}>
+      {pillar.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: `${9 * scale}em`, height: `${4.6 * scale}em`, objectFit: "contain", objectPosition: align === "right" ? "right" : align === "center" ? "center" : "left", marginBottom: "0.5em" }} />
+      ) : pillar.icon ? (
+        <ScopeIcon name={pillar.icon} size={Math.round(30 * scale)} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.4em" }} />
+      ) : null}
+      <p style={{ fontSize: `${0.82 * scale}em`, fontFamily: bodyFont, fontWeight: 700, color: accent, margin: 0, lineHeight: 1.2 }}>
         {pillar.title}
       </p>
-      <p style={{ fontSize: "0.72em", fontFamily: bodyFont, color: muted, margin: "0.25em 0 0", lineHeight: 1.4, maxWidth: "16em" }}>
+      <p style={{ fontSize: `${0.7 * scale}em`, fontFamily: bodyFont, color: muted, margin: "0.25em 0 0", lineHeight: 1.45, maxWidth: "15em" }}>
         {pillar.body}
       </p>
     </div>
@@ -685,6 +693,14 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
   const [z1, z2, z3] = pillars;
   const gridLine = "rgba(26,35,50,0.06)";
 
+  // Tunable geometry (inspector sliders).
+  const hubSizeM = content.hubSize ?? 1;
+  const zoneScale = content.zoneTextSize ?? 1;
+  const hubYpct = content.hubY ?? 0.56;
+  const hubTop = `${hubYpct * 100}%`;
+  const arrowY = hubYpct * 90; // viewBox units (0–90)
+  const hasHubImg = !!content.hubImageUrl;
+
   return (
     <div className="relative w-full h-full overflow-hidden" style={{ background: hasBg ? "transparent" : theme.color.surface }}>
       {/* graph-paper grid (blueprint theme) */}
@@ -699,56 +715,63 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
       )}
 
       {/* Header */}
-      <div style={{ position: "absolute", left: "6%", right: "6%", top: "6%", zIndex: 2 }}>
+      <div style={{ position: "absolute", left: "6%", right: "6%", top: "6%", zIndex: 3 }}>
         <h1 style={{ fontSize: "2.0em", fontWeight: (content.headlineBold ?? true) ? 700 : 400, fontFamily: headlineFont, color: ink, lineHeight: 1.1, margin: 0 }}>
           {slide.headline || "Project Objective"}
         </h1>
         {objective && (
-          <p style={{ fontSize: "0.92em", fontFamily: bodyFont, color: muted, lineHeight: 1.5, margin: "0.6em 0 0", maxWidth: "78%" }}>
+          <p style={{ fontSize: "0.92em", fontFamily: bodyFont, color: muted, lineHeight: 1.5, margin: "0.6em 0 0", maxWidth: "82%" }}>
             {renderEmphasis(objective)}
           </p>
         )}
       </div>
 
-      {/* Arrows (16:9 viewBox, uniform scale) */}
+      {/* Arrows (16:9 viewBox → uniform scale, no distortion) */}
       <svg className="absolute inset-0 pointer-events-none" viewBox="0 0 160 90" preserveAspectRatio="none" style={{ zIndex: 1 }} aria-hidden>
         <defs>
-          <marker id="hubArrow" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto">
-            <path d="M0 0 L5 2.5 L0 5 z" fill={accent} />
+          <marker id="hubArrow" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
+            <path d="M0 0 L4 2 L0 4 z" fill={accent} />
           </marker>
         </defs>
-        <line x1="72" y1="50" x2="48" y2="50" stroke={accent} strokeWidth="1" markerEnd="url(#hubArrow)" />
-        <line x1="88" y1="50" x2="112" y2="50" stroke={accent} strokeWidth="1" markerEnd="url(#hubArrow)" />
-        <line x1="80" y1="58" x2="80" y2="72" stroke={accent} strokeWidth="1" markerEnd="url(#hubArrow)" />
+        <line x1="70" y1={arrowY} x2="55" y2={arrowY} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />
+        <line x1="90" y1={arrowY} x2="105" y2={arrowY} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />
+        <line x1="80" y1={arrowY + 9} x2="80" y2={arrowY + 21} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />
       </svg>
 
       {/* Central hub */}
-      <div
-        style={{
-          position: "absolute", left: "50%", top: "55%", transform: "translate(-50%, -50%)",
-          width: "5.5em", height: "5.5em", borderRadius: "50%",
-          background: theme.color.panel, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
-        }}
-      >
-        <ScopeIcon name={content.hubIcon ?? "house"} size={44} color={theme.color.panelInk} strokeWidth={1.4} />
-      </div>
+      {hasHubImg ? (
+        <div style={{ position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)", width: `${8.5 * hubSizeM}em`, height: `${6 * hubSizeM}em`, zIndex: 2 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={content.hubImageUrl ?? ""} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        </div>
+      ) : (
+        <div
+          style={{
+            position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)",
+            width: `${5.4 * hubSizeM}em`, height: `${5.4 * hubSizeM}em`, borderRadius: "50%",
+            background: theme.color.panel, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
+          }}
+        >
+          <ScopeIcon name={content.hubIcon ?? "house"} size={Math.round(44 * hubSizeM)} color={theme.color.panelInk} strokeWidth={1.4} />
+        </div>
+      )}
 
       {/* Zone 1 — left */}
       {z1 && (
-        <div style={{ position: "absolute", left: "5%", top: "55%", transform: "translateY(-50%)", width: "26%", zIndex: 2 }}>
-          <HubZone pillar={z1} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="right" />
+        <div style={{ position: "absolute", left: "4%", top: hubTop, transform: "translateY(-50%)", width: "23%", zIndex: 2 }}>
+          <HubZone pillar={z1} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="right" scale={zoneScale} />
         </div>
       )}
       {/* Zone 2 — right */}
       {z2 && (
-        <div style={{ position: "absolute", right: "5%", top: "55%", transform: "translateY(-50%)", width: "26%", zIndex: 2 }}>
-          <HubZone pillar={z2} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="left" />
+        <div style={{ position: "absolute", right: "4%", top: hubTop, transform: "translateY(-50%)", width: "23%", zIndex: 2 }}>
+          <HubZone pillar={z2} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="left" scale={zoneScale} />
         </div>
       )}
       {/* Zone 3 — bottom */}
       {z3 && (
-        <div style={{ position: "absolute", left: "50%", bottom: "5%", transform: "translateX(-50%)", width: "34%", zIndex: 2 }}>
-          <HubZone pillar={z3} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="center" />
+        <div style={{ position: "absolute", left: "50%", bottom: "4%", transform: "translateX(-50%)", width: "30%", zIndex: 2 }}>
+          <HubZone pillar={z3} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="center" scale={zoneScale} />
         </div>
       )}
 

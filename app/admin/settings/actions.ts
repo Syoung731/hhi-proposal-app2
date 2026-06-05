@@ -2275,7 +2275,7 @@ Hard constraints:
 }
 
 export async function generateBrandIconPngAction(
-  input: { name: string; visual: string; description?: string | null; monochrome?: boolean }
+  input: { name: string; visual: string; description?: string | null; monochrome?: boolean; mode?: "icon" | "illustration" }
 ): Promise<{ error?: string; imageUrl?: string; imageKey?: string; width?: number; height?: number }> {
   await requireAdmin();
 
@@ -2285,6 +2285,8 @@ export async function generateBrandIconPngAction(
   const visual = (input.visual ?? "").toString().trim();
   const description = (input.description ?? "").toString().trim();
   const monochrome = input.monochrome === true;
+  const illustration = input.mode === "illustration";
+  const subj = illustration ? "line-art illustration" : "icon";
 
   if (!name) {
     return { error: "Name is required for PNG generation." };
@@ -2301,44 +2303,43 @@ export async function generateBrandIconPngAction(
   const ai = new GoogleGenAI({ apiKey: geminiKey.trim() });
 
   const prompt = `
-You are designing a single clean, modern PNG icon for a design-build-remodel company.
+You are designing a single clean, modern PNG ${subj} for a design-build-remodel company.
 
-Icon name: ${name}
+${illustration ? "Subject" : "Icon name"}: ${name}
 Primary visual directive: ${visual}
 Additional context: ${description || "Simple, clear icon for a home services contractor."}
 
-ICON OUTPUT REQUIREMENTS (STRICT, MUST FOLLOW EXACTLY):
-- Output exactly ONE icon image, not a sheet or grid.
+OUTPUT REQUIREMENTS (STRICT, MUST FOLLOW EXACTLY):
+- Output exactly ONE ${subj}, not a sheet or grid.
 - The output format SHOULD be a PNG image (no animated formats like GIF or APNG).
 - The canvas must be a 1:1 square (for example 512x512).
 - The BACKGROUND must be a SOLID pure white color (#FFFFFF) with no gradient, no noise, no texture, and no pattern.
 - Absolutely NO fake-transparency checkerboards, grids, tiles, or crosshatch patterns in the background.
 - Do NOT use gradient, textured, photographic, or patterned backgrounds of any kind.
-- Do NOT include drop shadows, inner shadows, outer glows, halos, or cast shadows around or behind the icon.
-- The icon must be a standalone subject on this solid white canvas only. Do NOT add a separate plate, tile, badge, circle, rounded rectangle, frame, or container shape behind it.
-- Only use visible strokes and filled shapes for the subject itself.
+- Do NOT include drop shadows, inner shadows, outer glows, halos, or cast shadows.
+- The subject must stand alone on the solid white canvas only. Do NOT add a separate plate, tile, badge, circle, rounded rectangle, frame, or container shape behind it.
+${illustration
+  ? `- This is a small SCENE illustration (e.g. a room with furniture, a structure with its surroundings, a floor-plan vignette). It should FILL most of the canvas with comfortable, even margins.
+- Detailed but clean line-art: confident outlines depicting the whole described scene; light interior detail, no heavy shading.`
+  : `- Only use visible strokes and filled shapes for the subject itself.
 - The icon subject must be centered on the canvas with even padding on all sides so strokes never touch the canvas edge.
-- ${monochrome ? "Strict line-art: clean outlines ONLY, no filled shapes, no shading." : "Line-art inspired style: simple, clean outlines, with optional subtle flat fills."}
+- ${monochrome ? "Strict line-art: clean outlines ONLY, no filled shapes, no shading." : "Line-art inspired style: simple, clean outlines, with optional subtle flat fills."}`}
 
 PALETTE:
 ${monochrome
   ? `- STRICTLY MONOCHROME: use ONE single solid dark color (#1A2332) for ALL strokes. Absolutely no other colors, no fills, no gradients, no shading.
-- Even, consistent stroke weight throughout (like a Lucide / Feather line icon).
-- The result must read as a clean single-color line icon.`
-  : `- Full color is allowed. You may use multiple colors for the icon details.
+- Even, consistent stroke weight throughout (like a Lucide / Feather line drawing).
+- The result must read as a clean single-color line drawing.`
+  : `- Full color is allowed. You may use multiple colors for the details.
 - Prefer a cohesive, professional palette that would look good on both light and dark UI backgrounds.
 - Avoid neon, extremely saturated, or visually noisy palettes.`}
 - No photographic textures or photo-like elements.
 
 ADDITIONAL HARD CONSTRAINTS:
 - No text, no letters, no words.
-- No drop shadows, outer glows, inner glows, halos, or lighting effects that look like a shadow or glow around the icon.
-- No gradient BACKGROUND or gradient plate behind the icon. If you use gradients, they must be inside the icon subject only (not covering the canvas).
-- No people or faces; focus on tools, documents, rooms, or process scenes.
-- Keep the icon centered with comfortable padding to all edges so strokes never touch the canvas edge.
-
-Style:
-- Simple and bold enough to be legible at 24px in UI.
+- No drop shadows, outer glows, inner glows, halos, or lighting effects.
+- No gradient BACKGROUND or gradient plate behind the subject.
+- No people or faces; focus on tools, documents, rooms, structures, or process scenes.
 
 Output:
 - Return a single PNG image that follows ALL of the above rules.

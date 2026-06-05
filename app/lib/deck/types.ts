@@ -287,8 +287,13 @@ export interface CoverContent extends SharedSlideFields {
 export interface ObjectivePillar {
   title: string;
   body: string;
-  /** Optional icon key (ScopeIcons set) rendered above the pillar title. */
+  /** Optional icon key (ScopeIcons set) — fallback when no illustration. */
   icon?: string | null;
+  /**
+   * Bespoke AI-generated line-art illustration for this zone (project-specific,
+   * fills the zone area). Preferred over `icon` on the hub-spoke layout.
+   */
+  imageUrl?: string | null;
 }
 
 export interface ObjectiveContent extends SharedSlideFields {
@@ -307,6 +312,14 @@ export interface ObjectiveContent extends SharedSlideFields {
   layout?: "pillars" | "statement" | "hub-spoke" | null;
   /** Icon key for the central hub on the hub-spoke layout. Default "house". */
   hubIcon?: string | null;
+  /** Bespoke AI-generated line-art illustration of the home for the hub. */
+  hubImageUrl?: string | null;
+  /** Hub-spoke: central hub size multiplier (0.6–1.6, default 1). */
+  hubSize?: number | null;
+  /** Hub-spoke: zone text size multiplier (0.6–1.6, default 1). */
+  zoneTextSize?: number | null;
+  /** Hub-spoke: vertical center of the hub + zones (0.4–0.7, default 0.56). */
+  hubY?: number | null;
 
   // ── Per-field text styling ────────────────────────────────────────────────
   // Headline
