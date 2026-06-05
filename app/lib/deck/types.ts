@@ -299,6 +299,9 @@ export interface ObjectivePillar {
    * composer, consumed by the separate "Generate illustrations" step).
    */
   scene?: string | null;
+  /** Hub-spoke: manual position override (0–1 of slide w/h). Null = auto-placed. */
+  posX?: number | null;
+  posY?: number | null;
 }
 
 export interface ObjectiveContent extends SharedSlideFields {
@@ -325,8 +328,16 @@ export interface ObjectiveContent extends SharedSlideFields {
   hubSize?: number | null;
   /** Hub-spoke: zone text size multiplier (0.6–1.6, default 1). */
   zoneTextSize?: number | null;
-  /** Hub-spoke: vertical center of the hub + zones (0.4–0.7, default 0.56). */
+  /** Hub-spoke: vertical center of the hub + zones (0.3–0.75, default 0.52). */
   hubY?: number | null;
+  /** Hub-spoke: horizontal center of the hub (0.2–0.8, default 0.5). */
+  hubX?: number | null;
+  /** Hub-spoke: zone illustration size multiplier (0.5–2, default 1). */
+  zoneImageSize?: number | null;
+  /** Hub-spoke: arrow stroke + head thickness multiplier (0.5–2.5, default 1). */
+  arrowWidth?: number | null;
+  /** Hub-spoke: how far the arrow reaches from hub toward each zone (0.3–0.9, default 0.6). */
+  arrowLength?: number | null;
 
   // ── Per-field text styling ────────────────────────────────────────────────
   // Headline

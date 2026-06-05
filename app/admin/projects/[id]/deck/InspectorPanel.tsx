@@ -75,6 +75,7 @@ import { SLIDE_FONTS } from "@/app/lib/slide-constants";
 import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
 import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction, aiEditScopeSlideAction } from "./actions";
 import { SCOPE_ICON_OPTIONS } from "@/app/lib/deck/scope-icon-keys";
+import { objectiveDefaultZonePos } from "./slides/ObjectiveSlide";
 
 interface Props {
   slide: ProposalSlide | null;
@@ -1574,7 +1575,7 @@ function ObjectiveInspector({
     }
   }
 
-  const pillarSlots: { title: string; body: string; icon?: string | null; imageUrl?: string | null }[] = (() => {
+  const pillarSlots: { title: string; body: string; icon?: string | null; imageUrl?: string | null; posX?: number | null; posY?: number | null }[] = (() => {
     const seed = (content.pillars ?? []).slice(0, 6);
     while (seed.length < 3) seed.push({ title: "", body: "" });
     return seed;
@@ -1584,7 +1585,7 @@ function ObjectiveInspector({
     const hasAny = next.some((p) => p.title.trim() || p.body.trim());
     updateContent({ pillars: hasAny ? next : undefined });
   }
-  function updatePillar(index: number, patch: Partial<{ title: string; body: string; icon: string | null; imageUrl: string | null }>) {
+  function updatePillar(index: number, patch: Partial<{ title: string; body: string; icon: string | null; imageUrl: string | null; posX: number | null; posY: number | null }>) {
     persistPillars(pillarSlots.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   }
   function addPillar() {
@@ -1720,7 +1721,9 @@ function ObjectiveInspector({
 
           {PF_GROUP_DIVIDER}
 
-          {/* ── PROJECT HIGHLIGHT BULLETS ─────────────────────────────────── */}
+          {mode === "pillars" && (
+          <>
+          {/* ── PROJECT HIGHLIGHT BULLETS (Pillars layout only) ───────────── */}
           <SectionLabel>Project Highlights</SectionLabel>
           <p style={{ fontSize: 10, color: "#9CA3AF", marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>
             Up to 6 bullets. Render between the objective and the 3 pillars. Auto-populated from the Overview tab on Generate Overview; edit here to override.
@@ -1785,22 +1788,44 @@ function ObjectiveInspector({
               onChangeFn={(v) => updateContent({ bulletsOutline: v })}
             />
           </FieldGroup>
+          </>
+          )}
 
           {PF_GROUP_DIVIDER}
 
           {/* Hub & Spoke tuning */}
           {mode === "hub-spoke" && (
             <>
+              <SectionLabel>Hub &amp; Spoke — Size</SectionLabel>
               <FieldGroup label={`Hub Size — ${(content.hubSize ?? 1).toFixed(1)}×`}>
                 <PSizeSlider accentColor={branding.accentColor} value={content.hubSize ?? 1} onChange={(v) => updateContent({ hubSize: v })} />
+              </FieldGroup>
+              <FieldGroup label={`Illustration Size — ${(content.zoneImageSize ?? 1).toFixed(1)}×`}>
+                <PSizeSlider accentColor={branding.accentColor} value={content.zoneImageSize ?? 1} onChange={(v) => updateContent({ zoneImageSize: v })} />
               </FieldGroup>
               <FieldGroup label={`Zone Text Size — ${(content.zoneTextSize ?? 1).toFixed(1)}×`}>
                 <PSizeSlider accentColor={branding.accentColor} value={content.zoneTextSize ?? 1} onChange={(v) => updateContent({ zoneTextSize: v })} />
               </FieldGroup>
-              <FieldGroup label={`Hub Vertical Position — ${Math.round((content.hubY ?? 0.56) * 100)}%`}>
-                <input type="range" min={40} max={70} step={1}
-                  value={Math.round((content.hubY ?? 0.56) * 100)}
+              <SectionLabel>Hub &amp; Spoke — Position &amp; Arrows</SectionLabel>
+              <FieldGroup label={`Hub Horizontal — ${Math.round((content.hubX ?? 0.5) * 100)}%`}>
+                <input type="range" min={20} max={80} step={1}
+                  value={Math.round((content.hubX ?? 0.5) * 100)}
+                  onChange={(e) => updateContent({ hubX: parseInt(e.target.value) / 100 })}
+                  style={{ width: "100%", accentColor: branding.accentColor }} />
+              </FieldGroup>
+              <FieldGroup label={`Hub Vertical — ${Math.round((content.hubY ?? 0.52) * 100)}%`}>
+                <input type="range" min={30} max={75} step={1}
+                  value={Math.round((content.hubY ?? 0.52) * 100)}
                   onChange={(e) => updateContent({ hubY: parseInt(e.target.value) / 100 })}
+                  style={{ width: "100%", accentColor: branding.accentColor }} />
+              </FieldGroup>
+              <FieldGroup label={`Arrow Thickness — ${(content.arrowWidth ?? 1).toFixed(1)}×`}>
+                <PSizeSlider accentColor={branding.accentColor} value={content.arrowWidth ?? 1} onChange={(v) => updateContent({ arrowWidth: v })} />
+              </FieldGroup>
+              <FieldGroup label={`Arrow Length — ${Math.round((content.arrowLength ?? 0.6) * 100)}%`}>
+                <input type="range" min={30} max={90} step={1}
+                  value={Math.round((content.arrowLength ?? 0.6) * 100)}
+                  onChange={(e) => updateContent({ arrowLength: parseInt(e.target.value) / 100 })}
                   style={{ width: "100%", accentColor: branding.accentColor }} />
               </FieldGroup>
             </>
@@ -1851,6 +1876,33 @@ function ObjectiveInspector({
                   ))}
                 </select>
               </div>
+              {mode === "hub-spoke" && (() => {
+                const n = pillarSlots.length;
+                const def = objectiveDefaultZonePos(i, n, (content.hubX ?? 0.5) * 100, (content.hubY ?? 0.52) * 100);
+                const xVal = typeof slot.posX === "number" ? Math.round(slot.posX * 100) : Math.round(def.x);
+                const yVal = typeof slot.posY === "number" ? Math.round(slot.posY * 100) : Math.round(def.y);
+                const moved = typeof slot.posX === "number" || typeof slot.posY === "number";
+                return (
+                  <div style={{ marginTop: 6 }}>
+                    <FieldGroup label={`Position X — ${xVal}%`}>
+                      <input type="range" min={0} max={100} step={1} value={xVal}
+                        onChange={(e) => updatePillar(i, { posX: parseInt(e.target.value) / 100 })}
+                        style={{ width: "100%", accentColor: branding.accentColor }} />
+                    </FieldGroup>
+                    <FieldGroup label={`Position Y — ${yVal}%`}>
+                      <input type="range" min={0} max={100} step={1} value={yVal}
+                        onChange={(e) => updatePillar(i, { posY: parseInt(e.target.value) / 100 })}
+                        style={{ width: "100%", accentColor: branding.accentColor }} />
+                    </FieldGroup>
+                    {moved && (
+                      <button onClick={() => updatePillar(i, { posX: null, posY: null })}
+                        style={{ fontSize: 10, color: "#9CA3AF", background: "none", border: "none", cursor: "pointer", marginBottom: 4 }}>
+                        Reset position (auto-place)
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           ))}
           {pillarSlots.length < 6 && (

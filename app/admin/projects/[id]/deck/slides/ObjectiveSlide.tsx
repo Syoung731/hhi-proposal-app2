@@ -646,6 +646,27 @@ function renderEmphasis(text: string): React.ReactNode {
   );
 }
 
+/** Default angles (degrees, screen) for auto-placing N zones around the hub. */
+function objectiveZoneAngles(n: number): number[] {
+  if (n <= 1) return [270];
+  if (n === 2) return [180, 360];
+  if (n === 3) return [180, 270, 360]; // left, down, right (Coggins)
+  // 4+: full circle starting at the bottom → uses up/left/right/down.
+  return Array.from({ length: n }, (_, i) => 90 + (360 * i) / n);
+}
+
+const ZONE_RX = 34; // horizontal placement radius (% of slide)
+const ZONE_RY = 27; // vertical placement radius (%)
+
+/** Auto position (in %) for zone i of n, around a hub at (hubXpct, hubYpct) %. */
+export function objectiveDefaultZonePos(i: number, n: number, hubXpct: number, hubYpct: number) {
+  const deg = objectiveZoneAngles(n)[i] ?? 270;
+  const rad = (deg * Math.PI) / 180;
+  const dx = Math.cos(rad);
+  const dy = -Math.sin(rad); // screen y is down
+  return { x: hubXpct + ZONE_RX * dx, y: hubYpct + ZONE_RY * dy };
+}
+
 function HubZone({
   pillar,
   accent,
@@ -654,6 +675,7 @@ function HubZone({
   bodyFont,
   align,
   scale = 1,
+  imageScale = 1,
 }: {
   pillar: ObjectivePillar;
   accent: string;
@@ -662,15 +684,16 @@ function HubZone({
   bodyFont: string;
   align: "left" | "right" | "center";
   scale?: number;
+  imageScale?: number;
 }) {
   const alignItems = align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start";
   return (
     <div style={{ textAlign: align, display: "flex", flexDirection: "column", alignItems }}>
       {pillar.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: `${12 * scale}em`, height: `${6.6 * scale}em`, objectFit: "contain", objectPosition: align === "right" ? "right" : align === "center" ? "center" : "left", marginBottom: "0.6em" }} />
+        <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: `${12 * imageScale}em`, height: `${6.6 * imageScale}em`, objectFit: "contain", objectPosition: align === "right" ? "right" : align === "center" ? "center" : "left", marginBottom: "0.6em" }} />
       ) : pillar.icon ? (
-        <ScopeIcon name={pillar.icon} size={Math.round(44 * scale)} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.5em" }} />
+        <ScopeIcon name={pillar.icon} size={Math.round(44 * imageScale)} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.5em" }} />
       ) : null}
       <p style={{ fontSize: `${0.82 * scale}em`, fontFamily: bodyFont, fontWeight: 700, color: accent, margin: 0, lineHeight: 1.2 }}>
         {pillar.title}
@@ -698,27 +721,29 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
   // Tunable geometry (inspector sliders).
   const hubSizeM = content.hubSize ?? 1;
   const zoneScale = content.zoneTextSize ?? 1;
+  const imageScale = content.zoneImageSize ?? 1;
+  const arrowW = content.arrowWidth ?? 1;
+  const arrowLen = content.arrowLength ?? 0.6;
   const hubYpct = content.hubY ?? 0.52;
-  const hubTop = `${hubYpct * 100}%`;
+  const hubXpct = content.hubX ?? 0.5;
+  const CX = hubXpct * 100;
+  const CY = hubYpct * 100;
+  const hubLeft = `${CX}%`;
+  const hubTop = `${CY}%`;
   const hasHubImg = !!content.hubImageUrl;
 
-  // Dynamic radial placement: fan the N zones across the lower arc (left →
-  // bottom → right) so the layout scales from 2 to ~5 zones around the hub.
+  // Per-zone placement: manual posX/posY override, else auto fan around the hub.
   const N = pillars.length;
-  const CX = 50;
-  const CY = hubYpct * 100;
-  const RX = 34; // horizontal card-placement radius (%)
-  const RY = 27; // vertical card-placement radius (%)
   function zoneGeom(i: number) {
-    const deg = N <= 1 ? 270 : 180 + (180 * i) / (N - 1);
-    const rad = (deg * Math.PI) / 180;
-    const dx = Math.cos(rad);
-    const dy = -Math.sin(rad); // screen y is down
+    const p = pillars[i] ?? { title: "", body: "" };
+    const def = objectiveDefaultZonePos(i, N, CX, CY);
+    const x = typeof p.posX === "number" ? p.posX * 100 : def.x;
+    const y = typeof p.posY === "number" ? p.posY * 100 : def.y;
     const align: "left" | "right" | "center" =
-      dx < -0.25 ? "right" : dx > 0.25 ? "left" : "center";
-    return { dx, dy, align, x: CX + RX * dx, y: CY + RY * dy };
+      x < CX - 6 ? "right" : x > CX + 6 ? "left" : "center";
+    return { x, y, align };
   }
-  const hubVB = { x: 80, y: (CY / 100) * 90 };
+  const hubVB = { x: (CX / 100) * 160, y: (CY / 100) * 90 };
 
   return (
     <div className="relative w-full h-full overflow-hidden" style={{ background: hasBg ? "transparent" : theme.color.surface }}>
@@ -754,25 +779,25 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
         </defs>
         {pillars.map((_, i) => {
           const g = zoneGeom(i);
-          const cardVB = { x: ((CX + RX * g.dx) / 100) * 160, y: ((CY + RY * g.dy) / 100) * 90 };
-          const sx = hubVB.x + 0.2 * (cardVB.x - hubVB.x);
-          const sy = hubVB.y + 0.2 * (cardVB.y - hubVB.y);
-          const ex = hubVB.x + 0.6 * (cardVB.x - hubVB.x);
-          const ey = hubVB.y + 0.6 * (cardVB.y - hubVB.y);
-          return <line key={i} x1={sx} y1={sy} x2={ex} y2={ey} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />;
+          const cardVB = { x: (g.x / 100) * 160, y: (g.y / 100) * 90 };
+          const sx = hubVB.x + 0.18 * (cardVB.x - hubVB.x);
+          const sy = hubVB.y + 0.18 * (cardVB.y - hubVB.y);
+          const ex = hubVB.x + arrowLen * (cardVB.x - hubVB.x);
+          const ey = hubVB.y + arrowLen * (cardVB.y - hubVB.y);
+          return <line key={i} x1={sx} y1={sy} x2={ex} y2={ey} stroke={accent} strokeWidth={0.9 * arrowW} markerEnd="url(#hubArrow)" />;
         })}
       </svg>
 
       {/* Central hub */}
       {hasHubImg ? (
-        <div style={{ position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)", width: `${11 * hubSizeM}em`, height: `${7.5 * hubSizeM}em`, zIndex: 2 }}>
+        <div style={{ position: "absolute", left: hubLeft, top: hubTop, transform: "translate(-50%, -50%)", width: `${11 * hubSizeM}em`, height: `${7.5 * hubSizeM}em`, zIndex: 2 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={content.hubImageUrl ?? ""} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
         </div>
       ) : (
         <div
           style={{
-            position: "absolute", left: "50%", top: hubTop, transform: "translate(-50%, -50%)",
+            position: "absolute", left: hubLeft, top: hubTop, transform: "translate(-50%, -50%)",
             width: `${6.4 * hubSizeM}em`, height: `${6.4 * hubSizeM}em`, borderRadius: "50%",
             background: theme.color.panel, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
           }}
@@ -786,7 +811,7 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
         const g = zoneGeom(i);
         return (
           <div key={i} style={{ position: "absolute", left: `${g.x}%`, top: `${g.y}%`, transform: "translate(-50%, -50%)", width: "26%", zIndex: 2 }}>
-            <HubZone pillar={p} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align={g.align} scale={zoneScale} />
+            <HubZone pillar={p} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align={g.align} scale={zoneScale} imageScale={imageScale} />
           </div>
         );
       })}

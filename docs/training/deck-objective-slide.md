@@ -65,6 +65,18 @@ Both use the same three items, so you can switch between them freely.
 > **Tip:** Keep zone titles to 2–4 words and bodies to one line — they read best
 > balanced and short. 3–4 zones usually look cleanest; 5 is the max.
 
+### Fitting it to the slide (Hub & Spoke)
+
+The auto-placement is a starting point — tune it with the inspector controls
+under **Hub & Spoke**:
+
+- **Hub Size / Illustration Size / Zone Text Size** — scale the pieces.
+- **Hub Horizontal / Vertical** — move the center hub.
+- **Arrow Thickness / Arrow Length** — fatten or pull the arrows in.
+- **Per zone → Position X / Position Y** — drag any zone anywhere (e.g. up,
+  left, right); **Reset position** returns it to auto-placement. The arrow
+  follows the zone automatically.
+
 ---
 
 ## 5. Theme
