@@ -32,29 +32,70 @@ questions (`ai-review` prompts → `lib/ai/review-prompts.ts`), phone/QR upload
 (`PhotoUploadToken` model + `/api/phone-upload/*` + `/m/[token]`), Google Drive
 import (`DriveImportModal` + `/api/drive-import`), thumbnail + rollup-timeout fixes.
 
-**▶ VISUAL LOOP — Scope slide chosen as the pilot. Status:**
-- **Part 1 DONE (commits 541ad05, 477b494):** Scope-overview rebuilt around a
-  structured `scopeItems` model ({title, detail, icon}) instead of one paragraph.
-  Six layouts now: `editorial-split` (dark panel + framed photo + floating card),
-  `blueprint-icons` (Poolside reference — left photo, right graph-paper panel
-  with corner dimension marks + per-item line-art icons + orange `stat`
-  subtitle), `photo-numbered`, `photo-checklist`, `gallery-grid`, plus legacy
-  `split-panel`/`image-row`. Icon set: `app/lib/deck/scope-icon-keys.ts` (plain,
-  server-importable) + `slides/shared/ScopeIcons.tsx` (35 hand-rolled SVGs, no
-  dep). Composer (`compose-copy.ts`) drafts items, picks an icon per item from
-  the allowed set, writes a stat when a metric exists, attaches a hero photo,
-  and auto-selects the layout. Inspector: per-item icon dropdown, stat field,
-  blueprint toggle, reorder/remove.
-- **Part 2 DONE — "AI Edit" box** (`aiEditScopeSlide` in compose-copy.ts +
-  `aiEditScopeSlideAction` in deck/actions.ts + UI atop ScopeOverviewInspector):
-  plain-language slide editing with two gating checkboxes — **Change copy & items**
-  (headline/intro/stat/scopeItems incl. icons) and **Change layout & style**
-  (layoutKey/backgroundSkin). Returns a patch applied via onUpdate (autosave +
-  isUserModified); never touches photos. Mirrors the rendering-edit UX.
-- **NEXT:** Steve screenshots Part 1 layouts + tries the AI Edit box, then we
-  tune (spacing, grid weight, icon size, dark-panel tone). After the Scope slide
-  is dialed in, propagate the structured-items + icons + AI-Edit pattern to the
-  other slide types.
+**▶ DONE since the pilot (newest area last):**
+- **Scope slide (DONE):** structured `scopeItems` {title,detail,icon,iconImageUrl},
+  7 layouts (editorial-split, blueprint-icons, photo-numbered, photo-checklist,
+  gallery-grid, split-panel, image-row), per-item icon dropdown, **content toggle
+  (bullets vs paragraph)** `contentMode`, item-text-size + icon-size sliders,
+  **AI Edit box** (changeCopy/changeLayout). Icons: built-in 35 SVGs
+  (`scope-icon-keys.ts` + `slides/shared/ScopeIcons.tsx`) + **self-growing
+  BrandIcon library** (`lib/deck/scope-icon-resolver.ts` — match-or-generate,
+  monochrome line-art via `generateBrandIconPngAction({monochrome:true})`).
+- **Deck Theme system (DONE):** `lib/deck/themes.ts` (Blueprint + Editorial
+  tokens) + `lib/deck/theme-context.tsx` (`useDeckTheme`), resolved in
+  `SlideRenderer` from `branding.deckTheme`. `ProposalDeck.deckTheme` column
+  (migration `add_deck_theme`) + theme picker in deck toolbar + snapshot.
+  Scope + Objective consume tokens.
+- **Objective slide (DONE):** retired Statement layout; default **Hub & Spoke**
+  (`HubSpokeLayout` — central home illustration + accent arrows fanning to 3–5
+  zones; full-circle default placement for 4+) + **Pillars** grid alternate.
+  `ObjectivePillar` {title,body,icon,imageUrl,scene,posX,posY}; AI drafts
+  creative headline + mission (`**bold**`) + zones + per-zone `scene` +
+  `hubScene`. Full manual controls: per-zone Position X/Y + reset, Hub size/X/Y,
+  Illustration size, Zone-text size, Arrow thickness/length. Headline+objective
+  styling now wired into hub-spoke. Pillars-only inspector controls hidden in
+  hub-spoke. Removed Project Highlights bullets.
+- **Bespoke illustrations:** `generateBrandIconPngAction` gained `mode:
+  "illustration"` (scene-filling line-art vs centered icon). Objective draws
+  hub + zone illustrations; scope draws per-item icons.
+- **Generate Deck UX (DONE):** unified **"Generate Deck" modal** on the Deck tab
+  (`GenerateDeckModal` in DeckEditorClient) = Structure (generate/replace/delete)
+  + AI Fill (Draft slide copy, Generate illustrations) + checkboxes "also draft
+  copy" / "also generate illustrations" (one-click full build). The two AI
+  buttons were REMOVED from Build Presentation (now pure media wizard). Two-step
+  by design: `composeDeckCopy` = fast text only; `generateDeckVisuals` = the slow
+  image step (objective hub/zone illustrations from stored scenes + scope items/
+  photo/icons, creating scope items if missing even on user-modified slides).
+
+**▶ ACTIVE BLOCKER (debugging — pick up HERE):** On a fresh **Generate Deck →
+Replace everything + both AI checkboxes**, the **Objective and Scope slides came
+out generic** (objective = settings pillars w/ no icons/scenes via hydration;
+scope = description sentences + star fallback). DB diag showed both slides
+`source:"manual"` with **no AI content**, while the **cover tagline DID update** —
+so composeDeckCopy ran but the **scope + objective drafts didn't write**.
+Confirmed the **raw Claude JSON call works standalone** (valid JSON parsed), so
+it's NOT the model/parser — it's a **silent failure during the bulk run**
+(draftObjective→null and/or the scope branch throwing on an un-caught call so the
+whole slide write aborted). NOTE: `compose-copy.ts` has `import "server-only"` so
+it CANNOT be run from a tsx script — diagnose via the running dev server only.
+
+Just shipped instrumentation (commit `ecda381`): scope branch now wraps
+`draftScopeItems`+`findScopeHeroPhoto` in `.catch` (so one failure no longer
+aborts the write); server `console.warn` logs per-slide outcomes/throws
+(`[composeDeckCopy] …`); the Generate Deck chain shows a **result summary**
+(`copy: N updated · N skipped · N err | visuals: …`) and waits 8s before reload
+instead of hiding failures.
+
+**→ EXACT NEXT STEP:** Have Steve restart dev, run **Deck → Generate Deck → both
+boxes → Replace everything**, and report **(a)** the on-screen summary line and
+**(b)** the `[composeDeckCopy]`/`[GenerateDeck]` dev-terminal lines. Those reveal
+whether scope/objective are skipped (draft empty) or threw (which call) — then
+fix that one call. Test project id: `cmoj1xg4t00t9747kq2py2iug`.
+
+**Process agreement (to stop circling):** test only via a FRESH Generate Deck
+(not hand-edited slides — those become `isUserModified` and Draft skips them);
+build each slide type to a "done" bar then leave it. Only Scope + Objective are
+AI-built so far; Cover gets a tagline; everything else is default content.
 
 **▶ FUTURE PHASE (Steve's vision, recorded for later):** NotebookLM doesn't just
 edit slides — it *decides which slides to build*. Steve wants: a few fixed/core
