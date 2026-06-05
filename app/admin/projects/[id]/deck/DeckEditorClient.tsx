@@ -1128,14 +1128,16 @@ export function DeckEditorClient({
         value={deckTheme}
         onChange={(e) => handleThemeChange(e.target.value as "blueprint" | "editorial")}
         title="Deck visual theme"
+        className="rounded"
         style={{
           fontSize: 11,
-          padding: "4px 8px",
-          borderRadius: 4,
-          border: "1px solid rgba(255,255,255,0.35)",
-          background: "transparent",
-          color: "#fff",
+          fontWeight: 500,
+          padding: "4px 10px",
+          background: "#2D3F50",
+          color: "#94A3B8",
+          border: "1px solid #334155",
           cursor: "pointer",
+          userSelect: "none",
           alignSelf: "center",
         }}
       >
