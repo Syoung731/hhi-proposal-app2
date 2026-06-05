@@ -541,15 +541,22 @@ export function DeckEditorClient({
       if (sorted[0]) setActiveSlideId(sorted[0].id);
       // Optionally chain the AI copy draft + illustrations, then reload to show them.
       if (alsoDraftCopy || alsoIllustrate) {
+        let summary = "";
         if (alsoDraftCopy) {
           setGenerateStatus("Drafting copy with AI…");
-          await composeDeckCopyAction(projectId);
+          const c = await composeDeckCopyAction(projectId);
+          summary += "error" in c ? `copy ERROR: ${c.error}` : `copy: ${c.updated} updated · ${c.skipped} skipped · ${c.errors.length} err`;
         }
         if (alsoIllustrate) {
           setGenerateStatus("Generating illustrations… (~1 min)");
-          await generateDeckVisualsAction(projectId);
+          const v = await generateDeckVisualsAction(projectId);
+          summary += (summary ? " | " : "") + ("error" in v ? `visuals ERROR: ${v.error}` : `visuals: ${v.illustrations} ill · ${v.icons} icons · ${v.errors} err`);
         }
-        window.location.reload();
+        setGenerating(false);
+        setGenerateStatus(summary + " — reloading in 8s");
+        // eslint-disable-next-line no-console
+        console.log("[GenerateDeck]", summary);
+        setTimeout(() => window.location.reload(), 8000);
         return;
       }
       setGenerating(false);

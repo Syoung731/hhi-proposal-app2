@@ -371,9 +371,15 @@ export async function composeDeckCopy(
             projectAddress,
             clientName,
           }).catch(() => null),
-          draftScopeItems(rooms),
-          findScopeHeroPhoto(projectId),
+          draftScopeItems(rooms).catch((e) => {
+            // eslint-disable-next-line no-console
+            console.warn("[composeDeckCopy] draftScopeItems threw:", e instanceof Error ? e.message : e);
+            return { items: [] as DraftScopeItem[], intro: null as string | null, stat: null as string | null };
+          }),
+          findScopeHeroPhoto(projectId).catch(() => null),
         ]);
+        // eslint-disable-next-line no-console
+        console.warn(`[composeDeckCopy] scope: items=${structured.items.length} narrative=${description ? "ok" : "FAIL"} hero=${hero ? "yes" : "no"}`);
 
         const existing = asObject(slide.content);
         const existingPhotos = Array.isArray(existing.selectedPhotos)
@@ -459,6 +465,8 @@ export async function composeDeckCopy(
           });
           updated += 1;
         } else {
+          // eslint-disable-next-line no-console
+          console.warn("[composeDeckCopy] objective: draftObjective returned null (Claude/JSON failed)");
           skipped += 1;
         }
       } else if (slide.type === "cover") {
@@ -483,6 +491,8 @@ export async function composeDeckCopy(
         skipped += 1;
       }
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[composeDeckCopy] ${slide.type} threw:`, e instanceof Error ? e.message : e);
       errors.push({
         type: slide.type,
         error: e instanceof Error ? e.message : "Draft failed",
