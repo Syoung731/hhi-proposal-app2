@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import {
   filterImages,
   prepareImage,
@@ -374,26 +373,6 @@ export function StudioTab({
           </div>
         </section>
 
-        {/* Build */}
-        <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            Next: assemble the deck
-          </h3>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Head to the Deck tab and use <strong>Generate Deck</strong> to build
-            the slides and fill them with AI (draft copy + illustrations). Rooms
-            with photos become before/after slides; rooms without are grouped
-            into Additional Rooms.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Link
-              href={`/admin/projects/${projectId}/deck`}
-              className="inline-block rounded bg-[#F47216] px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
-            >
-              Open Presentation Deck →
-            </Link>
-          </div>
-        </section>
       </div>
     </div>
   );
