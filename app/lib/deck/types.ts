@@ -114,6 +114,13 @@ export interface DeckBranding {
   brandTagline?: string | null;
   /** Headline rendered on the closing slide. Null/empty renders nothing. */
   closingHeadline?: string | null;
+  /**
+   * Deck-level visual theme key ("blueprint" | "editorial"). Rides along with
+   * branding so it reaches every render context (editor/present/PDF) without a
+   * new prop on every layer. SlideRenderer resolves it to a DeckTheme and
+   * provides it via context. Null/undefined → default theme.
+   */
+  deckTheme?: string | null;
 }
 
 // ─── Shared Slide Content Fields ────────────────────────────────────────────

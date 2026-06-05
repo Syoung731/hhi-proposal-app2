@@ -1,6 +1,8 @@
 "use client";
 
 import type { ProposalSlide, DeckBranding } from "@/app/lib/deck/types";
+import { resolveDeckTheme } from "@/app/lib/deck/themes";
+import { DeckThemeProvider } from "@/app/lib/deck/theme-context";
 import { CoverSlide } from "./CoverSlide";
 import { ObjectiveSlide } from "./ObjectiveSlide";
 import { InvestmentBySpaceSlide } from "./InvestmentBySpaceSlide";
@@ -60,7 +62,11 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false,
     ? { ...branding, textColor: DARK_BG_TEXT_COLOR }
     : branding;
 
-  switch (slide.type) {
+  // Resolve the deck theme once and provide it via context to every slide.
+  const theme = resolveDeckTheme(effectiveBranding.deckTheme);
+
+  const content = (() => {
+    switch (slide.type) {
     case "cover":
       return <CoverSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "objective":
@@ -99,11 +105,14 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false,
       return <DesignBuildSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "addition-overview":
       return <AdditionOverviewSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    default:
-      return (
-        <div className="w-full h-full flex items-center justify-center bg-white">
-          <p className="text-sm text-zinc-400">Unknown slide type</p>
-        </div>
-      );
-  }
+      default:
+        return (
+          <div className="w-full h-full flex items-center justify-center bg-white">
+            <p className="text-sm text-zinc-400">Unknown slide type</p>
+          </div>
+        );
+    }
+  })();
+
+  return <DeckThemeProvider theme={theme}>{content}</DeckThemeProvider>;
 }
