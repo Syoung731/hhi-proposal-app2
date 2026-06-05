@@ -40,6 +40,25 @@ for details.
 
 ---
 
+## 2.5 Choosing a deck theme
+
+The whole deck has a **visual theme** that sets the overall look — fonts, colors,
+and surfaces — so every slide feels like one designed system.
+
+**In the app:** Deck toolbar (top right) → the **Theme** dropdown.
+
+- **Blueprint** — clean bold sans-serif, white/graph-paper feel, slate panels.
+  The technical/architectural look.
+- **Editorial** — Cormorant serif headlines, warm linen background, navy panels.
+  The luxury look.
+
+Pick whichever suits the client/project; it's saved automatically and applies to
+the whole deck. (Today it visibly changes the **Scope** slide; the other slide
+types adopt it as they're updated.)
+
+> **Tip:** Try flipping the theme with the Scope slide open — the title font,
+> background, and panel color all change live.
+
 ## 3. Choosing a layout
 
 The Scope slide has several **layouts** — the same content, arranged differently.

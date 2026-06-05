@@ -11,10 +11,13 @@ import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { ScopeIcon } from "./shared/ScopeIcons";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
+import { useDeckTheme } from "@/app/lib/deck/theme-context";
+import type { DeckTheme } from "@/app/lib/deck/themes";
 
 interface LayoutProps {
   slide: ProposalSlide;
   branding: DeckBranding;
+  theme: DeckTheme;
   hasAiBackground?: boolean;
 }
 
@@ -99,8 +102,6 @@ function PositionedPhoto({ photo }: { photo: ScopeOverviewSelectedPhoto }) {
 }
 
 // ─── Structured-item helpers ──────────────────────────────────────────────────
-
-const DARK_PANEL = "#27323B"; // slate used by the editorial-split dark column
 
 /**
  * Returns the structured scope items for the rich layouts. Prefers
@@ -221,7 +222,7 @@ function Eyebrow({ accent, color }: { accent: string; color?: string }) {
 // Left 42 %: label + large serif title + accent rule + description
 // Right 58 %: 1 or 2 images stacked with a 2 px gap
 
-function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
+function SplitPanelLayout({ slide, branding, theme, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
@@ -236,7 +237,7 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const textPanelPct = 100 - photoPanelPct;
 
   // Per-field: Title
-  const titleFontFamily = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFontFamily = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const titleSize  = content.titleSize  ?? 2.0;
   const titleColor = content.titleColor ?? branding.textColor;
   const titleShadow = makeOutlineShadow(content.titleOutline);
@@ -277,7 +278,7 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
     >
       {/* Left panel border */}
       <div style={{ position: "absolute", left: 0, top: 0, width: `${textPanelPct}%`, height: "100%", borderRight: "1px solid #E5E3DF", pointerEvents: "none" }} />
@@ -366,7 +367,7 @@ function SplitPanelLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 // Top 38 %: eyebrow + title + accent rule + description (left-aligned)
 // Bottom 62 %: 3–4 images in a full-bleed horizontal row
 
-function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
+function ImageRowLayout({ slide, branding, theme, hasAiBackground }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const resolvedAccent = content.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
@@ -379,7 +380,7 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
 
   // Per-field: Title
-  const titleFontFamily = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFontFamily = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const titleSize  = content.titleSize  ?? 2.0;
   const titleColor = content.titleColor ?? branding.textColor;
   const titleShadow = makeOutlineShadow(content.titleOutline);
@@ -420,7 +421,7 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
     >
       {/* ── Bottom: image row (occupies lower 60%) ─────────────────────────── */}
       <div
@@ -507,7 +508,7 @@ function ImageRowLayout({ slide, branding, hasAiBackground }: LayoutProps) {
 // list) and a framed full-bleed photo on the right, with an optional floating
 // white caption card. The premium "Editorial" hero layout.
 
-function EditorialSplitLayout({ slide, branding }: LayoutProps) {
+function EditorialSplitLayout({ slide, branding, theme }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const accent = content.accentColor ?? branding.accentColor;
   const items = deriveScopeItems(content, 6);
@@ -519,16 +520,16 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
   const mode = effectiveScopeMode(content, slide.layoutKey);
   const description = (content.description ?? "").trim();
   const showIcons = (content.showItemIcons ?? true) && items.some((it) => it.icon || it.iconImageUrl);
-  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFont = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const panelPct = 40;
 
   return (
-    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FAFAF8" }}>
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: theme.color.surface }}>
       {/* Left dark column */}
       <div
         style={{
           position: "absolute", left: 0, top: 0, bottom: 0, width: `${panelPct}%`,
-          background: DARK_PANEL,
+          background: theme.color.panel,
           padding: "7% 6%",
           display: "flex", flexDirection: "column", justifyContent: "center",
           zIndex: 2,
@@ -590,7 +591,7 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
 
       {/* Right framed photo */}
       <div style={{ position: "absolute", left: `${panelPct}%`, top: 0, right: 0, bottom: 0, padding: "3.5%", zIndex: 1 }}>
-        <div style={{ width: "100%", height: "100%", overflow: "hidden", boxShadow: "0 8px 30px rgba(0,0,0,0.18)", background: "#FFFFFF", padding: 6 }}>
+        <div style={{ width: "100%", height: "100%", overflow: "hidden", boxShadow: "0 8px 30px rgba(0,0,0,0.18)", background: theme.color.surface, padding: 6 }}>
           <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
             <PhotoOrPlaceholder photo={photo} />
           </div>
@@ -602,7 +603,7 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
         <div
           style={{
             position: "absolute", right: "5%", bottom: "7%", maxWidth: "34%",
-            background: "#FFFFFF", padding: "1.1em 1.3em",
+            background: theme.color.surface, padding: "1.1em 1.3em",
             boxShadow: "0 10px 30px rgba(0,0,0,0.20)", zIndex: 3,
           }}
         >
@@ -631,7 +632,7 @@ function EditorialSplitLayout({ slide, branding }: LayoutProps) {
 // Left full-bleed photo, right white column with eyebrow + title + accent rule
 // then numbered rows (orange square chips).
 
-function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
+function PhotoNumberedLayout({ slide, branding, theme }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const accent = content.accentColor ?? branding.accentColor;
   const items = deriveScopeItems(content, 6);
@@ -640,11 +641,11 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
   const itemScale = content.scopeItemsSize ?? 1;
   const mode = effectiveScopeMode(content, slide.layoutKey);
   const description = (content.description ?? "").trim();
-  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFont = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const photoPct = 48;
 
   return (
-    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF" }}>
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: theme.color.surface }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${photoPct}%`, overflow: "hidden" }}>
         <PhotoOrPlaceholder photo={photo} />
       </div>
@@ -707,7 +708,7 @@ function PhotoNumberedLayout({ slide, branding }: LayoutProps) {
 // ─── Layout 5: photo-checklist ───────────────────────────────────────────────
 // Left white column with title + accent check rows, right full-bleed photo.
 
-function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
+function PhotoChecklistLayout({ slide, branding, theme }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const accent = content.accentColor ?? branding.accentColor;
   const items = deriveScopeItems(content, 6);
@@ -716,11 +717,11 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
   const itemScale = content.scopeItemsSize ?? 1;
   const mode = effectiveScopeMode(content, slide.layoutKey);
   const description = (content.description ?? "").trim();
-  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFont = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const textPct = 58;
 
   return (
-    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF" }}>
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: theme.color.surface }}>
       <div
         style={{
           position: "absolute", left: 0, top: 0, bottom: 0, width: `${textPct}%`,
@@ -773,7 +774,7 @@ function PhotoChecklistLayout({ slide, branding }: LayoutProps) {
 // Compact title bar, a row of up to 3 photos, then a 2×2 grid of titled item
 // groups divided by a center rule.
 
-function GalleryGridLayout({ slide, branding }: LayoutProps) {
+function GalleryGridLayout({ slide, branding, theme }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const accent = content.accentColor ?? branding.accentColor;
   const items = deriveScopeItems(content, 4);
@@ -782,10 +783,10 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
   const itemScale = content.scopeItemsSize ?? 1;
   const mode = effectiveScopeMode(content, slide.layoutKey);
   const description = (content.description ?? "").trim();
-  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFont = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
 
   return (
-    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF", padding: "4% 4.5%", display: "flex", flexDirection: "column" }}>
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: theme.color.surface, padding: "4% 4.5%", display: "flex", flexDirection: "column" }}>
       {/* Title bar */}
       <div style={{ flex: "0 0 auto", marginBottom: "0.9em" }}>
         {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
@@ -849,7 +850,7 @@ function GalleryGridLayout({ slide, branding }: LayoutProps) {
 // dimension brackets, a bold title, an accent stat subtitle, and icon rows.
 // Matches the Poolside reference.
 
-function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
+function BlueprintIconsLayout({ slide, branding, theme }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const accent = content.accentColor ?? branding.accentColor;
   const ink = content.titleColor ?? branding.textColor ?? "#1A2332";
@@ -861,14 +862,14 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
   const iconScale = content.scopeIconSize ?? 1;
   const mode = effectiveScopeMode(content, slide.layoutKey);
   const description = (content.description ?? "").trim();
-  const titleFont = content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const titleFont = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const showGrid = (content.backgroundSkin ?? "blueprint") !== "none";
   const photoPct = 46;
   const gridLine = "rgba(26,35,50,0.07)";
   const markColor = "rgba(26,35,50,0.28)";
 
   return (
-    <div className="relative w-full h-full" style={{ overflow: "hidden", background: "#FFFFFF" }}>
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: theme.color.surface }}>
       {/* Left photo */}
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${photoPct}%`, overflow: "hidden" }}>
         <PhotoOrPlaceholder photo={photo} />
@@ -955,23 +956,25 @@ function BlueprintIconsLayout({ slide, branding }: LayoutProps) {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
-export function ScopeOverviewSlide({ slide, branding, hasAiBackground }: LayoutProps) {
+export function ScopeOverviewSlide({ slide, branding, hasAiBackground }: Omit<LayoutProps, "theme">) {
+  const theme = useDeckTheme();
+  const props = { slide, branding, theme, hasAiBackground };
   switch (slide.layoutKey) {
     case "blueprint-icons":
-      return <BlueprintIconsLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <BlueprintIconsLayout {...props} />;
     case "editorial-split":
-      return <EditorialSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <EditorialSplitLayout {...props} />;
     case "photo-numbered":
-      return <PhotoNumberedLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <PhotoNumberedLayout {...props} />;
     case "photo-checklist":
-      return <PhotoChecklistLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <PhotoChecklistLayout {...props} />;
     case "gallery-grid":
-      return <GalleryGridLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <GalleryGridLayout {...props} />;
     case "image-row":
-      return <ImageRowLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <ImageRowLayout {...props} />;
     case "split-panel":
-      return <SplitPanelLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <SplitPanelLayout {...props} />;
     default:
-      return <EditorialSplitLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+      return <EditorialSplitLayout {...props} />;
   }
 }
