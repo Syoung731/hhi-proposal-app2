@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -25,6 +26,13 @@ export function AdminLayoutChrome({
 }: AdminLayoutChromeProps) {
   const pathname = usePathname();
   const isPreviewDraft = pathname?.includes(PREVIEW_DRAFT_SEGMENT) ?? false;
+
+  // Clerk's <UserButton> injects its own DOM only on the client (after Clerk's
+  // JS loads), so server-rendered HTML has nothing there → hydration mismatch.
+  // Render a same-sized placeholder until mounted so server and first client
+  // render agree, then swap in the real button.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   if (isPreviewDraft) {
     return (
@@ -65,7 +73,11 @@ export function AdminLayoutChrome({
                   {displayName}
                 </span>
                 <div className="ml-3 flex items-center">
-                  <UserButton afterSignOutUrl="/sign-in" />
+                  {mounted ? (
+                    <UserButton afterSignOutUrl="/sign-in" />
+                  ) : (
+                    <div className="h-7 w-7" aria-hidden />
+                  )}
                 </div>
               </div>
             </div>
