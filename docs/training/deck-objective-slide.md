@@ -1,89 +1,140 @@
 # Training: The Project Objective Slide
 
 The **Objective** slide answers *"why are we doing this project?"* before the
-deck dives into *what*. It opens with a short mission statement and three
-supporting **pillars**.
+deck dives into *what*. It opens with a creative headline and a short mission
+statement, then shows **3–5 "zones"** fanned around a central hub (a drawing of
+the home) — each zone a piece of the project with its own illustration.
 
 ---
 
 ## 1. Where it lives
 
-**In the app:** project → **Deck** tab → click the **Objective** slide (usually
-slide 2) → edit it in the right-hand **Inspector**.
+**In the app:** open a project → **Deck** tab → click the **Objective** slide
+(usually slide 2) in the left rail → edit it in the right-hand **Inspector**.
 
 ---
 
-## 2. Let the AI build it (recommended)
+## 2. Build it with AI (recommended) — a two-step flow
 
-The fastest way to a great Objective is to let the AI draft it for the specific
-project.
+The fastest path to a strong, project-specific Objective. It's **two steps** on
+purpose: fast text first, then the slower pictures.
 
-It's a **two-step** flow (fast text first, pictures second):
+**In the app — Build Presentation tab:**
 
-**In the app:**
-1. **Build Presentation** tab → **"Draft slide copy with AI"** — writes a
-   creative headline, a one- or two-sentence mission, and **3–5 zones** (the AI
-   picks how many fit the project), each with a title + one-line body, pulled
-   from *that project's* actual scope. This is quick.
-2. Then **"Generate illustrations"** — draws the **custom line-art illustration**
-   for the hub (the home) and each zone (e.g. a screened porch, a garage with
-   the site's trees). This is the slower, image-generation step.
+1. **"Draft slide copy with AI"** — quickly writes a creative headline, a one-
+   to two-sentence mission statement, and **3–5 zones** (the AI chooses how many
+   fit the project), each with a title and a one-line body — all pulled from
+   *that project's* actual scope.
+2. **"Generate illustrations"** — draws the **custom line-art illustration** for
+   the hub (the home) and each zone (e.g. a screened porch, a garage among the
+   site's trees). This is the slower, image-generation step.
 
-It defaults to the **Hub & Spoke** look (below), where the zones **fan around the
-central hub**.
+> **Heads-up:** "Generate illustrations" takes ~30–60s and can be re-run safely
+> (it only fills in what's missing). Until you run it, each zone shows a simple
+> **icon** instead of a drawing — that's expected.
 
-> **Heads-up:** "Generate illustrations" uses image generation, so it takes
-> ~30–60s and can be re-run (it only fills in what's missing). Until you run it,
-> zones show a simple **icon** instead of the drawing.
-
-## 3. The two layouts
-
-**In the app:** Inspector → **Objective Layout**.
-
-- **Hub & Spoke** (default) — a central icon with arrows radiating to the three
-  zones (the 94 Coggins style). Distinctive and project-specific.
-- **Pillars** — the three zones as a clean 3-column grid.
-
-Both use the same zones, so you can switch between them freely.
-
-> **Heads-up:** Until you add zones, the slide just shows the headline + hub —
-> run "Draft slide copy with AI" or add zones in the inspector to fill it in.
+> **Tip:** Run *Draft slide copy* once for a strong first draft, then tune the
+> wording/zones by hand and finish with *Generate illustrations*.
 
 ---
 
-## 4. Editing it
+## 3. Choosing the layout
+
+**In the app:** Inspector → **Layout**.
+
+- **Hub & Spoke** (default) — the home in the center with arrows radiating out to
+  each zone (the 94 Coggins style). Distinctive and project-specific.
+- **Pillars** — the same zones as a clean multi-column grid.
+
+Both use the same zones, so you can switch freely.
+
+> **Heads-up:** Until zones are added, the slide just shows the headline + hub
+> (never a blank sheet). Run *Draft slide copy* or add zones in the inspector.
+
+---
+
+## 4. Editing the copy
 
 **In the app (Inspector):**
 
-- **Headline** — the slide title.
-- **Objective opener** — the framing sentences (wrap key phrases in
-  `**double asterisks**` to bold them).
-- **Zones** — for each: a **Title**, a **Body** line, and an **Icon** (used when
-  there's no AI illustration). Use **+ Add Zone** / **Remove** to set 3–5 zones.
+- **Headline** — the slide title (e.g. *The "Living Outward" Objective*).
+- **Objective opener** — the framing sentence(s). Wrap key phrases in
+  `**double asterisks**` to **bold** them on the slide.
+- **Zones** — for each zone: a **Title** (2–4 words), a **Body** line, and an
+  **Icon** (used when there's no AI illustration). Use **+ Add Zone** and
+  **Remove** to set anywhere from 3 to 5 zones.
 
-> **Tip:** Keep zone titles to 2–4 words and bodies to one line — they read best
-> balanced and short. 3–4 zones usually look cleanest; 5 is the max.
+> **Tip:** Keep zone titles to 2–4 words and bodies to one line. 3–4 zones look
+> cleanest; 5 is the max before it crowds.
 
-### Fitting it to the slide (Hub & Spoke)
+### Headline & Objective styling
 
-The auto-placement is a starting point — tune it with the inspector controls
-under **Hub & Spoke**:
+Both the **Headline** and **Objective** sections have full styling controls, and
+they all affect the slide live:
 
-- **Hub Size / Illustration Size / Zone Text Size** — scale the pieces.
-- **Hub Horizontal / Vertical** — move the center hub.
-- **Arrow Thickness / Arrow Length** — fatten or pull the arrows in.
-- **Per zone → Position X / Position Y** — drag any zone anywhere (e.g. up,
-  left, right); **Reset position** returns it to auto-placement. The arrow
-  follows the zone automatically.
+- **Size** slider, **Font**, **Color**, **Bold / Italic / Underline**, **Outline**.
 
 ---
 
-## 5. Theme
+## 5. Fitting it to the slide (Hub & Spoke controls)
 
-Like the rest of the deck, the Objective follows the **deck theme** (Blueprint
-vs Editorial — set in the Deck toolbar): serif headline + linen on Editorial,
-bold sans + white on Blueprint. The pillar accent rule and icons use your brand
-orange in both.
+Auto-placement is just a starting point. Everything is adjustable in the
+inspector so you can make it fit the page exactly.
+
+**In the app (Inspector → Hub & Spoke sections):**
+
+- **Hub & Spoke — Size**
+  - **Hub Size** — the center home drawing
+  - **Illustration Size** — the zone drawings
+  - **Zone Text Size** — the zone title + body text
+- **Hub & Spoke — Position & Arrows**
+  - **Hub Horizontal / Hub Vertical** — move the center hub
+  - **Arrow Thickness** — fatten the arrows
+  - **Arrow Length** — pull the arrows in or push them out
+- **Per zone (inside each Zone card)**
+  - **Position X / Position Y** — drag that zone anywhere (up, down, left,
+    right). The arrow follows it automatically.
+  - **Reset position** — return the zone to auto-placement.
+
+> **Tip:** Default placement fans the zones around the hub (4 zones land at
+> top/bottom/left/right). If two crowd each other, nudge them with Position X/Y
+> or shrink Illustration/Zone Text size.
+
+---
+
+## 6. Icons vs. AI illustrations
+
+Each zone shows its **AI illustration** when one exists; otherwise it falls back
+to a built-in **icon**.
+
+- To force an icon instead of the drawing: in the zone card, pick any icon from
+  the **Icon** dropdown (this overrides the illustration).
+- To get the drawing back: clear the icon / re-run **Generate illustrations**.
+
+---
+
+## 7. Theme
+
+Like the rest of the deck, the Objective follows the **deck theme** (set in the
+Deck toolbar):
+
+- **Editorial** — serif headline, warm linen background, navy hub.
+- **Blueprint** — bold sans headline, white/graph-paper background, slate hub.
+
+Arrows, accent rules, and zone titles use your brand orange in both.
+
+---
+
+## 8. Quick-start checklist
+
+1. **Build Presentation → "Draft slide copy with AI."**
+2. **Build Presentation → "Generate illustrations."**
+3. **Deck → Objective slide.** Confirm **Layout = Hub & Spoke**.
+4. Tidy the **Headline**, **Objective opener**, and **Zones** (titles, bodies,
+   add/remove).
+5. Fit it to the page with **Hub/Illustration/Zone-text size**, **Hub
+   position**, **Arrow thickness/length**, and per-zone **Position X/Y**.
+6. Set the **deck theme** to match the project.
 
 ---
 
