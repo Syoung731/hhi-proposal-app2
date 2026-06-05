@@ -26,6 +26,7 @@ import { generateRoomRendering, generateRenderEdit, compareSourceAndRenderImages
 import { MediaKind, MediaPlacement, MediaType, RenderStatus } from "@/app/generated/prisma";
 import { callClaude } from "@/app/lib/ai/model";
 import { getRendrSpaceDetail, streamRendrPhoto } from "@/app/lib/rendr/rendrClient";
+import { parseLinkedSpaces } from "@/app/lib/rendr/linkedSpaces";
 import type { HeroPresetKey } from "./hero-presets";
 
 export async function getPresignedUploadUrlAction(
@@ -333,19 +334,26 @@ export async function importRendrPhotosAction(
   if (!photoIds.length) return { imported: 0, skipped: 0 };
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, rendrSpaceId: true },
+    select: { id: true, rendrSpaces: true },
   });
   if (!project) return { imported: 0, skipped: 0, error: "Project not found" };
-  if (!project.rendrSpaceId) return { imported: 0, skipped: 0, error: "Project is not linked to a Rendr space" };
+  const linkedSpaces = parseLinkedSpaces(project.rendrSpaces);
+  if (linkedSpaces.length === 0) return { imported: 0, skipped: 0, error: "Project is not linked to a Rendr space" };
 
-  let spaceDetail;
-  try {
-    spaceDetail = await getRendrSpaceDetail(project.rendrSpaceId);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Failed to load Rendr space";
-    return { imported: 0, skipped: 0, error: msg };
+  // Gather photos across every linked space (one scan per floor). Each photo
+  // carries its own download URL, so spaceId is only needed to fetch the list.
+  const photoById = new Map<string, Awaited<ReturnType<typeof getRendrSpaceDetail>>["photos"][number]>();
+  for (const s of linkedSpaces) {
+    try {
+      const detail = await getRendrSpaceDetail(s.spaceId);
+      for (const p of detail.photos) photoById.set(p.id, p);
+    } catch {
+      // Best-effort: skip a space whose detail fails to load.
+    }
   }
-  const photoById = new Map(spaceDetail.photos.map((p) => [p.id, p]));
+  if (photoById.size === 0) {
+    return { imported: 0, skipped: 0, error: "Failed to load Rendr photos" };
+  }
 
   const placement: MediaPlacement =
     target.roomId != null

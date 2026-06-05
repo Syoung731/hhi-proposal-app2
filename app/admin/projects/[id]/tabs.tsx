@@ -10,6 +10,7 @@ import { PublishTab } from "./publish/publish-tab";
 import type { SendableEmployee } from "./publish/send-email-modal";
 import { RendrTab } from "./rendr/rendr-tab";
 import { ProjectTabNav } from "./ProjectTabNav";
+import { parseLinkedSpaces, linkedSpaceIds } from "@/app/lib/rendr/linkedSpaces";
 
 /** Build full address string from project Overview fields for Zillow search. */
 function buildProjectAddress(project: {
@@ -208,7 +209,7 @@ export function ProjectTabs({
             coverHeroImageId={project.coverHeroImageId}
             initialRoomId={initialMediaRoomId}
             projectAddress={buildProjectAddress(project)}
-            rendrSpaceId={project.rendrSpaceId ?? null}
+            rendrSpaceIds={linkedSpaceIds(project.rendrSpaces)}
           />
         )}
         {currentTab === "timeline" && (
@@ -269,7 +270,7 @@ export function ProjectTabs({
         {currentTab === "rendr" && rendrConfigured && (
           <RendrTab
             projectId={project.id}
-            rendrSpaceId={project.rendrSpaceId ?? null}
+            rendrSpaces={parseLinkedSpaces(project.rendrSpaces)}
             rendrProjectId={project.rendrProjectId ?? null}
             rendrImportedAt={project.rendrImportedAt?.toISOString() ?? null}
             rooms={project.rooms.map((r) => ({ id: r.id, name: r.name }))}

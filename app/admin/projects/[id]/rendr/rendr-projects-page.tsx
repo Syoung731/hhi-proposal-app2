@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { ImperialTakeoffData } from "@/app/lib/rendr/types";
+import type { LinkedSpace } from "@/app/lib/rendr/linkedSpaces";
 import { RendrFloorPlan } from "./rendr-floor-plan";
 import { RendrWallElevations } from "./rendr-wall-elevations";
 
@@ -27,7 +28,8 @@ interface RendrProject {
 }
 
 type Props = {
-  onSelectSpace: (projectId: number | null, spaceId: number) => void;
+  /** Link one or more spaces (floors) to the app project, each with a short label. */
+  onLinkSpaces: (projectId: number | null, spaces: LinkedSpace[]) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -75,7 +77,7 @@ function groupByDate(projects: RendrProject[]): { date: string; label: string; c
 // Component
 // ---------------------------------------------------------------------------
 
-export function RendrProjectsPage({ onSelectSpace }: Props) {
+export function RendrProjectsPage({ onLinkSpaces }: Props) {
   // ─── Data ───
   const [allProjects, setAllProjects] = useState<RendrProject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,10 +89,31 @@ export function RendrProjectsPage({ onSelectSpace }: Props) {
   const [selectedProject, setSelectedProject] = useState<RendrProject | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // ─── Multi-select linking (within a project's space list) ───
+  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<number>>(new Set());
+  const [spaceLabels, setSpaceLabels] = useState<Record<number, string>>({});
+
   // ─── Space detail state ───
   const [selectedSpace, setSelectedSpace] = useState<RendrSpace | null>(null);
   const [spaceData, setSpaceData] = useState<ImperialTakeoffData | null>(null);
   const [spaceDataLoading, setSpaceDataLoading] = useState(false);
+
+  // Reset multi-select when entering/leaving a project.
+  const openProject = useCallback((proj: RendrProject) => {
+    setSelectedProject(proj);
+    setSelectedSpaceIds(new Set());
+    setSpaceLabels({});
+  }, []);
+
+  const toggleSpaceSelected = useCallback((space: RendrSpace) => {
+    setSelectedSpaceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(space.id)) next.delete(space.id);
+      else next.add(space.id);
+      return next;
+    });
+    setSpaceLabels((prev) => (prev[space.id] ? prev : { ...prev, [space.id]: space.title }));
+  }, []);
 
   // ─── Fetch all projects ───
   const fetchProjects = useCallback(async () => {
@@ -160,19 +183,24 @@ export function RendrProjectsPage({ onSelectSpace }: Props) {
         projectId={selectedProject ? Number(selectedProject.id) : null}
         onBack={() => { setSelectedSpace(null); setSpaceData(null); }}
         onLink={() => {
-          onSelectSpace(
+          onLinkSpaces(
             selectedProject ? Number(selectedProject.id) : null,
-            selectedSpace.id,
+            [{ spaceId: selectedSpace.id, label: selectedSpace.title }],
           );
         }}
       />
     );
   }
 
-  // ─── Space picker within a project ───
+  // ─── Space picker within a project (multi-select) ───
   if (selectedProject) {
+    const projId = Number(selectedProject.id);
+    const spacesToLink: LinkedSpace[] = (selectedProject.spaces ?? [])
+      .filter((s) => selectedSpaceIds.has(s.id))
+      .map((s) => ({ spaceId: s.id, label: (spaceLabels[s.id] ?? s.title).trim() || s.title }));
+
     return (
-      <div>
+      <div className="pb-24">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -187,7 +215,8 @@ export function RendrProjectsPage({ onSelectSpace }: Props) {
             </button>
             <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">{selectedProject.name}</h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Select a space to link to your project
+              Select one or more spaces to link. For a multi-floor scan, give each a short
+              label (e.g. &quot;1st Floor&quot;, &quot;2nd Floor&quot;) to keep same-named rooms apart.
             </p>
           </div>
         </div>
@@ -199,30 +228,86 @@ export function RendrProjectsPage({ onSelectSpace }: Props) {
           </div>
         ) : (
           <div className="space-y-2">
-            {selectedProject.spaces.map((space) => (
-              <button
-                key={space.id}
-                onClick={() => handleViewSpace(space)}
-                className="w-full rounded-xl border border-zinc-200 bg-white p-4 text-left transition-all hover:border-orange-300 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-orange-600"
-              >
-                <div className="flex items-center justify-between">
+            {selectedProject.spaces.map((space) => {
+              const checked = selectedSpaceIds.has(space.id);
+              return (
+                <div
+                  key={space.id}
+                  className={`rounded-xl border bg-white p-4 transition-all dark:bg-zinc-800 ${
+                    checked
+                      ? "border-orange-300 dark:border-orange-600"
+                      : "border-zinc-200 dark:border-zinc-700"
+                  }`}
+                >
                   <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSpaceSelected(space)}
+                      className="h-4 w-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-400 dark:border-zinc-600"
+                    />
                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20">
                       <svg className="h-4 w-4 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m10.5-6v4.5m0-4.5h-4.5m4.5 0L15 9m-10.5 6v4.5m0-4.5h4.5m-4.5 4.5L9 15m10.5 6v-4.5m0 4.5h-4.5m4.5 0L15 15" />
                       </svg>
                     </div>
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <span className="font-medium text-zinc-900 dark:text-zinc-100">{space.title}</span>
                       {space.notes && (
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">{space.notes}</p>
+                        <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{space.notes}</p>
                       )}
                     </div>
+                    <button
+                      onClick={() => handleViewSpace(space)}
+                      className="shrink-0 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    >
+                      Preview
+                    </button>
+                    <span className="shrink-0 text-xs text-zinc-400">{new Date(space.created).toLocaleDateString()}</span>
                   </div>
-                  <span className="text-xs text-zinc-400">{new Date(space.created).toLocaleDateString()}</span>
+
+                  {/* Per-space short label (shown when selected) */}
+                  {checked && (
+                    <div className="mt-3 flex items-center gap-2 pl-7">
+                      <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                        Short label
+                      </label>
+                      <input
+                        type="text"
+                        value={spaceLabels[space.id] ?? space.title}
+                        onChange={(e) =>
+                          setSpaceLabels((prev) => ({ ...prev, [space.id]: e.target.value }))
+                        }
+                        placeholder="e.g. 2nd Floor"
+                        className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                      />
+                    </div>
+                  )}
                 </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Sticky link bar */}
+        {spacesToLink.length > 0 && (
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-6 py-3 backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95">
+            <div className="mx-auto flex max-w-5xl items-center justify-between">
+              <span className="text-sm text-zinc-600 dark:text-zinc-300">
+                {spacesToLink.length} space{spacesToLink.length !== 1 ? "s" : ""} selected
+                <span className="ml-2 text-zinc-400">{spacesToLink.map((s) => s.label).join(" · ")}</span>
+              </span>
+              <button
+                onClick={() => onLinkSpaces(projId, spacesToLink)}
+                className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
+                </svg>
+                Link {spacesToLink.length} space{spacesToLink.length !== 1 ? "s" : ""} to project
               </button>
-            ))}
+            </div>
           </div>
         )}
       </div>
@@ -305,7 +390,7 @@ export function RendrProjectsPage({ onSelectSpace }: Props) {
                 {group.items.map((proj) => (
                   <button
                     key={proj.id}
-                    onClick={() => setSelectedProject(proj)}
+                    onClick={() => openProject(proj)}
                     className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-left transition-all hover:border-orange-300 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-orange-600"
                   >
                     <div className="flex items-center justify-between gap-4">
@@ -373,7 +458,7 @@ export function RendrProjectsPage({ onSelectSpace }: Props) {
           onCreated={(proj) => {
             setAllProjects((prev) => [proj, ...prev]);
             setShowAddModal(false);
-            setSelectedProject(proj);
+            openProject(proj);
           }}
         />
       )}

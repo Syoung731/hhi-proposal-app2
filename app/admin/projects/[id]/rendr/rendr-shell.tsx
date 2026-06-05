@@ -8,6 +8,7 @@ import { RendrMatchingTable, type ExtendedMapping } from "./rendr-matching-table
 import { RendrFloorPlan } from "./rendr-floor-plan";
 import { linkRendrProject, unlinkRendrProject, importRendrMeasurements, previewRendrResync, executeRendrResync, type ResyncDiff } from "./rendr-actions";
 import type { ImperialTakeoffData } from "@/app/lib/rendr/types";
+import type { LinkedSpace } from "@/app/lib/rendr/linkedSpaces";
 
 type AppRoom = { id: string; name: string };
 type SectionTypeOption = { id: string; name: string; category: string };
@@ -16,7 +17,7 @@ type SpaceTab = "floorplan" | "photos" | "rooms" | "about";
 
 type Props = {
   projectId: string;
-  rendrSpaceId: number | null;
+  rendrSpaces: LinkedSpace[];
   rendrProjectId: number | null;
   rendrImportedAt: string | null;
   rooms: AppRoom[];
@@ -41,16 +42,19 @@ const SPACE_TABS: { key: SpaceTab; label: string }[] = [
 // ---------------------------------------------------------------------------
 interface SpacePhoto { id: string; created: string; }
 
-export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImportedAt, rooms, sectionTypes }: Props) {
+export function RendrShell({ projectId, rendrSpaces, rendrProjectId, rendrImportedAt, rooms, sectionTypes }: Props) {
   const [activePage, setActivePage] = useState<ActivePage>("dashboard");
-  const [linkedSpaceId, setLinkedSpaceId] = useState(rendrSpaceId);
+  const [linkedSpaces, setLinkedSpaces] = useState<LinkedSpace[]>(rendrSpaces);
   const [linkedProjectId, setLinkedProjectId] = useState(rendrProjectId);
   const [importedAt, setImportedAt] = useState(rendrImportedAt);
-  const [takeoffData, setTakeoffData] = useState<ImperialTakeoffData | null>(null);
+  // Active space within the linked detail view (the space switcher).
+  const [activeSpaceId, setActiveSpaceId] = useState<number | null>(rendrSpaces[0]?.spaceId ?? null);
+  // Takeoff per linked space (one scan per floor), keyed by spaceId.
+  const [takeoffBySpace, setTakeoffBySpace] = useState<Record<number, ImperialTakeoffData>>({});
   const [showMatching, setShowMatching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Linked space detail state
+  // Linked space detail state (for the active space)
   const [spaceTab, setSpaceTab] = useState<SpaceTab>("rooms");
   const [photos, setPhotos] = useState<SpacePhoto[]>([]);
   const [spaceDetail, setSpaceDetail] = useState<{ title: string; notes: string; saved_date: string; field_notes: string | null } | null>(null);
@@ -61,17 +65,41 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
   const [resyncLoading, setResyncLoading] = useState(false);
   const [resyncSelectedIds, setResyncSelectedIds] = useState<Set<string>>(new Set());
 
-  // Fetch takeoff + detail when linked
+  // Fetch takeoff for every linked space (used by the combined matching table and
+  // the active-space Rooms tab).
   useEffect(() => {
-    if (!linkedSpaceId) return;
-    // Fetch takeoff
-    fetch(`/api/rendr/spaces/${linkedSpaceId}/takeoff`)
-      .then((r) => r.json())
-      .then((d) => { if (!d.error) setTakeoffData(d); })
-      .catch(() => {});
-    // Fetch space detail
+    if (linkedSpaces.length === 0) {
+      setTakeoffBySpace({});
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      linkedSpaces.map(async (s) => {
+        try {
+          const r = await fetch(`/api/rendr/spaces/${s.spaceId}/takeoff`);
+          const d = await r.json();
+          if (d.error) return null;
+          return [s.spaceId, d as ImperialTakeoffData] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      const map: Record<number, ImperialTakeoffData> = {};
+      for (const e of entries) if (e) map[e[0]] = e[1];
+      setTakeoffBySpace(map);
+    });
+    return () => { cancelled = true; };
+  }, [linkedSpaces]);
+
+  // Fetch detail + photos for the active space.
+  useEffect(() => {
+    if (activeSpaceId == null) return;
     setPhotosLoading(true);
-    fetch(`/api/rendr/spaces/${linkedSpaceId}/detail`)
+    setPhotos([]);
+    setSpaceDetail(null);
+    fetch(`/api/rendr/spaces/${activeSpaceId}/detail`)
       .then((r) => r.json())
       .then((d) => {
         if (d.photos) setPhotos(d.photos);
@@ -79,13 +107,14 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
       })
       .catch(() => {})
       .finally(() => setPhotosLoading(false));
-  }, [linkedSpaceId]);
+  }, [activeSpaceId]);
 
-  const handleLink = useCallback(async (rendrProjId: number | null, spaceId: number) => {
+  const handleLink = useCallback(async (rendrProjId: number | null, spaces: LinkedSpace[]) => {
     try {
-      await linkRendrProject(projectId, rendrProjId, spaceId);
+      await linkRendrProject(projectId, rendrProjId, spaces);
       setLinkedProjectId(rendrProjId);
-      setLinkedSpaceId(spaceId);
+      setLinkedSpaces(spaces);
+      setActiveSpaceId(spaces[0]?.spaceId ?? null);
       setImportedAt(null);
       setSpaceTab("rooms");
     } catch (e) {
@@ -96,9 +125,10 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
   const handleUnlink = useCallback(async () => {
     try {
       await unlinkRendrProject(projectId);
-      setLinkedSpaceId(null);
+      setLinkedSpaces([]);
       setLinkedProjectId(null);
-      setTakeoffData(null);
+      setActiveSpaceId(null);
+      setTakeoffBySpace({});
       setImportedAt(null);
       setSpaceDetail(null);
       setPhotos([]);
@@ -149,11 +179,16 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
 
   // Check if any rooms have Rendr mappings (for showing re-sync button)
   const hasRendrMappings = rooms.length > 0 && importedAt;
+  // Takeoff data for the currently-viewed space.
+  const activeTakeoff = activeSpaceId != null ? takeoffBySpace[activeSpaceId] ?? null : null;
+  // All linked spaces have takeoff loaded → combined import is ready.
+  const allTakeoffsLoaded = linkedSpaces.length > 0 && linkedSpaces.every((s) => takeoffBySpace[s.spaceId]);
+  const multiSpace = linkedSpaces.length > 1;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LINKED STATE — Show space detail directly (no sidebar)
   // ═══════════════════════════════════════════════════════════════════════════
-  if (linkedSpaceId) {
+  if (linkedSpaces.length > 0) {
     // Re-sync diff overlay
     if (resyncDiffs !== null) {
       return (
@@ -231,12 +266,13 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
       );
     }
 
-    // Matching table overlay
-    if (showMatching && takeoffData) {
+    // Matching table overlay — combined across all linked spaces
+    if (showMatching && allTakeoffsLoaded) {
       return (
         <div className="p-6">
           <RendrMatchingTable
-            takeoffData={takeoffData}
+            spaces={linkedSpaces}
+            takeoffBySpace={takeoffBySpace}
             appRooms={rooms}
             sectionTypes={sectionTypes}
             projectId={projectId}
@@ -247,7 +283,8 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
       );
     }
 
-    const spaceTitle = spaceDetail?.title || `Space #${linkedSpaceId}`;
+    const activeLabel = linkedSpaces.find((s) => s.spaceId === activeSpaceId)?.label ?? "";
+    const spaceTitle = spaceDetail?.title || activeLabel || (activeSpaceId != null ? `Space #${activeSpaceId}` : "Rendr Scans");
 
     return (
       <div className="p-6">
@@ -263,7 +300,7 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
           <div>
             <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">{spaceTitle}</h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Linked to this project
+              {multiSpace ? `${linkedSpaces.length} spaces linked to this project` : "Linked to this project"}
               {importedAt && <span className="ml-2 text-green-600 dark:text-green-400">· Measurements imported</span>}
             </p>
           </div>
@@ -277,14 +314,13 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
                 {resyncLoading ? "Loading..." : "Re-sync from Rendr"}
               </button>
             )}
-            {takeoffData && (
-              <button
-                onClick={() => setShowMatching(true)}
-                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                {importedAt ? "Re-import Measurements" : "Import Measurements"}
-              </button>
-            )}
+            <button
+              onClick={() => setShowMatching(true)}
+              disabled={!allTakeoffsLoaded}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {!allTakeoffsLoaded ? "Loading…" : importedAt ? "Re-import Measurements" : "Import Measurements"}
+            </button>
             <button
               onClick={handleUnlink}
               className="flex items-center gap-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/10"
@@ -297,6 +333,25 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
             </button>
           </div>
         </div>
+
+        {/* Space switcher — one tab per linked space (floor) */}
+        {multiSpace && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {linkedSpaces.map((s) => (
+              <button
+                key={s.spaceId}
+                onClick={() => { setActiveSpaceId(s.spaceId); setSpaceTab("rooms"); }}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  activeSpaceId === s.spaceId
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="mb-5 flex gap-1 border-b border-zinc-200 dark:border-zinc-700">
@@ -316,8 +371,8 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
         </div>
 
         {/* Floor Plan */}
-        {spaceTab === "floorplan" && (
-          <RendrFloorPlan spaceId={linkedSpaceId} />
+        {spaceTab === "floorplan" && activeSpaceId != null && (
+          <RendrFloorPlan spaceId={activeSpaceId} />
         )}
 
         {/* Photos */}
@@ -334,7 +389,7 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
                 {photos.map((photo) => (
                   <div key={photo.id} className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
                     <img
-                      src={`/api/rendr/spaces/${linkedSpaceId}/photos/${photo.id}`}
+                      src={`/api/rendr/spaces/${activeSpaceId}/photos/${photo.id}`}
                       alt="Space photo"
                       className="aspect-[4/3] w-full object-cover"
                       loading="lazy"
@@ -350,13 +405,13 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
         )}
 
         {/* Rooms */}
-        {spaceTab === "rooms" && takeoffData && (
+        {spaceTab === "rooms" && activeTakeoff && (
           <div>
-            {takeoffData.rooms.length === 0 ? (
+            {activeTakeoff.rooms.length === 0 ? (
               <div className="py-12 text-center text-sm text-zinc-500">No room data available.</div>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {takeoffData.rooms.map((room, idx) => {
+                {activeTakeoff.rooms.map((room, idx) => {
                   const t = room.takeoff;
                   return (
                     <div key={idx} className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800">
@@ -406,7 +461,8 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
             <h3 className="mb-4 text-base font-semibold text-zinc-900 dark:text-zinc-100">Space Information</h3>
             <div className="space-y-4 text-sm">
               <div><span className="text-zinc-500">Space Name:</span> <span className="ml-2 font-medium text-zinc-900 dark:text-zinc-100">{spaceDetail?.title}</span></div>
-              <div><span className="text-zinc-500">Space ID:</span> <span className="ml-2 font-medium text-zinc-900 dark:text-zinc-100">{linkedSpaceId}</span></div>
+              {multiSpace && <div><span className="text-zinc-500">Floor Label:</span> <span className="ml-2 font-medium text-zinc-900 dark:text-zinc-100">{activeLabel}</span></div>}
+              <div><span className="text-zinc-500">Space ID:</span> <span className="ml-2 font-medium text-zinc-900 dark:text-zinc-100">{activeSpaceId}</span></div>
               {linkedProjectId && <div><span className="text-zinc-500">Rendr Project:</span> <span className="ml-2 font-medium text-zinc-900 dark:text-zinc-100">#{linkedProjectId}</span></div>}
               <div><span className="text-zinc-500">Notes:</span> <span className="ml-2 text-zinc-900 dark:text-zinc-100">{spaceDetail?.notes || "No notes"}</span></div>
               {spaceDetail?.field_notes && <div><span className="text-zinc-500">Field Notes:</span> <span className="ml-2 text-zinc-900 dark:text-zinc-100">{spaceDetail.field_notes}</span></div>}
@@ -471,7 +527,7 @@ export function RendrShell({ projectId, rendrSpaceId, rendrProjectId, rendrImpor
         )}
 
         {activePage === "projects" && (
-          <RendrProjectsPage onSelectSpace={handleLink} />
+          <RendrProjectsPage onLinkSpaces={handleLink} />
         )}
 
         {activePage === "spaces" && (
