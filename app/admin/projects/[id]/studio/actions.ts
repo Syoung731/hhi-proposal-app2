@@ -23,7 +23,7 @@ import {
   reconcileScopeWithPhoto,
   type AnnotatedRenderItem,
 } from "@/app/lib/media/render-scope-reconcile";
-import { composeDeckCopy, type ComposeCopyResult } from "@/app/lib/deck/compose-copy";
+import { composeDeckCopy, generateDeckVisuals, type ComposeCopyResult, type GenerateVisualsResult } from "@/app/lib/deck/compose-copy";
 
 /**
  * Server actions for the Presentation Studio "Build Presentation" wizard
@@ -461,4 +461,15 @@ export async function composeDeckCopyAction(
 ): Promise<ComposeCopyResult | { error: string }> {
   await requireAdmin();
   return composeDeckCopy(projectId);
+}
+
+/**
+ * Generates the deck's image assets (Objective illustrations + Blueprint scope
+ * icons) after the text draft. Slow (Gemini image gen) — run on its own button.
+ */
+export async function generateDeckVisualsAction(
+  projectId: string,
+): Promise<GenerateVisualsResult> {
+  await requireAdmin();
+  return generateDeckVisuals(projectId);
 }

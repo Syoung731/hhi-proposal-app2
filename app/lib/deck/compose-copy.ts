@@ -261,9 +261,10 @@ function itemsToScopeItems(items: DraftScopeItem[]): ScopeItem[] {
  * (matching the library or generating + persisting on a miss). Used for the
  * blueprint-icons layout, which renders the PNG; vector `icon` stays as fallback.
  */
-async function itemsWithIconImages(items: DraftScopeItem[]): Promise<ScopeItem[]> {
+async function itemsWithIconImages(items: DraftScopeItem[], generateMissing = false): Promise<ScopeItem[]> {
   const imageMap = await resolveScopeIconImages(
     items.map((it) => it.iconConcept || it.title),
+    { generateMissing },
   );
   return items.map((it) => {
     const url = imageMap.get(scopeIconSlug(it.iconConcept || it.title));
@@ -432,17 +433,14 @@ export async function composeDeckCopy(
           projectAddress,
         });
         if (obj) {
-          // Generate bespoke line-art illustrations for the hub + each zone,
-          // in parallel. Falls back to icons when generation is unavailable.
-          const [hubImageUrl, ...zoneImages] = await Promise.all([
-            genObjectiveIllustration(obj.hubScene, "the home"),
-            ...obj.pillars.map((p) => genObjectiveIllustration(p.scene, p.title)),
-          ]);
-          const pillars = obj.pillars.map((p, i) => ({
+          // Text-only draft: store the scene descriptions so the separate
+          // "Generate illustrations" step can draw them later. No image gen here
+          // (keeps Draft fast + reliable).
+          const pillars = obj.pillars.map((p) => ({
             title: p.title,
             body: p.body,
             icon: p.icon,
-            ...(zoneImages[i] ? { imageUrl: zoneImages[i] } : {}),
+            scene: p.scene,
           }));
           await prisma.deckSlide.update({
             where: { id: slide.id },
@@ -453,7 +451,7 @@ export async function composeDeckCopy(
                 ...(obj.objective ? { objective: obj.objective } : {}),
                 pillars,
                 hubIcon: obj.hubIcon,
-                ...(hubImageUrl ? { hubImageUrl } : {}),
+                hubScene: obj.hubScene,
                 layout: "hub-spoke",
               } as unknown as Prisma.InputJsonObject,
               source: "auto",
@@ -496,6 +494,104 @@ export async function composeDeckCopy(
     revalidatePath(`/admin/projects/${projectId}/deck`);
   }
   return { updated, skipped, errors };
+}
+
+// ─── Generate illustrations (the slow image step, run separately) ─────────────
+
+export type GenerateVisualsResult =
+  | { illustrations: number; icons: number; errors: number }
+  | { error: string };
+
+/**
+ * Generates the IMAGE assets for a deck after the (fast, text-only) copy draft:
+ * the Objective hub + zone line-art illustrations (from stored scene
+ * descriptions) and any missing Blueprint scope-item icons. Skips assets that
+ * already exist so it can be re-run safely. Kept separate from composeDeckCopy
+ * so the text draft stays fast and never blocks on image generation.
+ */
+export async function generateDeckVisuals(projectId: string): Promise<GenerateVisualsResult> {
+  const deck = await prisma.proposalDeck.findUnique({
+    where: { projectId },
+    include: { slides: { select: { id: true, type: true, layoutKey: true, content: true } } },
+  });
+  if (!deck) return { error: "No deck yet — draft slide copy first." };
+
+  let illustrations = 0;
+  let icons = 0;
+  let errors = 0;
+
+  for (const slide of deck.slides) {
+    try {
+      if (slide.type === "objective") {
+        const content = asObject(slide.content);
+        const pillars = Array.isArray(content.pillars)
+          ? (content.pillars as Array<Record<string, unknown>>)
+          : [];
+        if (pillars.length === 0) continue;
+        const hubScene = typeof content.hubScene === "string" ? content.hubScene : "";
+        const hasHub = typeof content.hubImageUrl === "string" && !!content.hubImageUrl;
+        const [hubImg, ...zoneImgs] = await Promise.all([
+          !hasHub && hubScene ? genObjectiveIllustration(hubScene, "the home") : Promise.resolve(null),
+          ...pillars.map((p) => {
+            const scene = typeof p.scene === "string" ? p.scene : "";
+            const has = typeof p.imageUrl === "string" && !!p.imageUrl;
+            const title = typeof p.title === "string" ? p.title : "zone";
+            return !has && scene ? genObjectiveIllustration(scene, title) : Promise.resolve(null);
+          }),
+        ]);
+        const newPillars = pillars.map((p, i) => (zoneImgs[i] ? { ...p, imageUrl: zoneImgs[i] } : p));
+        const got = (hubImg ? 1 : 0) + zoneImgs.filter(Boolean).length;
+        if (got > 0) {
+          await prisma.deckSlide.update({
+            where: { id: slide.id },
+            data: {
+              content: {
+                ...content,
+                pillars: newPillars,
+                ...(hubImg ? { hubImageUrl: hubImg } : {}),
+              } as unknown as Prisma.InputJsonObject,
+            },
+          });
+          illustrations += got;
+        }
+      } else if (slide.type === "scope-overview" && slide.layoutKey === "blueprint-icons") {
+        const content = asObject(slide.content);
+        const items = Array.isArray(content.scopeItems)
+          ? (content.scopeItems as Array<Record<string, unknown>>)
+          : [];
+        const anyMissing = items.some(
+          (it) => !(typeof it.iconImageUrl === "string" && it.iconImageUrl) && typeof it.title === "string",
+        );
+        if (!anyMissing) continue;
+        const imageMap = await resolveScopeIconImages(
+          items.map((it) => String(it.title ?? "")),
+          { generateMissing: true },
+        );
+        let added = 0;
+        const newItems = items.map((it) => {
+          if (typeof it.iconImageUrl === "string" && it.iconImageUrl) return it;
+          const url = imageMap.get(scopeIconSlug(String(it.title ?? "")));
+          if (url) {
+            added += 1;
+            return { ...it, iconImageUrl: url };
+          }
+          return it;
+        });
+        if (added > 0) {
+          await prisma.deckSlide.update({
+            where: { id: slide.id },
+            data: { content: { ...content, scopeItems: newItems } as unknown as Prisma.InputJsonObject },
+          });
+          icons += added;
+        }
+      }
+    } catch {
+      errors += 1;
+    }
+  }
+
+  revalidatePath(`/admin/projects/${projectId}/deck`);
+  return { illustrations, icons, errors };
 }
 
 // ─── AI Edit (Part 2): prompt-driven scope-slide redesign ─────────────────────

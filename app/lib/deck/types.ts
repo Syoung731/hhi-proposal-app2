@@ -294,6 +294,11 @@ export interface ObjectivePillar {
    * fills the zone area). Preferred over `icon` on the hub-spoke layout.
    */
   imageUrl?: string | null;
+  /**
+   * Scene description for generating this zone's illustration (drafted by the
+   * composer, consumed by the separate "Generate illustrations" step).
+   */
+  scene?: string | null;
 }
 
 export interface ObjectiveContent extends SharedSlideFields {
@@ -314,6 +319,8 @@ export interface ObjectiveContent extends SharedSlideFields {
   hubIcon?: string | null;
   /** Bespoke AI-generated line-art illustration of the home for the hub. */
   hubImageUrl?: string | null;
+  /** Scene description for generating the hub (home) illustration later. */
+  hubScene?: string | null;
   /** Hub-spoke: central hub size multiplier (0.6–1.6, default 1). */
   hubSize?: number | null;
   /** Hub-spoke: zone text size multiplier (0.6–1.6, default 1). */

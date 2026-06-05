@@ -18,19 +18,23 @@ slide 2) → edit it in the right-hand **Inspector**.
 The fastest way to a great Objective is to let the AI draft it for the specific
 project.
 
-**In the app:** **Build Presentation** tab → **"Draft slide copy with AI."**
+It's a **two-step** flow (fast text first, pictures second):
 
-It writes a creative headline, a one- or two-sentence mission statement, and
-**3–5 zones** (the AI picks how many fit the project), each with a title, a
-one-line body, and a **custom line-art illustration drawn for that zone** — e.g.
-a screened porch, a garage with the site's trees — pulled from *that project's*
-actual scope. The hub becomes a drawing of the home. So every job gets its own
-bespoke Objective. It defaults to the **Hub & Spoke** look (below), where the
-zones **fan around the central hub**.
+**In the app:**
+1. **Build Presentation** tab → **"Draft slide copy with AI"** — writes a
+   creative headline, a one- or two-sentence mission, and **3–5 zones** (the AI
+   picks how many fit the project), each with a title + one-line body, pulled
+   from *that project's* actual scope. This is quick.
+2. Then **"Generate illustrations"** — draws the **custom line-art illustration**
+   for the hub (the home) and each zone (e.g. a screened porch, a garage with
+   the site's trees). This is the slower, image-generation step.
 
-> **Heads-up:** Generating the illustrations adds ~30–60s the first time (it
-> draws the hub + 3 zones). If an illustration can't be generated, that zone
-> falls back to a simple icon.
+It defaults to the **Hub & Spoke** look (below), where the zones **fan around the
+central hub**.
+
+> **Heads-up:** "Generate illustrations" uses image generation, so it takes
+> ~30–60s and can be re-run (it only fills in what's missing). Until you run it,
+> zones show a simple **icon** instead of the drawing.
 
 ## 3. The two layouts
 
