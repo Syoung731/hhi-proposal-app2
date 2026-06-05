@@ -1840,8 +1840,10 @@ function ObjectiveInspector({
             </button>
           )}
 
-          {/* Pillar title typography (applies to all 3 pillar titles) */}
-          <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginTop: 12, marginBottom: 6 }}>Title typography (all 3 pillars)</p>
+          {mode === "pillars" && (
+          <>
+          {/* Pillar title typography (Pillars layout only) */}
+          <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginTop: 12, marginBottom: 6 }}>Title typography (all pillars)</p>
           <FieldGroup label="Font">
             <PFontSelect
               value={content.pillarTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline}
@@ -1913,6 +1915,8 @@ function ObjectiveInspector({
               onChangeFn={(v) => updateContent({ pillarBodyOutline: v })}
             />
           </FieldGroup>
+          </>
+          )}
 
           {PF_GROUP_DIVIDER}
         </>

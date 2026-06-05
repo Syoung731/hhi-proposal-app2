@@ -660,6 +660,11 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
   const muted = theme.color.muted;
   const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const headlineFont = content.headlineFont ?? theme.fonts.headline;
+  // Headline + objective typography (driven by the inspector controls).
+  const headlineSize = content.headlineSize ?? 1;
+  const objectiveSize = content.objectiveSize ?? 1;
+  const objectiveFont = content.objectiveFont ?? bodyFont;
+  const objectiveColor = content.objectiveColor ?? muted;
   const objective = (content.objective ?? content.statementText ?? "").trim();
   const pillars = (content.pillars ?? []).slice(0, 6);
   const gridLine = "rgba(26,35,50,0.06)";
@@ -706,11 +711,32 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
 
       {/* Header */}
       <div style={{ position: "absolute", left: "6%", right: "6%", top: "6%", zIndex: 3 }}>
-        <h1 style={{ fontSize: "2.0em", fontWeight: (content.headlineBold ?? true) ? 700 : 400, fontFamily: headlineFont, color: ink, lineHeight: 1.1, margin: 0 }}>
+        <h1 style={{
+          fontSize: `${2.0 * headlineSize}em`,
+          fontWeight: (content.headlineBold ?? true) ? 700 : 400,
+          fontStyle: content.headlineItalic ? "italic" : undefined,
+          textDecoration: content.headlineUnderline ? "underline" : undefined,
+          fontFamily: headlineFont,
+          color: ink,
+          lineHeight: 1.1,
+          margin: 0,
+          textShadow: makeOutlineShadow(content.headlineOutline),
+        }}>
           {slide.headline || "Project Objective"}
         </h1>
         {objective && (
-          <p style={{ fontSize: "0.92em", fontFamily: bodyFont, color: muted, lineHeight: 1.5, margin: "0.6em 0 0", maxWidth: "82%" }}>
+          <p style={{
+            fontSize: `${0.92 * objectiveSize}em`,
+            fontFamily: objectiveFont,
+            fontWeight: content.objectiveBold ? 700 : 400,
+            fontStyle: content.objectiveItalic ? "italic" : undefined,
+            textDecoration: content.objectiveUnderline ? "underline" : undefined,
+            color: objectiveColor,
+            lineHeight: 1.5,
+            margin: "0.6em 0 0",
+            maxWidth: "82%",
+            textShadow: makeOutlineShadow(content.objectiveOutline),
+          }}>
             {renderEmphasis(objective)}
           </p>
         )}
