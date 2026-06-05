@@ -20,11 +20,13 @@ You almost never start from a blank slide. There are two ways to get content:
 
 ### A) Draft the whole deck at once (fastest start)
 
-**In the app:** **Build Presentation** tab → **"Draft slide copy with AI"**.
+**In the app:** **Deck** tab → **"Generate Deck"** → **AI Fill → "Draft slide copy"**.
 
 This reads the project's rooms and scopes and fills in the Scope slide (and other
 slides) automatically — it writes the scope items, picks a layout, pulls in a
 hero photo, and assigns an icon to each line. Use this once at the beginning.
+(Illustrations/Blueprint icons come from the **"Generate illustrations"** button
+in the same modal.)
 
 ### B) AI Edit one slide (best for fine-tuning)
 
@@ -228,8 +230,8 @@ versa.
 
 ## 10. Quick start checklist
 
-1. Open the project → **Build Presentation** → **Draft slide copy with AI**.
-2. Go to **Deck** → **Scope Overview** slide.
+1. **Deck** tab → **Generate Deck** → **Draft slide copy** (then **Generate illustrations**).
+2. Click the **Scope Overview** slide.
 3. Pick a **Layout** (try Editorial Split or Blueprint + Icons).
 4. Set **Content** to Bullet items (or Paragraph).
 5. Tidy the **Scope Items** (titles, details, icons, order).

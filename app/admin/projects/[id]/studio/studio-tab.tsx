@@ -13,8 +13,6 @@ import {
   requestStudioPresignedUrls,
   commitStudioRoomPhotos,
   commitStudioHeroPhoto,
-  composeDeckCopyAction,
-  generateDeckVisualsAction,
   type StudioReadiness,
 } from "./actions";
 import { RoomRenderPanel } from "./RoomRenderPanel";
@@ -247,90 +245,6 @@ function PhotoTarget({
 // The per-room render UI now lives in ./RoomRenderPanel (multi-photo selection,
 // Render New + Update + Set-as-main + Delete, modeled on the Media tab).
 
-function ComposeCopyButton({ projectId }: { projectId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const compose = useCallback(async () => {
-    setBusy(true);
-    setMsg(null);
-    const res = await composeDeckCopyAction(projectId);
-    setBusy(false);
-    if ("error" in res) {
-      setMsg(res.error);
-      return;
-    }
-    setMsg(
-      `Drafted copy on ${res.updated} slide${res.updated === 1 ? "" : "s"}` +
-        (res.errors.length ? ` · ${res.errors.length} skipped on error` : ""),
-    );
-  }, [projectId]);
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      <button
-        type="button"
-        onClick={compose}
-        disabled={busy}
-        className={
-          "rounded border px-4 py-2 text-sm font-medium " +
-          (busy
-            ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800"
-            : "border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800")
-        }
-      >
-        {busy ? "Drafting copy…" : "Draft slide copy with AI"}
-      </button>
-      {msg && (
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">{msg}</span>
-      )}
-    </span>
-  );
-}
-
-function GenerateVisualsButton({ projectId }: { projectId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const run = useCallback(async () => {
-    setBusy(true);
-    setMsg(null);
-    const res = await generateDeckVisualsAction(projectId);
-    setBusy(false);
-    if ("error" in res) {
-      setMsg(res.error);
-      return;
-    }
-    setMsg(
-      `Generated ${res.illustrations} illustration${res.illustrations === 1 ? "" : "s"}` +
-        ` · ${res.icons} icon${res.icons === 1 ? "" : "s"}` +
-        (res.errors ? ` · ${res.errors} failed` : ""),
-    );
-  }, [projectId]);
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      <button
-        type="button"
-        onClick={run}
-        disabled={busy}
-        title="Draw the Objective hub + zone illustrations and any missing Blueprint icons (slower — uses image generation)."
-        className={
-          "rounded border px-4 py-2 text-sm font-medium " +
-          (busy
-            ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800"
-            : "border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800")
-        }
-      >
-        {busy ? "Generating illustrations…" : "Generate illustrations"}
-      </button>
-      {msg && (
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">{msg}</span>
-      )}
-    </span>
-  );
-}
-
 export function StudioTab({
   projectId,
   rooms,
@@ -466,9 +380,10 @@ export function StudioTab({
             Next: assemble the deck
           </h3>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Open the deck to generate slides from your sections + photos. Rooms
-            with photos get before/after slides (rendering comes in the next
-            phase); rooms without are grouped into Additional Rooms.
+            Head to the Deck tab and use <strong>Generate Deck</strong> to build
+            the slides and fill them with AI (draft copy + illustrations). Rooms
+            with photos become before/after slides; rooms without are grouped
+            into Additional Rooms.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Link
@@ -477,8 +392,6 @@ export function StudioTab({
             >
               Open Presentation Deck →
             </Link>
-            <ComposeCopyButton projectId={projectId} />
-            <GenerateVisualsButton projectId={projectId} />
           </div>
         </section>
       </div>

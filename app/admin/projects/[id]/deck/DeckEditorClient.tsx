@@ -14,6 +14,7 @@ import type {
   TextZoneSetting,
 } from "@/app/lib/deck/types";
 import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction, deleteProjectDeckAction, updateDeckThemeAction } from "./actions";
+import { composeDeckCopyAction, generateDeckVisualsAction } from "../studio/actions";
 import { DEFAULT_SPEC_SLIDE_TYPES } from "@/app/lib/deck/default-spec";
 import { SlideRail } from "./SlideRail";
 import { SlideCanvas } from "./SlideCanvas";
@@ -349,125 +350,115 @@ function GenerateDeckButton({
         userSelect: "none",
       }}
     >
-      {busy ? "Generating…" : "Generate Default Deck"}
+      {busy ? "Generating…" : "Generate Deck"}
     </button>
   );
 }
 
-function ConfirmRegenerateModal({
+function GenerateDeckModal({
   onClose,
-  onKeepManual,
-  onReplaceAll,
+  hasSlides,
+  generating,
+  alsoDraftCopy,
+  setAlsoDraftCopy,
+  onGenerate,
   onDeleteAll,
+  composeBusy,
+  composeMsg,
+  onComposeCopy,
+  illustrateBusy,
+  illustrateMsg,
+  onGenerateIllustrations,
+  accent,
 }: {
   onClose: () => void;
-  onKeepManual: () => void;
-  onReplaceAll: () => void;
+  hasSlides: boolean;
+  generating: boolean;
+  alsoDraftCopy: boolean;
+  setAlsoDraftCopy: (v: boolean) => void;
+  onGenerate: (mode: "keep-manual" | "replace-all") => void;
   onDeleteAll: () => void;
+  composeBusy: boolean;
+  composeMsg: string | null;
+  onComposeCopy: () => void;
+  illustrateBusy: boolean;
+  illustrateMsg: string | null;
+  onGenerateIllustrations: () => void;
+  accent: string;
 }) {
+  const busy = generating || composeBusy || illustrateBusy;
+  const sectionLabel: React.CSSProperties = {
+    color: "#94A3B8", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+    textTransform: "uppercase", marginBottom: 8,
+  };
+  const cardBtn = (bg: string, border: string, color: string): React.CSSProperties => ({
+    padding: "10px 14px", background: bg, color, border: `1px solid ${border}`,
+    borderRadius: 6, cursor: busy ? "not-allowed" : "pointer", textAlign: "left", fontSize: 13,
+    opacity: busy ? 0.6 : 1, width: "100%",
+  });
   return (
     <div
       onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#1E2D3A",
-          border: "1px solid #334155",
-          borderRadius: 8,
-          padding: 24,
-          maxWidth: 460,
-          boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
-        }}
+        style={{ background: "#1E2D3A", border: "1px solid #334155", borderRadius: 8, padding: 24, width: 480, maxHeight: "86vh", overflowY: "auto", boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}
       >
-        <h2 style={{ color: "#E2E8F0", fontSize: 16, fontWeight: 600, marginBottom: 10 }}>
-          Regenerate default deck?
-        </h2>
-        <p style={{ color: "#94A3B8", fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>
-          This deck already has slides. Choose how to regenerate:
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
-            onClick={onKeepManual}
-            style={{
-              padding: "10px 14px",
-              background: "#2D3F50",
-              color: "#E2E8F0",
-              border: "1px solid #475569",
-              borderRadius: 6,
-              cursor: "pointer",
-              textAlign: "left",
-              fontSize: 13,
-            }}
-          >
-            <div style={{ fontWeight: 600 }}>Keep manual, regenerate auto</div>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>
-              Preserves every slide you have and adds any missing defaults.
-            </div>
-          </button>
-          <button
-            onClick={onReplaceAll}
-            style={{
-              padding: "10px 14px",
-              background: "#3A1F1F",
-              color: "#FECACA",
-              border: "1px solid #7F1D1D",
-              borderRadius: 6,
-              cursor: "pointer",
-              textAlign: "left",
-              fontSize: 13,
-            }}
-          >
-            <div style={{ fontWeight: 600 }}>Replace everything</div>
-            <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>
-              Deletes all slides and re-seeds from the default spec. User edits are lost.
-            </div>
-          </button>
-          <button
-            onClick={onDeleteAll}
-            style={{
-              padding: "10px 14px",
-              background: "#3A1F1F",
-              color: "#FECACA",
-              border: "1px solid #7F1D1D",
-              borderRadius: 6,
-              cursor: "pointer",
-              textAlign: "left",
-              fontSize: 13,
-            }}
-          >
-            <div style={{ fontWeight: 600 }}>Delete entire deck — start over</div>
-            <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>
-              Removes ALL slides and the deck itself, leaving an empty deck. Photos
-              &amp; renders are kept. Use this to re-test from scratch.
-            </div>
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "9px 14px",
-              background: "transparent",
-              color: "#94A3B8",
-              border: "1px solid #334155",
-              borderRadius: 6,
-              cursor: "pointer",
-              textAlign: "center",
-              fontSize: 13,
-              marginTop: 4,
-            }}
-          >
-            Cancel
-          </button>
+        <h2 style={{ color: "#E2E8F0", fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Generate Deck</h2>
+
+        {/* ── STRUCTURE ── */}
+        <div style={sectionLabel}>1 · Slides</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+          {!hasSlides ? (
+            <button onClick={() => onGenerate("replace-all")} disabled={busy} style={cardBtn("#2D3F50", "#475569", "#E2E8F0")}>
+              <div style={{ fontWeight: 600 }}>{generating ? "Generating…" : "Generate default slides"}</div>
+              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>Builds the standard slide set for this project.</div>
+            </button>
+          ) : (
+            <>
+              <button onClick={() => onGenerate("keep-manual")} disabled={busy} style={cardBtn("#2D3F50", "#475569", "#E2E8F0")}>
+                <div style={{ fontWeight: 600 }}>Keep manual, regenerate auto</div>
+                <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>Preserves your slides and adds any missing defaults.</div>
+              </button>
+              <button onClick={() => onGenerate("replace-all")} disabled={busy} style={cardBtn("#3A1F1F", "#7F1D1D", "#FECACA")}>
+                <div style={{ fontWeight: 600 }}>Replace everything</div>
+                <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>Deletes all slides and re-seeds. User edits are lost.</div>
+              </button>
+              <button onClick={onDeleteAll} disabled={busy} style={cardBtn("#3A1F1F", "#7F1D1D", "#FECACA")}>
+                <div style={{ fontWeight: 600 }}>Delete entire deck — start over</div>
+                <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>Removes all slides + the deck. Photos &amp; renders kept.</div>
+              </button>
+            </>
+          )}
         </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#CBD5E1", marginBottom: 20, cursor: "pointer" }}>
+          <input type="checkbox" checked={alsoDraftCopy} onChange={(e) => setAlsoDraftCopy(e.target.checked)} style={{ accentColor: accent }} />
+          Also draft slide copy with AI after generating
+        </label>
+
+        {/* ── AI FILL ── */}
+        <div style={sectionLabel}>2 · Fill with AI</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={onComposeCopy} disabled={busy} style={cardBtn("#2D3F50", "#475569", "#E2E8F0")}>
+            <div style={{ fontWeight: 600 }}>{composeBusy ? "Drafting copy…" : "Draft slide copy"}</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>Writes headlines, scope, objective zones from the project. Fast.</div>
+          </button>
+          {composeMsg && <span style={{ fontSize: 11, color: composeMsg.toLowerCase().includes("error") ? "#FCA5A5" : "#86EFAC" }}>{composeMsg}</span>}
+          <button onClick={onGenerateIllustrations} disabled={busy} style={cardBtn("#2D3F50", "#475569", "#E2E8F0")}>
+            <div style={{ fontWeight: 600 }}>{illustrateBusy ? "Generating illustrations…" : "Generate illustrations"}</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>Draws the Objective hub + zones and Blueprint icons. Slower (~30–60s).</div>
+          </button>
+          {illustrateMsg && <span style={{ fontSize: 11, color: illustrateMsg.toLowerCase().includes("error") ? "#FCA5A5" : "#86EFAC" }}>{illustrateMsg}</span>}
+        </div>
+
+        <button
+          onClick={onClose}
+          disabled={busy}
+          style={{ marginTop: 20, padding: "9px 14px", background: "transparent", color: "#94A3B8", border: "1px solid #334155", borderRadius: 6, cursor: busy ? "not-allowed" : "pointer", textAlign: "center", fontSize: 13, width: "100%" }}
+        >
+          Close
+        </button>
       </div>
     </div>
   );
@@ -514,19 +505,24 @@ export function DeckEditorClient({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Generate Default Deck state ───────────────────────────────────────────
+  // ── Generate Deck state ───────────────────────────────────────────────────
   const [generating, setGenerating] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
+  // AI Fill (unified Generate Deck modal)
+  const [alsoDraftCopy, setAlsoDraftCopy] = useState(false);
+  const [composeBusy, setComposeBusy] = useState(false);
+  const [composeMsg, setComposeMsg] = useState<string | null>(null);
+  const [illustrateBusy, setIllustrateBusy] = useState(false);
+  const [illustrateMsg, setIllustrateMsg] = useState<string | null>(null);
 
   const runGeneration = useCallback(
     async (mode: "keep-manual" | "replace-all") => {
-      setConfirmOpen(false);
       setGenerating(true);
       setGenerateStatus(null);
       const result = await generateDefaultDeckAction(projectId, mode);
-      setGenerating(false);
       if (result.error) {
+        setGenerating(false);
         setGenerateStatus(`Error: ${result.error}`);
         setTimeout(() => setGenerateStatus(null), 5000);
         return;
@@ -534,22 +530,66 @@ export function DeckEditorClient({
       const sorted = result.slides.sort((a, b) => a.order - b.order);
       setSlides(sorted);
       if (sorted[0]) setActiveSlideId(sorted[0].id);
-      setGenerateStatus(
-        slides.length === 0 ? "Default deck generated" : "Default deck regenerated"
-      );
+      // Optionally chain the AI copy draft, then reload to show it.
+      if (alsoDraftCopy) {
+        setGenerateStatus("Drafting copy with AI…");
+        await composeDeckCopyAction(projectId);
+        window.location.reload();
+        return;
+      }
+      setGenerating(false);
+      setConfirmOpen(false);
+      setGenerateStatus(slides.length === 0 ? "Default deck generated" : "Default deck regenerated");
       setTimeout(() => setGenerateStatus(null), 3000);
     },
-    [projectId, slides.length]
+    [projectId, slides.length, alsoDraftCopy]
   );
 
-  const handleGenerateClick = useCallback(() => {
-    // Empty deck: silent generate. Any slides at all: ask.
-    if (slides.length === 0) {
-      void runGeneration("replace-all");
-      return;
+  // Save current editor state first (so user edits persist), run the AI action,
+  // then reload so the freshly-written content shows.
+  const runComposeCopy = useCallback(async () => {
+    setComposeBusy(true);
+    setComposeMsg(null);
+    try {
+      await saveDeckSlidesAction(projectId, slides);
+      const res = await composeDeckCopyAction(projectId);
+      if ("error" in res) {
+        setComposeMsg(`Error: ${res.error}`);
+        setComposeBusy(false);
+        return;
+      }
+      setComposeMsg(`Drafted ${res.updated} slide${res.updated === 1 ? "" : "s"} — reloading…`);
+      setTimeout(() => window.location.reload(), 700);
+    } catch {
+      setComposeMsg("Error: draft failed");
+      setComposeBusy(false);
     }
+  }, [projectId, slides]);
+
+  const runGenerateIllustrations = useCallback(async () => {
+    setIllustrateBusy(true);
+    setIllustrateMsg(null);
+    try {
+      await saveDeckSlidesAction(projectId, slides);
+      const res = await generateDeckVisualsAction(projectId);
+      if ("error" in res) {
+        setIllustrateMsg(`Error: ${res.error}`);
+        setIllustrateBusy(false);
+        return;
+      }
+      setIllustrateMsg(`${res.illustrations} illustration${res.illustrations === 1 ? "" : "s"}, ${res.icons} icon${res.icons === 1 ? "" : "s"} — reloading…`);
+      setTimeout(() => window.location.reload(), 1000);
+    } catch {
+      setIllustrateMsg("Error: generation failed");
+      setIllustrateBusy(false);
+    }
+  }, [projectId, slides]);
+
+  const handleGenerateClick = useCallback(() => {
+    setComposeMsg(null);
+    setIllustrateMsg(null);
     setConfirmOpen(true);
-  }, [slides.length, runGeneration]);
+  }, []);
 
   const runDeleteDeck = useCallback(async () => {
     setConfirmOpen(false);
@@ -1315,11 +1355,21 @@ export function DeckEditorClient({
       )}
 
       {confirmOpen && (
-        <ConfirmRegenerateModal
+        <GenerateDeckModal
           onClose={() => setConfirmOpen(false)}
-          onKeepManual={() => void runGeneration("keep-manual")}
-          onReplaceAll={() => void runGeneration("replace-all")}
+          hasSlides={slides.length > 0}
+          generating={generating}
+          alsoDraftCopy={alsoDraftCopy}
+          setAlsoDraftCopy={setAlsoDraftCopy}
+          onGenerate={(mode) => void runGeneration(mode)}
           onDeleteAll={() => void runDeleteDeck()}
+          composeBusy={composeBusy}
+          composeMsg={composeMsg}
+          onComposeCopy={() => void runComposeCopy()}
+          illustrateBusy={illustrateBusy}
+          illustrateMsg={illustrateMsg}
+          onGenerateIllustrations={() => void runGenerateIllustrations()}
+          accent={branding.accentColor}
         />
       )}
     </div>

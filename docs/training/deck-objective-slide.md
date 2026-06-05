@@ -19,15 +19,20 @@ the home) — each zone a piece of the project with its own illustration.
 The fastest path to a strong, project-specific Objective. It's **two steps** on
 purpose: fast text first, then the slower pictures.
 
-**In the app — Build Presentation tab:**
+**In the app — Deck tab → "Generate Deck"** (opens a modal with an **AI Fill**
+section):
 
-1. **"Draft slide copy with AI"** — quickly writes a creative headline, a one-
-   to two-sentence mission statement, and **3–5 zones** (the AI chooses how many
-   fit the project), each with a title and a one-line body — all pulled from
-   *that project's* actual scope.
+1. **"Draft slide copy"** — quickly writes a creative headline, a one- to
+   two-sentence mission statement, and **3–5 zones** (the AI chooses how many fit
+   the project), each with a title and a one-line body — all pulled from *that
+   project's* actual scope.
 2. **"Generate illustrations"** — draws the **custom line-art illustration** for
    the hub (the home) and each zone (e.g. a screened porch, a garage among the
    site's trees). This is the slower, image-generation step.
+
+> **Tip:** On a brand-new deck, the modal can also build the slide structure
+> first — and there's a checkbox to *draft copy automatically right after
+> generating*.
 
 > **Heads-up:** "Generate illustrations" takes ~30–60s and can be re-run safely
 > (it only fills in what's missing). Until you run it, each zone shows a simple
@@ -127,8 +132,8 @@ Arrows, accent rules, and zone titles use your brand orange in both.
 
 ## 8. Quick-start checklist
 
-1. **Build Presentation → "Draft slide copy with AI."**
-2. **Build Presentation → "Generate illustrations."**
+1. **Deck → "Generate Deck" → "Draft slide copy."**
+2. **Deck → "Generate Deck" → "Generate illustrations."**
 3. **Deck → Objective slide.** Confirm **Layout = Hub & Spoke**.
 4. Tidy the **Headline**, **Objective opener**, and **Zones** (titles, bodies,
    add/remove).
