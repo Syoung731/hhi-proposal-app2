@@ -6,8 +6,10 @@ import type {
   ObjectiveContent,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { ScopeIcon } from "./shared/ScopeIcons";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SECTION_LABEL_SIZE, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
+import { useDeckTheme } from "@/app/lib/deck/theme-context";
 
 interface Props {
   slide: ProposalSlide;
@@ -406,6 +408,7 @@ function DarkStatementLayout({ slide, branding, hasAiBackground }: Props) {
 // ─── 3. Pillar Layout (new Phase 8A structured objective) ─────────────────────
 
 function PillarLayout({ slide, branding, hasAiBackground }: Props) {
+  const theme = useDeckTheme();
   const content = (slide.content ?? {}) as ObjectiveContent;
   const accent = content.accentColor ?? branding.accentColor;
   const hasBg = !!slide.backgroundId || !!hasAiBackground;
@@ -419,20 +422,20 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   // app/admin/projects/[id]/deck/page.tsx.
   const bullets = (content.bullets ?? []).filter(Boolean).slice(0, 6);
 
-  const headlineColor = content.headlineColor ?? branding.textColor;
+  const headlineColor = content.headlineColor ?? theme.color.ink;
   const headlineShadow = makeOutlineShadow(content.headlineOutline);
 
   // Objective opener typography
-  const objectiveFont = content.objectiveFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
-  const objectiveColor = content.objectiveColor ?? content.statementColor ?? "#1A2332";
+  const objectiveFont = content.objectiveFont ?? content.headlineFont ?? theme.fonts.headline;
+  const objectiveColor = content.objectiveColor ?? content.statementColor ?? theme.color.ink;
   const objectiveEm = (content.objectiveSize ?? 1.0) * 1.1;
 
   // Pillar title + body typography
-  const pillarTitleFont = content.pillarTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
-  const pillarTitleColor = content.pillarTitleColor ?? content.headlineColor ?? branding.textColor;
+  const pillarTitleFont = content.pillarTitleFont ?? content.headlineFont ?? theme.fonts.headline;
+  const pillarTitleColor = content.pillarTitleColor ?? content.headlineColor ?? theme.color.ink;
   const pillarTitleEm = (content.pillarTitleSize ?? 1.0) * 1.15;
   const pillarBodyFont = content.pillarBodyFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
-  const pillarBodyColor = content.pillarBodyColor ?? content.supportingColor ?? "#374151";
+  const pillarBodyColor = content.pillarBodyColor ?? content.supportingColor ?? theme.color.muted;
   const pillarBodyEm = (content.pillarBodySize ?? 1.0) * 0.78;
 
   // Bullets typography (already wired in earlier task)
@@ -454,7 +457,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
     <div
       className="relative w-full h-full overflow-hidden"
       style={{
-        background: hasBg ? "transparent" : "#FAFAF8",
+        background: hasBg ? "transparent" : theme.color.surface,
       }}
     >
       <div
@@ -479,11 +482,10 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
       >
         {/* Headline */}
         <h1
-          className="font-serif"
           style={{
             fontSize: "2.4em",
             fontWeight: (content.headlineBold ?? true) ? 700 : 400,
-            fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+            fontFamily: content.headlineFont ?? theme.fonts.headline,
             color: headlineColor,
             lineHeight: 1.1,
             marginBottom: "1.8%",
@@ -569,6 +571,9 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
         >
           {pillars.map((pillar, i) => (
             <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+              {pillar.icon && (
+                <ScopeIcon name={pillar.icon} size={30} color={accent} strokeWidth={1.6} style={{ marginBottom: "0.5em" }} />
+              )}
               <div
                 style={{
                   borderTop: `3px solid ${accent}`,

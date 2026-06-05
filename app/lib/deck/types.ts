@@ -287,6 +287,8 @@ export interface CoverContent extends SharedSlideFields {
 export interface ObjectivePillar {
   title: string;
   body: string;
+  /** Optional icon key (ScopeIcons set) rendered above the pillar title. */
+  icon?: string | null;
 }
 
 export interface ObjectiveContent extends SharedSlideFields {

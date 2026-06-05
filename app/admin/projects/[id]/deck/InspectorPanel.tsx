@@ -1572,13 +1572,13 @@ function ObjectiveInspector({
     }
   }
 
-  const pillarSlots: { title: string; body: string }[] = (() => {
+  const pillarSlots: { title: string; body: string; icon?: string | null }[] = (() => {
     const seed = (content.pillars ?? []).slice(0, 3);
     while (seed.length < 3) seed.push({ title: "", body: "" });
     return seed;
   })();
 
-  function updatePillar(index: 0 | 1 | 2, patch: Partial<{ title: string; body: string }>) {
+  function updatePillar(index: 0 | 1 | 2, patch: Partial<{ title: string; body: string; icon: string | null }>) {
     const next = pillarSlots.map((p, i) => (i === index ? { ...p, ...patch } : p));
     // Only persist a defined pillars array when the user has entered content.
     const hasAny = next.some((p) => p.title.trim() || p.body.trim());
@@ -1800,6 +1800,18 @@ function ObjectiveInspector({
                   rows={2}
                 />
               </FieldGroup>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 10, color: "#6B7280", flex: "0 0 auto" }}>Icon</span>
+                <select
+                  value={pillarSlots[i].icon ?? "feature"}
+                  onChange={(e) => updatePillar(i, { icon: e.target.value })}
+                  style={{ flex: 1, fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#FFFFFF", color: "#374151" }}
+                >
+                  {SCOPE_ICON_OPTIONS.map((opt) => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           ))}
 

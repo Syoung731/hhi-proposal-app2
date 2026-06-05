@@ -9,6 +9,7 @@ Each module is self-contained; build the full training program by combining them
 | Module | Covers | Status |
 |--------|--------|--------|
 | [Deck — Scope Slide](./deck-scope-slide.md) | The Project Scope slide: layouts, content toggle, scope items, icons, AI Edit, sizing | ✅ Ready |
+| [Deck — Objective Slide](./deck-objective-slide.md) | The Project Objective slide: opener + 3 pillars with icons, theme | ✅ Ready |
 
 > More modules (Cover, Investment, Before/After, Build Presentation wizard, etc.)
 > will be added here as those areas are finished.
