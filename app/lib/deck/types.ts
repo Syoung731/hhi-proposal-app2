@@ -300,10 +300,13 @@ export interface ObjectiveContent extends SharedSlideFields {
 
   /** Short opener (≤50 words, 2-3 sentences). Used by PillarLayout. */
   objective?: string | null;
-  /** Exactly 3 pillars for the 3-column pillars layout. */
+  /** Exactly 3 pillars for the pillars / hub-spoke layouts. */
   pillars?: ObjectivePillar[];
-  // LEGACY: layout mode toggle. Once statement layouts are removed, this field collapses to always-pillars.
-  layout?: "pillars" | "statement" | null;
+  // LEGACY: "statement" is the pre-pillar prose mode. "pillars" = 3-column grid,
+  // "hub-spoke" = radial hub + 3 zones (94 Coggins style).
+  layout?: "pillars" | "statement" | "hub-spoke" | null;
+  /** Icon key for the central hub on the hub-spoke layout. Default "house". */
+  hubIcon?: string | null;
 
   // ── Per-field text styling ────────────────────────────────────────────────
   // Headline

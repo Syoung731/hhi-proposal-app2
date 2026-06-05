@@ -13,38 +13,50 @@ slide 2) → edit it in the right-hand **Inspector**.
 
 ---
 
-## 2. The standard shape
+## 2. Let the AI build it (recommended)
 
-The Objective renders as:
+The fastest way to a great Objective is to let the AI draft it for the specific
+project.
 
-- A **headline** ("Project Objective" or your own).
-- A short **opener** — 2–3 sentences framing the project.
-- Three **pillars**, each with an **icon**, a short **title** (2–4 words), and a
-  one-line **body**.
+**In the app:** **Build Presentation** tab → **"Draft slide copy with AI."**
 
-This matches the reference decks (e.g. *The Space / The Flow / The Craft*).
+It writes a creative headline, a one- or two-sentence mission statement, and
+**three zones** (each with a title, a one-line body, and a matching icon) pulled
+from *that project's* actual scope — so every job gets its own Objective. It
+defaults to the **Hub & Spoke** look (below).
 
-> **Heads-up:** The pillar layout shows once all **three** pillars have a title
-> and body. If pillars are empty, the slide falls back to a simpler text layout —
-> fill in the three pillars to get the designed version.
+## 3. The two layouts
+
+**In the app:** Inspector → **Objective Layout**.
+
+- **Hub & Spoke** (default) — a central icon with arrows radiating to the three
+  zones (the 94 Coggins style). Distinctive and project-specific.
+- **Pillars** — the three zones as a clean 3-column grid.
+
+Both use the same three items, so you can switch between them freely.
+
+> **Heads-up:** Both layouts need all **three** zones/pillars filled (title +
+> body). If they're empty, the slide falls back to a simpler text layout — run
+> "Draft slide copy with AI" or fill the three in the inspector.
 
 ---
 
-## 3. Editing it
+## 4. Editing it
 
 **In the app (Inspector):**
 
 - **Headline** — the slide title.
-- **Objective opener** — the framing sentences.
-- **Pillars 1–3** — for each: a **Title**, a **Body** line, and an **Icon**
+- **Objective opener** — the framing sentences (wrap key phrases in
+  `**double asterisks**` to bold them).
+- **Zones 1–3** — for each: a **Title**, a **Body** line, and an **Icon**
   (dropdown of the built-in icon set).
 
-> **Tip:** Keep pillar titles to 2–4 words and bodies to one line — the three
-> columns read best when they're balanced and short.
+> **Tip:** Keep zone titles to 2–4 words and bodies to one line — they read best
+> balanced and short.
 
 ---
 
-## 4. Theme
+## 5. Theme
 
 Like the rest of the deck, the Objective follows the **deck theme** (Blueprint
 vs Editorial — set in the Deck toolbar): serif headline + linen on Editorial,

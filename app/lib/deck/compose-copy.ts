@@ -112,6 +112,87 @@ async function draftScopeItems(
   }
 }
 
+type DraftObjective = {
+  headline: string | null;
+  objective: string | null;
+  hubIcon: string;
+  pillars: { title: string; body: string; icon: string }[];
+};
+
+/**
+ * Drafts a per-project Objective for the hub-and-spoke layout: a creative
+ * headline, a short mission opener (with **bold** key phrases), a central hub
+ * icon, and EXACTLY 3 "zone" pillars (title + one-line body + icon) derived
+ * from the project's actual scope. Returns null on failure / <3 pillars so the
+ * caller can leave the slide untouched.
+ */
+async function draftObjective(params: {
+  rooms: { name: string; scopeNarrative: string; bucket: string }[];
+  projectTitle: string;
+  projectAddress: string;
+}): Promise<DraftObjective | null> {
+  const scoped = params.rooms.filter((r) => (r.scopeNarrative ?? "").trim().length >= 12);
+  const source = (scoped.length > 0 ? scoped : params.rooms)
+    .map((r) => `${r.name}: ${r.scopeNarrative || "(remodel)"}`)
+    .join("\n")
+    .slice(0, 3500);
+  if (!source.trim()) return null;
+
+  const response = await callClaude({
+    max_tokens: 800,
+    temperature: 0.5,
+    system:
+      "You write the Objective slide for a luxury design-build remodeling proposal. " +
+      "It frames WHY the project matters before the deck covers what. " +
+      "Return ONLY minified JSON of the shape " +
+      '{"headline":"<creative objective title, =6 words, e.g. The \'Living Outward\' Objective>","objective":"<1-2 sentence mission, =28 words, wrap 2-3 key phrases in **double asterisks** for emphasis>","hubIcon":"<one icon key for the home/project>","pillars":[{"title":"<2-4 word zone name, e.g. The Space / Zone 1 (Leisure)>","detail-as-body":"<one benefit line, =16 words, no trailing period>","icon":"<one icon key>"}]}. ' +
+      'Use the key "body" (not "detail-as-body") for the pillar body. ' +
+      "Produce EXACTLY 3 pillars that capture the project's main dimensions (group rooms/work meaningfully). " +
+      `All icon values (hubIcon + each pillar.icon) MUST be exactly one key from this list: ${SCOPE_ICON_KEY_LIST}. Use "house" for hubIcon and "feature" for a pillar when unsure. ` +
+      "No markdown fences, no commentary — JSON only.",
+    messages: [
+      {
+        role: "user",
+        content: `Project: ${params.projectTitle}\nAddress: ${params.projectAddress}\nRooms & scope:\n${source}\n\nReturn the JSON now.`,
+      },
+    ],
+  });
+
+  const raw = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim()
+    .replace(/^```(?:json)?\s*|\s*```$/g, "");
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      headline?: string;
+      objective?: string;
+      hubIcon?: string;
+      pillars?: { title?: string; body?: string; icon?: string }[];
+    };
+    const pillars = (parsed.pillars ?? [])
+      .filter((p) => p && typeof p.title === "string" && typeof p.body === "string")
+      .map((p) => ({
+        title: (p.title ?? "").trim(),
+        body: (p.body ?? "").trim(),
+        icon: isScopeIconKey(p.icon) ? p.icon : "feature",
+      }))
+      .filter((p) => p.title && p.body)
+      .slice(0, 3);
+    if (pillars.length !== 3) return null;
+    return {
+      headline: (parsed.headline ?? "").trim() || null,
+      objective: (parsed.objective ?? "").trim() || null,
+      hubIcon: isScopeIconKey(parsed.hubIcon) ? parsed.hubIcon : "house",
+      pillars,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Finds one good hero photo for the scope slide so the photo-bearing layouts
  * render complete. Prefers AFTER renders, then COVER, then BEFORE. Returns null
@@ -316,6 +397,31 @@ export async function composeDeckCopy(
           },
         });
         updated += 1;
+      } else if (slide.type === "objective") {
+        const obj = await draftObjective({
+          rooms,
+          projectTitle: project.title,
+          projectAddress,
+        });
+        if (obj) {
+          await prisma.deckSlide.update({
+            where: { id: slide.id },
+            data: {
+              ...(obj.headline ? { headline: obj.headline } : {}),
+              content: {
+                ...asObject(slide.content),
+                ...(obj.objective ? { objective: obj.objective } : {}),
+                pillars: obj.pillars,
+                hubIcon: obj.hubIcon,
+                layout: "hub-spoke",
+              } as unknown as Prisma.InputJsonObject,
+              source: "auto",
+            },
+          });
+          updated += 1;
+        } else {
+          skipped += 1;
+        }
       } else if (slide.type === "cover") {
         const scopeBlurb = rooms
           .map((r) => r.name)

@@ -1781,8 +1781,33 @@ function ObjectiveInspector({
 
           {PF_GROUP_DIVIDER}
 
+          {/* ── OBJECTIVE LAYOUT ───────────────────────────────────────────── */}
+          <SectionLabel>Objective Layout</SectionLabel>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"]] as const).map(([val, label]) => {
+              const active = (content.layout ?? "hub-spoke") === val;
+              return (
+                <button
+                  key={val}
+                  onClick={() => updateContent({ layout: val })}
+                  style={{
+                    flex: 1, padding: "6px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 4,
+                    border: `1px solid ${active ? branding.accentColor : "#D1D5DB"}`,
+                    background: active ? branding.accentColor + "1A" : "#FFFFFF",
+                    color: active ? branding.textColor : "#6B7280",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* ── PILLARS (3-column footer band) ─────────────────────────────── */}
           <SectionLabel>Pillars</SectionLabel>
+          <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
+            Hub &amp; Spoke shows these as 3 zones around a central icon; Pillars shows a 3-column grid. Fill all 3.
+          </p>
           {([0, 1, 2] as const).map((i) => (
             <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
               <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>

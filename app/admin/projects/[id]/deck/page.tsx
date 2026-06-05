@@ -380,15 +380,23 @@ export default async function DeckEditorPage({ params }: PageProps) {
         if (!p || typeof p !== "object") return null;
         const title = String((p as { title?: unknown }).title ?? "").trim();
         const body = String((p as { body?: unknown }).body ?? "").trim();
+        const icon = String((p as { icon?: unknown }).icon ?? "").trim();
         if (!title || !body) return null;
-        return { title, body };
+        return { title, body, ...(icon ? { icon } : {}) };
       })
-      .filter((p): p is { title: string; body: string } => p !== null);
+      .filter((p): p is { title: string; body: string; icon?: string } => p !== null);
     return pillars.length === 3 ? pillars : null;
   })();
 
   for (const slide of slides) {
     if (slide.type !== "objective" || slide.isUserModified) continue;
+
+    // Respect already-structured objective content (AI-composed or previously
+    // hydrated pillars) — don't clobber it on reload.
+    const existingObjective = (slide.content ?? {}) as ObjectiveContent;
+    if (Array.isArray(existingObjective.pillars) && existingObjective.pillars.length > 0) {
+      continue;
+    }
 
     const statementText =
       objectiveConfig?.objectiveText?.trim() ||
@@ -410,10 +418,9 @@ export default async function DeckEditorPage({ params }: PageProps) {
       continue;
     }
 
-    const existingContent = (slide.content ?? {}) as ObjectiveContent;
     slide.headline = title ?? slide.headline ?? "Project Objective";
     slide.content = {
-      ...existingContent,
+      ...existingObjective,
       statementText,
       supportingText,
       bullets,

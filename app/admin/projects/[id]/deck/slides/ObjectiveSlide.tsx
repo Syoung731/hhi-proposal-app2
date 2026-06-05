@@ -4,6 +4,7 @@ import type {
   ProposalSlide,
   DeckBranding,
   ObjectiveContent,
+  ObjectivePillar,
 } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { ScopeIcon } from "./shared/ScopeIcons";
@@ -626,25 +627,170 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   );
 }
 
+// ─── Hub-and-Spoke layout (94 Coggins style) ──────────────────────────────────
+// Center subject icon with accent arrows radiating to three "zone" clusters
+// (left, right, bottom). Reuses the 3 pillars as the zones.
+
+/** Render text with **bold** spans (lightweight inline emphasis). */
+function renderEmphasis(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    p.startsWith("**") && p.endsWith("**") ? (
+      <strong key={i} style={{ fontWeight: 700 }}>{p.slice(2, -2)}</strong>
+    ) : (
+      <span key={i}>{p}</span>
+    ),
+  );
+}
+
+function HubZone({
+  pillar,
+  accent,
+  ink,
+  muted,
+  bodyFont,
+  align,
+}: {
+  pillar: ObjectivePillar;
+  accent: string;
+  ink: string;
+  muted: string;
+  bodyFont: string;
+  align: "left" | "right" | "center";
+}) {
+  return (
+    <div style={{ textAlign: align, display: "flex", flexDirection: "column", alignItems: align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start" }}>
+      {pillar.icon && <ScopeIcon name={pillar.icon} size={30} color={ink} strokeWidth={1.5} style={{ marginBottom: "0.4em" }} />}
+      <p style={{ fontSize: "0.82em", fontFamily: bodyFont, fontWeight: 700, color: accent, margin: 0, lineHeight: 1.2 }}>
+        {pillar.title}
+      </p>
+      <p style={{ fontSize: "0.72em", fontFamily: bodyFont, color: muted, margin: "0.25em 0 0", lineHeight: 1.4, maxWidth: "16em" }}>
+        {pillar.body}
+      </p>
+    </div>
+  );
+}
+
+function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
+  const theme = useDeckTheme();
+  const content = (slide.content ?? {}) as ObjectiveContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  const ink = content.headlineColor ?? theme.color.ink;
+  const muted = theme.color.muted;
+  const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const headlineFont = content.headlineFont ?? theme.fonts.headline;
+  const objective = (content.objective ?? content.statementText ?? "").trim();
+  const pillars = (content.pillars ?? []).slice(0, 3);
+  const [z1, z2, z3] = pillars;
+  const gridLine = "rgba(26,35,50,0.06)";
+
+  return (
+    <div className="relative w-full h-full overflow-hidden" style={{ background: hasBg ? "transparent" : theme.color.surface }}>
+      {/* graph-paper grid (blueprint theme) */}
+      {theme.surface.grid && !hasBg && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `linear-gradient(${gridLine} 1px, transparent 1px), linear-gradient(90deg, ${gridLine} 1px, transparent 1px)`,
+            backgroundSize: "26px 26px",
+          }}
+        />
+      )}
+
+      {/* Header */}
+      <div style={{ position: "absolute", left: "6%", right: "6%", top: "6%", zIndex: 2 }}>
+        <h1 style={{ fontSize: "2.0em", fontWeight: (content.headlineBold ?? true) ? 700 : 400, fontFamily: headlineFont, color: ink, lineHeight: 1.1, margin: 0 }}>
+          {slide.headline || "Project Objective"}
+        </h1>
+        {objective && (
+          <p style={{ fontSize: "0.92em", fontFamily: bodyFont, color: muted, lineHeight: 1.5, margin: "0.6em 0 0", maxWidth: "78%" }}>
+            {renderEmphasis(objective)}
+          </p>
+        )}
+      </div>
+
+      {/* Arrows (16:9 viewBox, uniform scale) */}
+      <svg className="absolute inset-0 pointer-events-none" viewBox="0 0 160 90" preserveAspectRatio="none" style={{ zIndex: 1 }} aria-hidden>
+        <defs>
+          <marker id="hubArrow" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto">
+            <path d="M0 0 L5 2.5 L0 5 z" fill={accent} />
+          </marker>
+        </defs>
+        <line x1="72" y1="50" x2="48" y2="50" stroke={accent} strokeWidth="1" markerEnd="url(#hubArrow)" />
+        <line x1="88" y1="50" x2="112" y2="50" stroke={accent} strokeWidth="1" markerEnd="url(#hubArrow)" />
+        <line x1="80" y1="58" x2="80" y2="72" stroke={accent} strokeWidth="1" markerEnd="url(#hubArrow)" />
+      </svg>
+
+      {/* Central hub */}
+      <div
+        style={{
+          position: "absolute", left: "50%", top: "55%", transform: "translate(-50%, -50%)",
+          width: "5.5em", height: "5.5em", borderRadius: "50%",
+          background: theme.color.panel, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
+        }}
+      >
+        <ScopeIcon name={content.hubIcon ?? "house"} size={44} color={theme.color.panelInk} strokeWidth={1.4} />
+      </div>
+
+      {/* Zone 1 — left */}
+      {z1 && (
+        <div style={{ position: "absolute", left: "5%", top: "55%", transform: "translateY(-50%)", width: "26%", zIndex: 2 }}>
+          <HubZone pillar={z1} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="right" />
+        </div>
+      )}
+      {/* Zone 2 — right */}
+      {z2 && (
+        <div style={{ position: "absolute", right: "5%", top: "55%", transform: "translateY(-50%)", width: "26%", zIndex: 2 }}>
+          <HubZone pillar={z2} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="left" />
+        </div>
+      )}
+      {/* Zone 3 — bottom */}
+      {z3 && (
+        <div style={{ position: "absolute", left: "50%", bottom: "5%", transform: "translateX(-50%)", width: "34%", zIndex: 2 }}>
+          <HubZone pillar={z3} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="center" />
+        </div>
+      )}
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export function resolveObjectiveLayoutMode(
   content: ObjectiveContent,
-): "pillars" | "statement" {
-  if (content.layout === "pillars" || content.layout === "statement") {
+): "pillars" | "statement" | "hub-spoke" {
+  if (
+    content.layout === "pillars" ||
+    content.layout === "statement" ||
+    content.layout === "hub-spoke"
+  ) {
     return content.layout;
   }
   const pillars = content.pillars ?? [];
   const pillarsValid =
     pillars.length === 3 &&
     pillars.every((p) => p?.title?.trim() && p?.body?.trim());
-  return pillarsValid ? "pillars" : "statement";
+  // Default to the hub-spoke "standard" when we have valid pillars.
+  return pillarsValid ? "hub-spoke" : "statement";
 }
 
 export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {
   const content = (slide.content ?? {}) as ObjectiveContent;
   const mode = resolveObjectiveLayoutMode(content);
 
+  if (mode === "hub-spoke") {
+    return <HubSpokeLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+  }
   if (mode === "pillars") {
     return <PillarLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
