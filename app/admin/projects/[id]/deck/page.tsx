@@ -374,7 +374,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
   // and this injection is skipped — their deck-specific copy is preserved.
   const objectivePillars = (() => {
     const raw = project.objectivePillars as unknown;
-    if (!Array.isArray(raw) || raw.length !== 3) return null;
+    if (!Array.isArray(raw) || raw.length < 2 || raw.length > 6) return null;
     const pillars = raw
       .map((p) => {
         if (!p || typeof p !== "object") return null;
@@ -385,7 +385,7 @@ export default async function DeckEditorPage({ params }: PageProps) {
         return { title, body, ...(icon ? { icon } : {}) };
       })
       .filter((p): p is { title: string; body: string; icon?: string } => p !== null);
-    return pillars.length === 3 ? pillars : null;
+    return pillars.length >= 2 ? pillars : null;
   })();
 
   for (const slide of slides) {

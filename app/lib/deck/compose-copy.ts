@@ -171,7 +171,7 @@ async function draftObjective(params: {
       "avoid generic, formulaic phrasing. " +
       "Return ONLY minified JSON of the shape " +
       '{"headline":"<an evocative, distinctive objective name, =6 words, in the spirit of \'The Living Outward Objective\' or \'The Coastal Sanctuary Mandate\' — make it memorable and specific, NOT \'The X Objective\' boilerplate>","objective":"<1-2 sentence mission, =28 words, wrap 2-3 key phrases in **double asterisks** for emphasis>","hubIcon":"<one icon key for the home>","hubScene":"<short visual description of the existing home to illustrate, e.g. two-gable coastal home with covered porch>","pillars":[{"title":"<2-4 word zone name, evocative, e.g. The Poolside Retreat / Zone 1 (Leisure)>","body":"<one benefit line, =16 words, no trailing period>","icon":"<one icon key>","scene":"<concrete visual to illustrate this zone as a small line-art scene, e.g. screened porch with seating and ceiling fan / garage bay with car among mature trees / storage room with shelving and equipment>"}]}. ' +
-      "Produce EXACTLY 3 pillars capturing the project's main dimensions (group rooms/work meaningfully). " +
+      "Produce 3 to 5 pillars (zones) — choose the count that best fits the project's scope (a simple project = 3; a larger one = 4-5), grouping rooms/work meaningfully. " +
       `All icon values (hubIcon + each pillar.icon) MUST be exactly one key from this list: ${SCOPE_ICON_KEY_LIST}. Use "house" for hubIcon and "feature" for a pillar when unsure. ` +
       "The scene/hubScene fields describe a drawing to generate — be concrete and project-specific. " +
       "No markdown fences, no commentary — JSON only.",
@@ -207,8 +207,8 @@ async function draftObjective(params: {
         scene: (p.scene ?? "").trim(),
       }))
       .filter((p) => p.title && p.body)
-      .slice(0, 3);
-    if (pillars.length !== 3) return null;
+      .slice(0, 5);
+    if (pillars.length < 2) return null;
     return {
       headline: (parsed.headline ?? "").trim() || null,
       objective: (parsed.objective ?? "").trim() || null,

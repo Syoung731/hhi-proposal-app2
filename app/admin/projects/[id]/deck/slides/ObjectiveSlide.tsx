@@ -417,7 +417,7 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   // Fall back to statementText when `objective` is absent (lets legacy data
   // benefit from the pillar layout once pillars are set).
   const objective = (content.objective ?? content.statementText ?? "").trim();
-  const pillars = (content.pillars ?? []).slice(0, 3);
+  const pillars = (content.pillars ?? []).slice(0, 5);
   // Highlight bullets fill the middle of the slide between the opener and
   // the 3 pillars. Sourced from Project.bullets via the deck hydration in
   // app/admin/projects/[id]/deck/page.tsx.
@@ -565,16 +565,19 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: `repeat(${Math.min(Math.max(pillars.length, 1), 4)}, 1fr)`,
             gap: "4%",
             marginTop: "auto",
           }}
         >
           {pillars.map((pillar, i) => (
             <div key={i} style={{ display: "flex", flexDirection: "column" }}>
-              {pillar.icon && (
+              {pillar.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: "9em", height: "5em", objectFit: "contain", objectPosition: "left", marginBottom: "0.5em" }} />
+              ) : pillar.icon ? (
                 <ScopeIcon name={pillar.icon} size={30} color={accent} strokeWidth={1.6} style={{ marginBottom: "0.5em" }} />
-              )}
+              ) : null}
               <div
                 style={{
                   borderTop: `3px solid ${accent}`,
@@ -689,17 +692,33 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
   const bodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const headlineFont = content.headlineFont ?? theme.fonts.headline;
   const objective = (content.objective ?? content.statementText ?? "").trim();
-  const pillars = (content.pillars ?? []).slice(0, 3);
-  const [z1, z2, z3] = pillars;
+  const pillars = (content.pillars ?? []).slice(0, 6);
   const gridLine = "rgba(26,35,50,0.06)";
 
   // Tunable geometry (inspector sliders).
   const hubSizeM = content.hubSize ?? 1;
   const zoneScale = content.zoneTextSize ?? 1;
-  const hubYpct = content.hubY ?? 0.54;
+  const hubYpct = content.hubY ?? 0.52;
   const hubTop = `${hubYpct * 100}%`;
-  const arrowY = hubYpct * 90; // viewBox units (0–90)
   const hasHubImg = !!content.hubImageUrl;
+
+  // Dynamic radial placement: fan the N zones across the lower arc (left →
+  // bottom → right) so the layout scales from 2 to ~5 zones around the hub.
+  const N = pillars.length;
+  const CX = 50;
+  const CY = hubYpct * 100;
+  const RX = 34; // horizontal card-placement radius (%)
+  const RY = 27; // vertical card-placement radius (%)
+  function zoneGeom(i: number) {
+    const deg = N <= 1 ? 270 : 180 + (180 * i) / (N - 1);
+    const rad = (deg * Math.PI) / 180;
+    const dx = Math.cos(rad);
+    const dy = -Math.sin(rad); // screen y is down
+    const align: "left" | "right" | "center" =
+      dx < -0.25 ? "right" : dx > 0.25 ? "left" : "center";
+    return { dx, dy, align, x: CX + RX * dx, y: CY + RY * dy };
+  }
+  const hubVB = { x: 80, y: (CY / 100) * 90 };
 
   return (
     <div className="relative w-full h-full overflow-hidden" style={{ background: hasBg ? "transparent" : theme.color.surface }}>
@@ -733,9 +752,15 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
             <path d="M0 0 L4 2 L0 4 z" fill={accent} />
           </marker>
         </defs>
-        <line x1="70" y1={arrowY} x2="55" y2={arrowY} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />
-        <line x1="90" y1={arrowY} x2="105" y2={arrowY} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />
-        <line x1="80" y1={arrowY + 9} x2="80" y2={arrowY + 21} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />
+        {pillars.map((_, i) => {
+          const g = zoneGeom(i);
+          const cardVB = { x: ((CX + RX * g.dx) / 100) * 160, y: ((CY + RY * g.dy) / 100) * 90 };
+          const sx = hubVB.x + 0.2 * (cardVB.x - hubVB.x);
+          const sy = hubVB.y + 0.2 * (cardVB.y - hubVB.y);
+          const ex = hubVB.x + 0.6 * (cardVB.x - hubVB.x);
+          const ey = hubVB.y + 0.6 * (cardVB.y - hubVB.y);
+          return <line key={i} x1={sx} y1={sy} x2={ex} y2={ey} stroke={accent} strokeWidth="0.9" markerEnd="url(#hubArrow)" />;
+        })}
       </svg>
 
       {/* Central hub */}
@@ -756,24 +781,15 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
         </div>
       )}
 
-      {/* Zone 1 — left */}
-      {z1 && (
-        <div style={{ position: "absolute", left: "3.5%", top: hubTop, transform: "translateY(-50%)", width: "27%", zIndex: 2 }}>
-          <HubZone pillar={z1} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="right" scale={zoneScale} />
-        </div>
-      )}
-      {/* Zone 2 — right */}
-      {z2 && (
-        <div style={{ position: "absolute", right: "3.5%", top: hubTop, transform: "translateY(-50%)", width: "27%", zIndex: 2 }}>
-          <HubZone pillar={z2} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="left" scale={zoneScale} />
-        </div>
-      )}
-      {/* Zone 3 — bottom */}
-      {z3 && (
-        <div style={{ position: "absolute", left: "50%", bottom: "3%", transform: "translateX(-50%)", width: "32%", zIndex: 2 }}>
-          <HubZone pillar={z3} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align="center" scale={zoneScale} />
-        </div>
-      )}
+      {/* Zones — fanned around the hub */}
+      {pillars.map((p, i) => {
+        const g = zoneGeom(i);
+        return (
+          <div key={i} style={{ position: "absolute", left: `${g.x}%`, top: `${g.y}%`, transform: "translate(-50%, -50%)", width: "26%", zIndex: 2 }}>
+            <HubZone pillar={p} accent={accent} ink={ink} muted={muted} bodyFont={bodyFont} align={g.align} scale={zoneScale} />
+          </div>
+        );
+      })}
 
       <LogoOverlay
         show={content.showLogo ?? false}
@@ -801,7 +817,8 @@ export function resolveObjectiveLayoutMode(
   }
   const pillars = content.pillars ?? [];
   const pillarsValid =
-    pillars.length === 3 &&
+    pillars.length >= 2 &&
+    pillars.length <= 6 &&
     pillars.every((p) => p?.title?.trim() && p?.body?.trim());
   // Default to the hub-spoke "standard" when we have valid pillars.
   return pillarsValid ? "hub-spoke" : "statement";

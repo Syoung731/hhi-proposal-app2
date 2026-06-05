@@ -21,11 +21,12 @@ project.
 **In the app:** **Build Presentation** tab → **"Draft slide copy with AI."**
 
 It writes a creative headline, a one- or two-sentence mission statement, and
-**three zones** (each with a title, a one-line body, and a **custom line-art
-illustration drawn for that zone** — e.g. a screened porch, a garage with the
-site's trees) pulled from *that project's* actual scope. The hub becomes a
-drawing of the home. So every job gets its own bespoke Objective. It defaults to
-the **Hub & Spoke** look (below).
+**3–5 zones** (the AI picks how many fit the project), each with a title, a
+one-line body, and a **custom line-art illustration drawn for that zone** — e.g.
+a screened porch, a garage with the site's trees — pulled from *that project's*
+actual scope. The hub becomes a drawing of the home. So every job gets its own
+bespoke Objective. It defaults to the **Hub & Spoke** look (below), where the
+zones **fan around the central hub**.
 
 > **Heads-up:** Generating the illustrations adds ~30–60s the first time (it
 > draws the hub + 3 zones). If an illustration can't be generated, that zone
@@ -54,11 +55,11 @@ Both use the same three items, so you can switch between them freely.
 - **Headline** — the slide title.
 - **Objective opener** — the framing sentences (wrap key phrases in
   `**double asterisks**` to bold them).
-- **Zones 1–3** — for each: a **Title**, a **Body** line, and an **Icon**
-  (dropdown of the built-in icon set).
+- **Zones** — for each: a **Title**, a **Body** line, and an **Icon** (used when
+  there's no AI illustration). Use **+ Add Zone** / **Remove** to set 3–5 zones.
 
 > **Tip:** Keep zone titles to 2–4 words and bodies to one line — they read best
-> balanced and short.
+> balanced and short. 3–4 zones usually look cleanest; 5 is the max.
 
 ---
 

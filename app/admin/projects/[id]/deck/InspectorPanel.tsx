@@ -1572,17 +1572,25 @@ function ObjectiveInspector({
     }
   }
 
-  const pillarSlots: { title: string; body: string; icon?: string | null }[] = (() => {
-    const seed = (content.pillars ?? []).slice(0, 3);
+  const pillarSlots: { title: string; body: string; icon?: string | null; imageUrl?: string | null }[] = (() => {
+    const seed = (content.pillars ?? []).slice(0, 6);
     while (seed.length < 3) seed.push({ title: "", body: "" });
     return seed;
   })();
 
-  function updatePillar(index: 0 | 1 | 2, patch: Partial<{ title: string; body: string; icon: string | null }>) {
-    const next = pillarSlots.map((p, i) => (i === index ? { ...p, ...patch } : p));
-    // Only persist a defined pillars array when the user has entered content.
+  function persistPillars(next: typeof pillarSlots) {
     const hasAny = next.some((p) => p.title.trim() || p.body.trim());
     updateContent({ pillars: hasAny ? next : undefined });
+  }
+  function updatePillar(index: number, patch: Partial<{ title: string; body: string; icon: string | null; imageUrl: string | null }>) {
+    persistPillars(pillarSlots.map((p, i) => (i === index ? { ...p, ...patch } : p)));
+  }
+  function addPillar() {
+    if (pillarSlots.length >= 6) return;
+    persistPillars([...pillarSlots, { title: "", body: "" }]);
+  }
+  function removePillar(index: number) {
+    persistPillars(pillarSlots.filter((_, i) => i !== index));
   }
 
   return (
@@ -1821,23 +1829,33 @@ function ObjectiveInspector({
             </>
           )}
 
-          {/* ── PILLARS (3-column footer band) ─────────────────────────────── */}
-          <SectionLabel>Pillars</SectionLabel>
+          {/* ── ZONES (fanned around the hub) ───────────────────────────────── */}
+          <SectionLabel>Zones</SectionLabel>
           <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
-            Hub &amp; Spoke shows these as 3 zones around a central icon; Pillars shows a 3-column grid. Fill all 3.
+            3–5 zones fan around the central hub. Each shows its AI illustration (or icon) + title + body.
           </p>
-          {([0, 1, 2] as const).map((i) => (
+          {pillarSlots.map((slot, i) => (
             <div key={i} style={{ marginBottom: 10, paddingLeft: 4, borderLeft: `2px solid ${branding.accentColor}33` }}>
-              <FieldGroup label={`Pillar ${i + 1} — Title (2-4 words)`}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: "#6B7280" }}>Zone {i + 1}</span>
+                {pillarSlots.length > 2 && (
+                  <button onClick={() => removePillar(i)} style={{ fontSize: 10, color: "#EF4444", background: "none", border: "none", cursor: "pointer" }}>Remove</button>
+                )}
+              </div>
+              {slot.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={slot.imageUrl} alt="AI illustration" title="AI-generated illustration. Pick an icon below to override." style={{ width: "100%", maxWidth: 120, height: 48, objectFit: "contain", border: "1px solid #E5E7EB", borderRadius: 4, background: "#fff", marginBottom: 6 }} />
+              )}
+              <FieldGroup label="Title (2-4 words)">
                 <TextInput
-                  value={pillarSlots[i].title}
+                  value={slot.title}
                   onChange={(v) => updatePillar(i, { title: v })}
                   placeholder={i === 0 ? "The Space" : i === 1 ? "The Connection" : "The Protection"}
                 />
               </FieldGroup>
-              <FieldGroup label={`Pillar ${i + 1} — Body (≤20 words)`}>
+              <FieldGroup label="Body (≤20 words)">
                 <TextArea
-                  value={pillarSlots[i].body}
+                  value={slot.body}
                   onChange={(v) => updatePillar(i, { body: v })}
                   placeholder="One sentence describing this dimension."
                   rows={2}
@@ -1846,10 +1864,11 @@ function ObjectiveInspector({
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 10, color: "#6B7280", flex: "0 0 auto" }}>Icon</span>
                 <select
-                  value={pillarSlots[i].icon ?? "feature"}
-                  onChange={(e) => updatePillar(i, { icon: e.target.value })}
+                  value={slot.imageUrl ? "" : slot.icon ?? "feature"}
+                  onChange={(e) => updatePillar(i, { icon: e.target.value, imageUrl: null })}
                   style={{ flex: 1, fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#FFFFFF", color: "#374151" }}
                 >
+                  {slot.imageUrl && <option value="">AI illustration (custom)</option>}
                   {SCOPE_ICON_OPTIONS.map((opt) => (
                     <option key={opt.key} value={opt.key}>{opt.label}</option>
                   ))}
@@ -1857,6 +1876,14 @@ function ObjectiveInspector({
               </div>
             </div>
           ))}
+          {pillarSlots.length < 6 && (
+            <button
+              onClick={addPillar}
+              style={{ width: "100%", padding: "6px 10px", marginBottom: 8, background: branding.accentColor + "18", color: branding.textColor, border: `1px solid ${branding.accentColor}`, borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 500 }}
+            >
+              + Add Zone
+            </button>
+          )}
 
           {/* Pillar title typography (applies to all 3 pillar titles) */}
           <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginTop: 12, marginBottom: 6 }}>Title typography (all 3 pillars)</p>
