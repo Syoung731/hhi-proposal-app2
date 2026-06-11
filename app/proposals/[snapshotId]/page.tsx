@@ -3,6 +3,7 @@ import { prisma } from "@/app/lib/prisma";
 import { getCompanyBrandingForRender } from "@/app/lib/company-branding-for-render";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getDeckForProject } from "@/app/lib/deck/db";
+import { isDeckThemeKey } from "@/app/lib/deck/themes";
 import { deserializeSnapshotSlides } from "@/app/lib/deck/deserialize-snapshot";
 import { PresentationFrame } from "./presentation-frame";
 import { PrintStack } from "./print-stack";
@@ -374,7 +375,7 @@ async function loadDraftDeck(projectId: string): Promise<{
     slides: slides.filter((s) => s.isEnabled !== false),
     projectTitle: project.title,
     nextVersion: (project.publishedVersion ?? 0) + 1,
-    deckTheme: deckRow?.deckTheme === "editorial" ? "editorial" : "blueprint",
+    deckTheme: isDeckThemeKey(deckRow?.deckTheme) ? deckRow.deckTheme : "blueprint",
   };
 }
 

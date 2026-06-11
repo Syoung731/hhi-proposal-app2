@@ -44,8 +44,7 @@ export const AUTO_SYNCED_SLIDE_TYPES: ReadonlySet<SlideType> = new Set([
  *   - addition-overview: project.hasAddition === true
  *
  * Slides moved to the optional library (available via + Add Slide dropdown,
- * not included here): risk-brief, design-build, our-process,
- * core-values, testimonials.
+ * not included here): design-build, our-process, core-values, testimonials.
  *
  * Order values are spaced 100 apart for insertion headroom.
  */
@@ -95,19 +94,19 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
       layoutKey: "icon-columns",
     },
     {
-      type: "inspiration",
-      order: 700,
-      layoutKey: "hero-plus-stacked",
-    },
-    {
       type: "why-us",
       order: 800,
-      layoutKey: "pillars-grid",
+      layoutKey: "guarantee-grid",
+    },
+    {
+      type: "design-experience",
+      order: 850,
+      layoutKey: "stepped-circles",
     },
     {
       type: "timeline",
       order: 900,
-      layoutKey: "vertical-dot",
+      layoutKey: "week-axis",
     },
     {
       type: "investment-by-space",
@@ -137,7 +136,7 @@ export function buildDefaultDeckSpec(project: ProjectForDeckSpec): DefaultSlideS
   specs.push({
     type: "closing",
     order: 1400,
-    layoutKey: "dark-centered",
+    layoutKey: "blueprint-split",
     isLocked: true,
     lockPosition: "last",
   });
@@ -158,7 +157,7 @@ export function getDefaultDeckSlideTypes(project: ProjectForDeckSpec): Set<Slide
  * conditional gates. Used by the editor to decide whether removing a slide
  * should hard-delete or soft-hide: spec types must soft-hide so the load-time
  * backfill in `getDeckForProject` doesn't resurrect them. Optional types
- * (risk-brief, our-process, core-values, design-build, testimonials) are
+ * (our-process, core-values, design-build, testimonials) are
  * NOT in this set, so removing them hard-deletes.
  */
 export const DEFAULT_SPEC_SLIDE_TYPES: ReadonlySet<SlideType> = new Set([
@@ -168,8 +167,8 @@ export const DEFAULT_SPEC_SLIDE_TYPES: ReadonlySet<SlideType> = new Set([
   "before-after",
   "scope-breakdown",
   "cope",
-  "inspiration",
   "why-us",
+  "design-experience",
   "timeline",
   "investment-by-space",
   "overall-investment",

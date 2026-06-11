@@ -13,7 +13,6 @@
  *   scope-breakdown   400                       (auto, if rooms.length >= 2)
  *   before-after      500 + roomIndex * 10      (auto, per room)
  *   cope                 600
- *   inspiration          700
  *   why-us               800
  *   timeline             900
  *   investment-by-space 1000
@@ -26,7 +25,7 @@
  * `buildDefaultDeckSpec(project)`. Never hardcode a slide list here.
  *
  * Optional slides (not in default spec; added manually via + Add Slide):
- *   risk-brief, our-process, core-values, design-build, testimonials.
+ *   our-process, core-values, design-build, testimonials.
  */
 
 import { prisma } from "@/app/lib/prisma";
@@ -50,6 +49,7 @@ import type {
   BeforeAfterBullet,
 } from "./types";
 import { KNOWN_SLIDE_TYPES } from "./types";
+import { DESIGN_EXPERIENCE_DEFAULTS, DEFAULT_DESIGN_EXPERIENCE_STAGES } from "./design-experience-defaults";
 import { buildProjectPhases } from "@/app/lib/timeline-phases";
 import { computeRetainer } from "@/app/lib/retainer";
 // Phase 8C.1: T6 scope categorization reverted — classifyScopeItem import
@@ -229,15 +229,17 @@ function buildSlideDataFromSpec(
         },
       };
 
-    case "inspiration":
+    case "design-experience":
       return {
         ...base,
-        type: "inspiration",
+        type: "design-experience",
         layoutKey: spec.layoutKey,
-        headline: "Design Inspiration",
+        headline: DESIGN_EXPERIENCE_DEFAULTS.headline,
         content: {
-          subtitle: "A curated vision for your space.",
-          photos: [],
+          sectionLabel: DESIGN_EXPERIENCE_DEFAULTS.sectionLabel,
+          subheadline: DESIGN_EXPERIENCE_DEFAULTS.subheadline,
+          stepWord: DESIGN_EXPERIENCE_DEFAULTS.stepWord,
+          stages: DEFAULT_DESIGN_EXPERIENCE_STAGES,
         },
       };
 
@@ -310,8 +312,6 @@ function buildSlideDataFromSpec(
         headline: ctx.nextStepsDefaults?.defaultHeadline ?? "Your Path Forward",
         content: {
           sectionLabel: ctx.nextStepsDefaults?.defaultSectionLabel ?? "WHAT HAPPENS NEXT",
-          contactEmail: ctx.nextStepsDefaults?.defaultContactEmail ?? null,
-          contactPhone: ctx.nextStepsDefaults?.defaultContactPhone ?? null,
           steps: ctx.nextStepsDefaults?.defaultSteps ?? [],
         },
       };
@@ -335,7 +335,9 @@ function buildSlideDataFromSpec(
         ...base,
         type: "closing",
         layoutKey: spec.layoutKey,
-        headline: null,
+        // Blueprint Split default headline; clearing it falls back to the
+        // Company Settings closing headline.
+        headline: "Securing Your Project Schedule",
         content: {
           validityNote: "This proposal is valid for 30 days.",
         },
@@ -344,31 +346,6 @@ function buildSlideDataFromSpec(
     // Types that are reclassified as optional (NOT in default spec) but still
     // fully supported when added manually. If they ever appear in the spec in
     // the future, these builders remain valid.
-    case "risk-brief":
-      return {
-        ...base,
-        type: "risk-brief",
-        layoutKey: spec.layoutKey,
-        headline: "The Stress-Free Remodel: How We Eliminate Common Risks",
-        content: {
-          leftHeader: "Why Remodels Go Wrong",
-          leftBullets: [
-            "Too many separate contractors means no single person is accountable.",
-            "Designs get approved before anyone confirms they fit the budget.",
-            "Hidden problems get discovered mid-construction, stalling everything.",
-          ],
-          rightHeader: "How We Prevent That",
-          rightBullets: [
-            "One team handles design and construction from start to finish.",
-            "Your budget is set before a single detail is finalized.",
-            "We identify and resolve potential issues before work ever begins.",
-          ],
-          rowLabels: ["Accountability", "Budgeting", "Design"],
-          bottomStatement:
-            "You'll know exactly what's being built, what it costs, and what to expect — before construction starts.",
-        },
-      };
-
     case "our-process":
       return {
         ...base,
@@ -506,10 +483,12 @@ async function syncBeforeAfterSlides(
   existing: DbRow[],
   rooms: RoomWithMedia[]
 ): Promise<void> {
-  // Rooms eligible for a before/after slide: must have a selected render + at
-  // least one before photo.
+  // Rooms eligible for a before/after slide: any finished render (selected or
+  // not) + at least one before photo. Before/After is our differentiator, so we
+  // always suggest it whenever a room has the raw materials; the render resolver
+  // below falls back to renderMedia[0] when none is explicitly selected.
   const eligible = rooms.filter(
-    (r) => r.selectedRenderMediaId && r.beforeMedia.length > 0
+    (r) => (r.selectedRenderMediaId || r.renderMedia.length > 0) && r.beforeMedia.length > 0
   );
   if (eligible.length === 0) return;
 
@@ -883,10 +862,18 @@ async function syncInvestmentSlide(
     },
   });
 
-  // 2. Project's saved group order + user-defined group labels.
+  // 2. Project's saved group order + user-defined group labels (+ retainer
+  //    settings for the Stacked Blocks foundation snapshot).
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { displayGroupOrder: true, displayGroupNames: true },
+    select: {
+      displayGroupOrder: true,
+      displayGroupNames: true,
+      retainerEnabled: true,
+      retainerPercent: true,
+      retainerRoundTo: true,
+      retainerOverride: true,
+    },
   });
   const savedOrder: string[] = Array.isArray(project?.displayGroupOrder)
     ? (project!.displayGroupOrder as string[])
@@ -971,10 +958,28 @@ async function syncInvestmentSlide(
     }];
   });
 
+  // 7. Retainer snapshot for the Stacked Blocks foundation block. Same math as
+  //    syncRetainerFromProject (sum of ALL rooms' totalHigh), but written HERE
+  //    because this function is the sole owner of investment-by-space content
+  //    (see SYNC_WRITE_SCOPES).
+  const subtotalHighAll = rooms.reduce((sum, r) => sum + (r.totalHigh ?? 0), 0);
+  const retainerAmount = computeRetainer(subtotalHighAll, {
+    enabled: project?.retainerEnabled ?? false,
+    percent: project?.retainerPercent ?? 0,
+    roundTo: project?.retainerRoundTo ?? 0,
+    override: project?.retainerOverride ?? null,
+  });
+  const companySettings = await prisma.companySettings.findFirst({
+    select: { designHourlyRate: true },
+  });
+
   const currentContent = (investmentRow.content ?? {}) as InvestmentBySpaceContent;
   const updatedContent: InvestmentBySpaceContent = {
     ...currentContent,
     lineItems,
+    retainerAmount: project?.retainerEnabled ? retainerAmount : null,
+    retainerEnabled: project?.retainerEnabled ?? false,
+    designHourlyRate: companySettings?.designHourlyRate ?? null,
   };
 
   // Phase 11 Pass 2A T10: auto-correct the legacy "Projected Investment" title
@@ -1284,7 +1289,7 @@ const SYNC_WRITE_SCOPES: readonly SlideSyncRegistration[] = [
  *
  * Only creates slides that are completely absent — never overwrites existing
  * rows. Auto-synced types (before-after, scope-breakdown) are skipped; their
- * sync functions own them. Reclassified slides (risk-brief, process,
+ * sync functions own them. Reclassified slides (process,
  * core-values, design-build, testimonials) are NOT in the
  * spec, so backfill will not resurrect them if a user removes them.
  *
@@ -1532,26 +1537,9 @@ export async function regenerateDefaultDeck({
   };
 
   if (mode === "replace-all") {
-    // Capture per-slide user overrides that should survive the nuke.
-    // Visual Inspiration has a `showByDefault` flag (Phase 8A T7): when the
-    // user set it to false on a prior slide, we honor it by removing the
-    // seeded slide post-seed.
-    const priorViz = await prisma.deckSlide.findFirst({
-      where: { deckId: deck.id, type: "inspiration" },
-      select: { content: true },
-    });
-    const vizShowByDefault =
-      (priorViz?.content as { showByDefault?: boolean } | null)?.showByDefault;
-
     // Nuke everything and re-seed from scratch.
     await prisma.deckSlide.deleteMany({ where: { deckId: deck.id } });
     await seedDefaultSlides(deck.id, projectSpec, seedCtx);
-
-    if (vizShowByDefault === false) {
-      await prisma.deckSlide.deleteMany({
-        where: { deckId: deck.id, type: "inspiration" },
-      });
-    }
   } else {
     // keep-manual: drop auto-sync slides (they'll be re-created) but
     // preserve every manual/edited slide.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, useReducer } from "react";
 import type {
   ProposalSlide,
   DeckBranding,
@@ -14,6 +14,8 @@ import type {
   TextZoneSetting,
 } from "@/app/lib/deck/types";
 import { saveDeckSlidesAction, refreshDeckAction, generateDefaultDeckAction, deleteProjectDeckAction, updateDeckThemeAction } from "./actions";
+import { DECK_THEMES, type DeckThemeKey } from "@/app/lib/deck/themes";
+import { HHI_DEFAULT_CRAFTSMANSHIP_ITEMS } from "@/app/lib/craftsmanship-defaults";
 import { composeDeckCopyAction, generateDeckVisualsAction } from "../studio/actions";
 import { DEFAULT_SPEC_SLIDE_TYPES } from "@/app/lib/deck/default-spec";
 import { SlideRail } from "./SlideRail";
@@ -29,7 +31,7 @@ interface Props {
   initialSlides: ProposalSlide[];
   branding: DeckBranding;
   /** Deck-level visual theme, loaded from ProposalDeck.deckTheme. */
-  initialDeckTheme?: "blueprint" | "editorial";
+  initialDeckTheme?: DeckThemeKey;
   projectId: string;
   projectTitle: string;
   /** Value pillars resolved from DB at SSR time. Used when "+ Why Us" is added. */
@@ -73,8 +75,8 @@ const ADD_SLIDE_GROUPS: AddSlideGroup[] = [
       { type: "scope-breakdown",     label: "+ Scope Breakdown" },
       { type: "before-after",        label: "+ Before / After" },
       { type: "cope",                label: "+ COPE" },
-      { type: "inspiration",         label: "+ Inspiration" },
       { type: "why-us",              label: "+ Why Us" },
+      { type: "design-experience",   label: "+ Design Experience" },
       { type: "timeline",            label: "+ Timeline" },
       { type: "investment-by-space", label: "+ Investment by Space" },
       { type: "overall-investment",  label: "+ Overall Investment" },
@@ -86,7 +88,8 @@ const ADD_SLIDE_GROUPS: AddSlideGroup[] = [
   {
     heading: "Optional",
     options: [
-      { type: "risk-brief",     label: "+ Risk Brief" },
+      { type: "floor-plan",     label: "+ Floor Plan Map" },
+      { type: "craftsmanship",  label: "+ Craftsmanship" },
       { type: "our-process",    label: "+ Our Process" },
       { type: "core-values",    label: "+ Core Values" },
       { type: "design-build",   label: "+ Design-Build" },
@@ -491,7 +494,7 @@ export function DeckEditorClient({
   );
 
   // ── Deck theme ───────────────────────────────────────────────────────────
-  const [deckTheme, setDeckTheme] = useState<"blueprint" | "editorial">(initialDeckTheme);
+  const [deckTheme, setDeckTheme] = useState<DeckThemeKey>(initialDeckTheme);
   // Inject the live theme into branding so all render contexts (canvas, rail,
   // inspector) pick it up via SlideRenderer's theme context.
   const themedBranding: DeckBranding = useMemo(
@@ -499,7 +502,7 @@ export function DeckEditorClient({
     [branding, deckTheme],
   );
   const handleThemeChange = useCallback(
-    async (next: "blueprint" | "editorial") => {
+    async (next: DeckThemeKey) => {
       setDeckTheme(next);
       await updateDeckThemeAction(projectId, next);
     },
@@ -700,6 +703,30 @@ export function DeckEditorClient({
   const visibleSlides = slides.filter((s) => !s.isUserHidden);
   const activeSlide = visibleSlides.find((s) => s.id === activeSlideId) ?? null;
 
+  // ── AI Edit undo (per-slide, multi-step, in-memory) ───────────────────────
+  // Snapshots live in a ref (source of truth for pop); a version counter forces
+  // re-render so the Undo button's enabled state stays in sync. Cleared on reload.
+  const aiUndoRef = useRef<Record<string, ProposalSlide[]>>({});
+  const [, bumpUndo] = useReducer((x: number) => x + 1, 0);
+  const MAX_UNDO = 10;
+
+  const pushAiSnapshot = useCallback((s: ProposalSlide) => {
+    const stack = aiUndoRef.current[s.id] ?? [];
+    // Shallow copy with a cloned content object so later edits don't mutate it.
+    const snap: ProposalSlide = { ...s, content: s.content ? { ...s.content } : s.content };
+    aiUndoRef.current[s.id] = [...stack, snap].slice(-MAX_UNDO);
+    bumpUndo();
+  }, []);
+
+  const undoAiEdit = useCallback((slideId: string) => {
+    const stack = aiUndoRef.current[slideId] ?? [];
+    if (stack.length === 0) return;
+    const snap = stack[stack.length - 1];
+    aiUndoRef.current[slideId] = stack.slice(0, -1);
+    setSlides((prev) => prev.map((s) => (s.id === slideId ? snap : s)));
+    bumpUndo();
+  }, []);
+
   // ── Slide operations ──────────────────────────────────────────────────────
 
   const updateSlide = useCallback((updated: ProposalSlide) => {
@@ -835,15 +862,17 @@ export function DeckEditorClient({
       type === "cover"               ? "hero-image"          :
       type === "objective"           ? "light-statement"     :
       type === "investment-by-space" ? "table-callout"       :
-      type === "why-us"              ? "pillars-grid"        :
-      type === "scope-overview"      ? "split-panel"         :
+      type === "why-us"              ? "guarantee-grid"      :
+      type === "scope-overview"      ? "editorial-split"     :
       type === "scope-breakdown"     ? "text-grid"           :
-      type === "risk-brief"          ? "two-column"          :
       type === "our-process"         ? "three-stages"        :
       type === "overall-investment"  ? "three-band-summary"  :
       type === "next-steps"          ? "numbered-photo"      :
-      type === "closing"             ? "dark-centered"       :
-      type === "inspiration"         ? "hero-plus-stacked"   :
+      type === "closing"             ? "blueprint-split"     :
+      type === "floor-plan"          ? "callout-map"         :
+      type === "craftsmanship"       ? "standards-grid"      :
+      type === "design-experience"   ? "stepped-circles"     :
+      type === "timeline"            ? "week-axis"           :
       type === "testimonials"        ? "quote-cards"         :
       type === "design-build"        ? designBuildDefaults.defaultLayout :
       type === "addition-overview"   ? "combined"            :
@@ -856,12 +885,14 @@ export function DeckEditorClient({
       type === "why-us"              ? "The HHI Difference"         :
       type === "scope-overview"      ? "Project Scope"              :
       type === "scope-breakdown"     ? "Additional Areas Included"  :
-      type === "risk-brief"          ? "The Stress-Free Remodel: How We Eliminate Common Risks" :
       type === "our-process"         ? "Our Process: From Vision to Finished Home" :
       type === "overall-investment"  ? "Your Investment"            :
       type === "next-steps"          ? "Your Path Forward"          :
-      type === "closing"             ? "Let\u2019s Build Something Extraordinary" :
-      type === "inspiration"         ? "Design Inspiration"         :
+      type === "closing"             ? "Securing Your Project Schedule" :
+      type === "floor-plan"          ? "Mapping the Project Footprint" :
+      type === "craftsmanship"       ? "Material & Assembly Standards" :
+      type === "design-experience"   ? "Your Design Experience"     :
+      type === "timeline"            ? "Projected Timeline"         :
       type === "testimonials"        ? "What Our Clients Say"       :
       type === "design-build"        ? designBuildDefaults.defaultHeadline :
       type === "addition-overview"   ? "The Vision: Expanding the Footprint" :
@@ -887,23 +918,6 @@ export function DeckEditorClient({
             rooms: [],
             photos: [],
           } satisfies ScopeBreakdownContent
-        : type === "risk-brief"
-        ? {
-            leftHeader: "Why Remodels Go Wrong",
-            leftBullets: [
-              "Too many separate contractors means no single person is accountable.",
-              "Designs get approved before anyone confirms they fit the budget.",
-              "Hidden problems get discovered mid-construction, stalling everything.",
-            ],
-            rightHeader: "How We Prevent That",
-            rightBullets: [
-              "One team handles design and construction from start to finish.",
-              "Your budget is set before a single detail is finalized.",
-              "We identify and resolve potential issues before work ever begins.",
-            ],
-            bottomStatement:
-              "You'll know exactly what's being built, what it costs, and what to expect — before construction starts.",
-          }
         : type === "our-process"
         ? {
             stages: [
@@ -962,11 +976,23 @@ export function DeckEditorClient({
             tagline: "Design. Build. Remodel.",
             validityNote: "This proposal is valid for 30 days.",
           }
-        : type === "inspiration"
+        : type === "floor-plan"
         ? {
-            subtitle: "A curated vision for your space.",
-            photos: [],
+            // Seed zones from the project's rooms (COPE excluded); SF can be
+            // pulled from room dimensions via the inspector's sync button.
+            zones: projectRoomsWithMedia
+              .filter((r) => !r.isProjectOverhead)
+              .slice(0, 8)
+              .map((r, i) => ({
+                id: `zone-${r.id}`,
+                number: i + 1,
+                label: `Zone ${i + 1}: ${r.name}`,
+                sqft: null,
+                roomId: r.id,
+              })),
           }
+        : type === "craftsmanship"
+        ? { items: HHI_DEFAULT_CRAFTSMANSHIP_ITEMS }
         : type === "testimonials"
         ? {
             showStars: true,
@@ -996,6 +1022,10 @@ export function DeckEditorClient({
               { id: "b3", label: "Finishes & Site Work", description: "Interior finishes selected to complement the existing home, with exterior work matched to current materials." },
             ],
           }
+        : type === "design-experience"
+        ? {}
+        : type === "timeline"
+        ? { sectionLabel: "YOUR PROJECT" }
         : undefined;
 
     const newSlide: ProposalSlide = {
@@ -1222,7 +1252,7 @@ export function DeckEditorClient({
       />
       <select
         value={deckTheme}
-        onChange={(e) => handleThemeChange(e.target.value as "blueprint" | "editorial")}
+        onChange={(e) => handleThemeChange(e.target.value as DeckThemeKey)}
         title="Deck visual theme"
         className="rounded"
         style={{
@@ -1237,8 +1267,11 @@ export function DeckEditorClient({
           alignSelf: "center",
         }}
       >
-        <option value="blueprint" style={{ color: "#111" }}>Theme: Blueprint</option>
-        <option value="editorial" style={{ color: "#111" }}>Theme: Editorial</option>
+        {DECK_THEMES.map((t) => (
+          <option key={t.key} value={t.key} style={{ color: "#111" }}>
+            Theme: {t.label}
+          </option>
+        ))}
       </select>
       <GenerateDeckButton
         disabled={generateDisabled}
@@ -1406,6 +1439,9 @@ export function DeckEditorClient({
             onBackgroundChange={handleBackgroundChange}
             onTextZoneChange={handleTextZoneChange}
             onResyncInvestment={handleResyncInvestment}
+            pushAiSnapshot={pushAiSnapshot}
+            onAiUndo={undoAiEdit}
+            aiUndoDepth={activeSlide ? (aiUndoRef.current[activeSlide.id]?.length ?? 0) : 0}
           />
         </div>
       )}

@@ -21,7 +21,6 @@ import type {
   RoomMediaItem,
   ScopeBreakdownContent,
   ScopeBreakdownRoom,
-  RiskBriefContent,
   OurProcessContent,
   ProcessStage,
   CoreValuesContent,
@@ -30,12 +29,13 @@ import type {
   ProjectPhase,
   CopeContent,
   CopeItem,
+  DesignExperienceContent,
+  DesignExperienceStage,
   OverallInvestmentContent,
   DesignRetainerBenefit,
   NextStepsContent,
   NextStep,
   ClosingContent,
-  InspirationContent,
   TestimonialsContent,
   SlideTestimonial,
   DesignBuildContent,
@@ -49,20 +49,25 @@ import type {
   AdditionOverviewContent,
   AdditionBullet,
   AdditionOverviewLayoutKey,
+  FloorPlanContent,
+  FloorPlanZone,
+  CraftsmanshipContent,
+  CraftsmanshipItem,
 } from "@/app/lib/deck/types";
 import {
   SLIDE_TYPE_LABELS,
   LOGO_DEFAULTS,
   getLayoutsForType,
   ADDITION_OVERVIEW_LAYOUTS,
+  aiEditSupported,
 } from "@/app/lib/deck/types";
+import { AiEditBox } from "./AiEditBox";
 import { HHI_DEFAULT_CORE_VALUES } from "@/app/lib/core-values-defaults";
 import { HHI_DEFAULT_COPE_ITEMS } from "@/app/lib/cope-defaults";
 import { DEFAULT_DESIGN_RETAINER_BENEFITS, DESIGN_RETAINER_DEFAULTS } from "@/app/lib/design-retainer-defaults";
 import { HHI_DEFAULT_NEXT_STEPS, HHI_NEXT_STEPS_DEFAULTS } from "@/app/lib/next-steps-defaults";
 import { CLOSING_SLIDE_DEFAULTS } from "@/app/lib/closing-slide-defaults";
 import { TemplateCIconPicker, type TemplateCIcon } from "@/app/admin/components/template-c-icon-picker";
-import { VISUAL_INSPIRATION_DEFAULTS } from "@/app/lib/visual-inspiration-defaults";
 import { DEFAULT_TESTIMONIALS, TESTIMONIALS_SLIDE_DEFAULTS } from "@/app/lib/testimonial-defaults";
 import { DEFAULT_PILLARS, DEFAULT_GUARANTEES, DEFAULT_DIAGRAM_NODES, DEFAULT_SUPPORT_COLUMNS } from "@/app/lib/design-build-defaults";
 import { LibraryMediaPicker } from "@/app/admin/settings/photo-library/library-media-picker";
@@ -73,9 +78,15 @@ import { analyzeBackgroundTextZoneAction } from "@/app/admin/settings/branding/b
 import { BrandingColorRow } from "@/components/ui/BrandingColorRow";
 import { SLIDE_FONTS } from "@/app/lib/slide-constants";
 import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
-import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction, aiEditScopeSlideAction } from "./actions";
+import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction, fetchFloorPlanRoomDataAction, saveFloorPlanImageAction, composeZoneDescriptionsAction, cleanFloorPlanImageAction, autoCropFloorPlanAction, generateCraftsmanshipPhotoAction, generateCraftsmanshipCollageAction } from "./actions";
+import { HHI_DEFAULT_CRAFTSMANSHIP_ITEMS, CRAFTSMANSHIP_DEFAULTS } from "@/app/lib/craftsmanship-defaults";
 import { SCOPE_ICON_OPTIONS } from "@/app/lib/deck/scope-icon-keys";
 import { objectiveDefaultZonePos } from "./slides/ObjectiveSlide";
+import { COPE_BUILTIN_ICONS, renderCopeIcon } from "./slides/CopeSlide";
+import { DUOTONE_ICONS, DuotoneIcon } from "./slides/shared/DuotoneIcons";
+import { DESIGN_EXPERIENCE_DEFAULTS, DEFAULT_DESIGN_EXPERIENCE_STAGES } from "@/app/lib/deck/design-experience-defaults";
+import { WHY_US_COMPARISON_DEFAULTS, DEFAULT_WHY_US_COMPARISON_ROWS } from "@/app/lib/deck/why-us-comparison-defaults";
+import { whyUsDefaultIcon } from "@/app/lib/deck/why-us-default-icons";
 
 interface Props {
   slide: ProposalSlide | null;
@@ -101,6 +112,12 @@ interface Props {
    * server sync so fresh line items are pulled from the Investment tab.
    */
   onResyncInvestment?: () => void;
+  /** Snapshot a slide before an AI edit (for undo). */
+  pushAiSnapshot?: (s: ProposalSlide) => void;
+  /** Undo the most recent AI edit on the given slide. */
+  onAiUndo?: (slideId: string) => void;
+  /** Number of undoable AI edits for the active slide. */
+  aiUndoDepth?: number;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -747,9 +764,12 @@ function SharedOverlaySection({
 function SharedCTASection({
   content,
   updateContent,
+  includeFooterNote = true,
 }: {
   content: SharedSlideFields;
   updateContent: (patch: Partial<SharedSlideFields>) => void;
+  /** Show the "Show Footer Note" toggle. Off for slides with no footer note. */
+  includeFooterNote?: boolean;
 }) {
   return (
     <>
@@ -765,16 +785,18 @@ function SharedCTASection({
           Show Contact Info
         </label>
       </FieldGroup>
-      <FieldGroup label="">
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            checked={content.showFooterNote ?? true}
-            onChange={(e) => updateContent({ showFooterNote: e.target.checked })}
-          />
-          Show Footer Note
-        </label>
-      </FieldGroup>
+      {includeFooterNote && (
+        <FieldGroup label="">
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={content.showFooterNote ?? true}
+              onChange={(e) => updateContent({ showFooterNote: e.target.checked })}
+            />
+            Show Footer Note
+          </label>
+        </FieldGroup>
+      )}
     </>
   );
 }
@@ -1507,12 +1529,18 @@ function ObjectiveInspector({
   slide,
   branding,
   onUpdate,
+  projectRoomsWithMedia = [],
+  projectLevelMedia = [],
 }: {
   slide: ProposalSlide;
   branding: DeckBranding;
   onUpdate: (s: ProposalSlide) => void;
+  projectRoomsWithMedia?: RoomWithMedia[];
+  projectLevelMedia?: RoomMediaItem[];
 }) {
   const content = (slide.content ?? {}) as ObjectiveContent;
+  const [objPhotoPickerOpen, setObjPhotoPickerOpen] = useState(false);
+  const objMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
 
   function updateContent(patch: Partial<ObjectiveContent>) {
     // Mark the slide as user-modified so the deck-page hydration in
@@ -1544,20 +1572,25 @@ function ObjectiveInspector({
 
   // Resolve the active layout mode. Must mirror resolveObjectiveLayoutMode()
   // in ObjectiveSlide.tsx so the inspector and slide always agree.
-  const mode: "pillars" | "statement" | "hub-spoke" = (() => {
-    if (content.layout === "pillars" || content.layout === "statement" || content.layout === "hub-spoke") {
+  const mode: "pillars" | "pillars-photo" | "statement" | "hub-spoke" = (() => {
+    if (
+      content.layout === "pillars" ||
+      content.layout === "pillars-photo" ||
+      content.layout === "statement" ||
+      content.layout === "hub-spoke"
+    ) {
       return content.layout;
     }
     return "hub-spoke";
   })();
-  // Both hub-spoke and pillars use the same Zones editor section.
-  const showZonesEditor = mode === "hub-spoke" || mode === "pillars";
+  // Hub-spoke, pillars, and photo-pillars all use the same Zones editor section.
+  const showZonesEditor = mode === "hub-spoke" || mode === "pillars" || mode === "pillars-photo";
 
   // Determine layout-aware headline color default
   const isLight = slide.layoutKey !== "dark-statement";
   const headlineColorDefault = isLight ? branding.textColor : "#FFFFFF";
 
-  function setMode(next: "pillars" | "statement" | "hub-spoke") {
+  function setMode(next: "pillars" | "pillars-photo" | "statement" | "hub-spoke") {
     // Clear any stale position values so the layout's built-in defaults apply
     // cleanly when switching modes. Users can still tune position via the Text
     // Position section afterwards; those explicit edits re-populate the fields.
@@ -1642,10 +1675,10 @@ function ObjectiveInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── LAYOUT MODE (Hub & Spoke / Pillars / Statement) ─────────────── */}
+      {/* ── LAYOUT MODE (Hub & Spoke / Pillars / Photo + Pillars) ───────── */}
       <SectionLabel>Layout</SectionLabel>
       <div style={{ display: "flex", gap: 0, marginBottom: 12, border: `1px solid ${branding.accentColor}`, borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
-        {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"]] as const).map(([m, label], idx) => {
+        {([["hub-spoke", "Hub & Spoke"], ["pillars", "Pillars"], ["pillars-photo", "Photo + Pillars"]] as const).map(([m, label], idx) => {
           const active = mode === m;
           return (
             <button
@@ -1669,6 +1702,51 @@ function ObjectiveInspector({
           );
         })}
       </div>
+
+      {mode === "pillars-photo" && (
+        <>
+          <SectionLabel>Photo</SectionLabel>
+          {content.heroImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={content.heroImageUrl}
+              alt="Objective hero"
+              style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid #E5E7EB", marginBottom: 6 }}
+            />
+          )}
+          <button
+            onClick={() => setObjPhotoPickerOpen(true)}
+            style={{
+              width: "100%", padding: "7px 10px", marginBottom: content.heroImageUrl ? 4 : 12,
+              background: content.heroImageUrl ? "#F3F4F6" : branding.accentColor + "18",
+              color: content.heroImageUrl ? "#374151" : branding.textColor,
+              border: `1px solid ${content.heroImageUrl ? "#D1D5DB" : branding.accentColor}`,
+              borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 500, textAlign: "center" as const,
+            }}
+          >
+            {content.heroImageUrl ? "Change Photo" : "Choose Photo"}
+          </button>
+          {content.heroImageUrl && (
+            <button
+              onClick={() => updateContent({ heroImageUrl: null })}
+              style={{ fontSize: 10, color: "#EF4444", background: "none", border: "none", cursor: "pointer", marginBottom: 12, padding: 0 }}
+            >
+              Remove photo
+            </button>
+          )}
+          <LibraryMediaPicker
+            open={objPhotoPickerOpen}
+            onClose={() => setObjPhotoPickerOpen(false)}
+            onSelect={(items) => {
+              if (items[0]) updateContent({ heroImageUrl: items[0].url });
+              setObjPhotoPickerOpen(false);
+            }}
+            multiple={false}
+            includeUnapproved
+            projectMedia={objMediaGroups}
+          />
+        </>
+      )}
 
       {showZonesEditor && (
         <>
@@ -2184,6 +2262,7 @@ function InvestmentInspector({
   const content = (slide.content ?? {}) as InvestmentBySpaceContent;
   const itemCount = (content.lineItems ?? []).length;
   const accent = content.accentColor ?? branding.accentColor;
+  const isTable = (slide.layoutKey ?? "table-callout") === "table-callout";
 
   function updateContent(patch: Partial<InvestmentBySpaceContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch }, isUserModified: true });
@@ -2246,6 +2325,202 @@ function InvestmentInspector({
         {resyncing ? "Syncing…" : "↺ Re-sync from Investment Tab"}
       </button>
 
+      {/* Construction subtotal — the visual layouts only (table stays anchor-free) */}
+      {(slide.layoutKey === "range-bars" || slide.layoutKey === "stacked-blocks" || slide.layoutKey === "blueprint-breakdown") && (
+        <>
+          <SectionLabel>Construction Subtotal</SectionLabel>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "4px 0 8px" }}>
+            <input
+              type="checkbox"
+              checked={content.showConstructionTotal ?? true}
+              onChange={(e) => updateContent({ showConstructionTotal: e.target.checked })}
+            />
+            Show the construction subtotal
+          </label>
+          {(content.showConstructionTotal ?? true) && (
+            <FieldGroup label="Label">
+              <TextInput
+                value={content.constructionTotalLabel ?? ""}
+                onChange={(v) => updateContent({ constructionTotalLabel: v || null })}
+                placeholder={slide.layoutKey === "stacked-blocks" ? "Total Projected Investment" : "Projected Construction Investment"}
+              />
+            </FieldGroup>
+          )}
+          <p style={{ fontSize: 9, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            Sums every line shown (rooms + COPE). On Stacked Blocks the retainer
+            foundation is added when shown; the full retainer story stays on the
+            Overall Investment slide.
+          </p>
+          <Divider />
+        </>
+      )}
+
+      {/* Retainer — Stacked Blocks foundation / Blueprint bar segment + callout */}
+      {(slide.layoutKey === "stacked-blocks" || slide.layoutKey === "blueprint-breakdown") && (
+        <>
+          <SectionLabel>Retainer</SectionLabel>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "4px 0 8px" }}>
+            <input
+              type="checkbox"
+              checked={content.showRetainer ?? true}
+              onChange={(e) => {
+                updateContent({ showRetainer: e.target.checked });
+                // First enable with no synced amount yet → pull the retainer
+                // snapshot from the project automatically.
+                if (e.target.checked && content.retainerAmount == null && onResyncInvestment) {
+                  void handleResync();
+                }
+              }}
+            />
+            {slide.layoutKey === "stacked-blocks"
+              ? "Show the retainer foundation block"
+              : "Show the retainer segment + callout"}
+          </label>
+          {resyncing && (
+            <p style={{ fontSize: 10, color: "#0369A1", marginBottom: 6 }}>Pulling retainer data…</p>
+          )}
+          {slide.layoutKey === "stacked-blocks" && (content.showRetainer ?? true) && (
+            <FieldGroup label="Caption">
+              <TextArea
+                value={content.retainerCaption ?? ""}
+                onChange={(v) => updateContent({ retainerCaption: v || null })}
+                rows={2}
+                placeholder="(Includes architectural design, engineering, ARB management, and material specs.)"
+              />
+            </FieldGroup>
+          )}
+          <p style={{ fontSize: 9, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            The amount syncs from the project&apos;s retainer settings; it shows
+            only when the retainer is enabled.
+          </p>
+          <Divider />
+        </>
+      )}
+
+      {/* Sizes — Stacked Blocks only */}
+      {slide.layoutKey === "stacked-blocks" && (
+        <>
+          <SectionLabel>Sizes</SectionLabel>
+          <FieldGroup label={`Block text — ${(content.blockTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.blockTextSize ?? 1} onChange={(v) => updateContent({ blockTextSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Tower width — ${(content.towerWidth ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.towerWidth ?? 1} onChange={(v) => updateContent({ towerWidth: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Total text — ${(content.anchorTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.anchorTextSize ?? 1} onChange={(v) => updateContent({ anchorTextSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Retainer text — ${(content.retainerTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.retainerTextSize ?? 1} onChange={(v) => updateContent({ retainerTextSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Bracket horizontal — ${(content.braceOffsetX ?? 0) > 0 ? "+" : ""}${(content.braceOffsetX ?? 0).toFixed(1)}em`}>
+            <input
+              type="range"
+              min={-10}
+              max={10}
+              step={0.5}
+              value={content.braceOffsetX ?? 0}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                updateContent({ braceOffsetX: v === 0 ? null : v });
+              }}
+              style={{ width: "100%", accentColor: accent }}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Bracket vertical — ${(content.braceOffsetY ?? 0) > 0 ? "+" : ""}${(content.braceOffsetY ?? 0).toFixed(1)}em`}>
+            <input
+              type="range"
+              min={-10}
+              max={10}
+              step={0.5}
+              value={content.braceOffsetY ?? 0}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                updateContent({ braceOffsetY: v === 0 ? null : v });
+              }}
+              style={{ width: "100%", accentColor: accent }}
+            />
+          </FieldGroup>
+          <Divider />
+        </>
+      )}
+
+      {/* Sizes — Blueprint Breakdown only */}
+      {slide.layoutKey === "blueprint-breakdown" && (
+        <>
+          <SectionLabel>Sizes</SectionLabel>
+          <FieldGroup label={`Zones text — ${(content.zoneTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.zoneTextSize ?? 1} onChange={(v) => updateContent({ zoneTextSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Totals box text — ${(content.anchorTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.anchorTextSize ?? 1} onChange={(v) => updateContent({ anchorTextSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Retainer callout text — ${(content.retainerTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.retainerTextSize ?? 1} onChange={(v) => updateContent({ retainerTextSize: v })} />
+          </FieldGroup>
+          <Divider />
+        </>
+      )}
+
+      {/* Guarantee badge — Range Bars layout only */}
+      {slide.layoutKey === "range-bars" && (
+        <>
+          <SectionLabel>Guarantee Badge</SectionLabel>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "4px 0 8px" }}>
+            <input
+              type="checkbox"
+              checked={content.showGuaranteeBadge ?? true}
+              onChange={(e) => updateContent({ showGuaranteeBadge: e.target.checked })}
+            />
+            Show the circular badge
+          </label>
+          {(content.showGuaranteeBadge ?? true) && (
+            <FieldGroup label="Badge text">
+              <TextArea
+                value={content.guaranteeBadgeText ?? "Includes Zero Mark-up on Materials Guarantee"}
+                onChange={(v) => updateContent({ guaranteeBadgeText: v || null })}
+                rows={2}
+                placeholder="Includes Zero Mark-up on Materials Guarantee"
+              />
+            </FieldGroup>
+          )}
+          <FieldGroup label="Bottom note (clear to hide)">
+            <TextArea
+              value={content.footnoteText ?? "COPE covers permits, inspections, waste handling, site protection, and on-site supervision."}
+              onChange={(v) => updateContent({ footnoteText: v })}
+              rows={2}
+              placeholder="COPE covers permits, inspections, waste handling, site protection, and on-site supervision."
+            />
+          </FieldGroup>
+
+          <SectionLabel>Bar Color</SectionLabel>
+          <FieldGroup label="Bars (light tail + numbers follow)">
+            <BrandingColorRow
+              branding={branding}
+              value={content.barColor}
+              defaultVal="#27323B"
+              onChange={(v) => updateContent({ barColor: v })}
+              onReset={() => updateContent({ barColor: null })}
+            />
+          </FieldGroup>
+
+          <SectionLabel>Sizes</SectionLabel>
+          <FieldGroup label={`Space labels — ${(content.barLabelSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.barLabelSize ?? 1} onChange={(v) => updateContent({ barLabelSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Range numbers — ${(content.barValueSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.barValueSize ?? 1} onChange={(v) => updateContent({ barValueSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Bottom note — ${(content.barNoteSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.barNoteSize ?? 1} onChange={(v) => updateContent({ barNoteSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Badge size — ${(content.badgeSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.badgeSize ?? 1} onChange={(v) => updateContent({ badgeSize: v })} />
+          </FieldGroup>
+          <Divider />
+        </>
+      )}
+
       <Divider />
 
       {PF_GROUP_DIVIDER}
@@ -2272,29 +2547,33 @@ function InvestmentInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── TABLE HEADER ─────────────────────────────── */}
-      <SectionLabel>Table Header</SectionLabel>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.tableHeaderFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ tableHeaderFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.tableHeaderSize ?? 0.72).toFixed(1)}×`}>
-        <PSizeSlider value={content.tableHeaderSize ?? 0.72} onChange={(v) => updateContent({ tableHeaderSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.tableHeaderBold ?? true} italic={content.tableHeaderItalic} underline={content.tableHeaderUnderline}
-          onBold={(v) => updateContent({ tableHeaderBold: v })} onItalic={(v) => updateContent({ tableHeaderItalic: v })} onUnderline={(v) => updateContent({ tableHeaderUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Header Bg Color">
-        <BrandingColorRow branding={branding} value={content.tableHeaderBgColor} defaultVal="#1B2A4A"
-          onChange={(v) => updateContent({ tableHeaderBgColor: v })} onReset={() => updateContent({ tableHeaderBgColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.tableHeaderOutline} onChangeFn={(v) => updateContent({ tableHeaderOutline: v })} accentColor={accent} />
-      </FieldGroup>
+      {/* ── TABLE HEADER (Table layout only) ─────────── */}
+      {isTable && (
+        <>
+          <SectionLabel>Table Header</SectionLabel>
+          <FieldGroup label="Font">
+            <PFontSelect value={content.tableHeaderFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ tableHeaderFont: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Size — ${(content.tableHeaderSize ?? 0.72).toFixed(1)}×`}>
+            <PSizeSlider value={content.tableHeaderSize ?? 0.72} onChange={(v) => updateContent({ tableHeaderSize: v })} accentColor={accent} />
+          </FieldGroup>
+          <FieldGroup label="Style">
+            <PStyleButtons bold={content.tableHeaderBold ?? true} italic={content.tableHeaderItalic} underline={content.tableHeaderUnderline}
+              onBold={(v) => updateContent({ tableHeaderBold: v })} onItalic={(v) => updateContent({ tableHeaderItalic: v })} onUnderline={(v) => updateContent({ tableHeaderUnderline: v })} />
+          </FieldGroup>
+          <FieldGroup label="Header Bg Color">
+            <BrandingColorRow branding={branding} value={content.tableHeaderBgColor} defaultVal="#1B2A4A"
+              onChange={(v) => updateContent({ tableHeaderBgColor: v })} onReset={() => updateContent({ tableHeaderBgColor: null })} />
+          </FieldGroup>
+          <FieldGroup label="Outline">
+            <POutlineRow value={content.tableHeaderOutline} onChangeFn={(v) => updateContent({ tableHeaderOutline: v })} accentColor={accent} />
+          </FieldGroup>
 
-      {PF_GROUP_DIVIDER}
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
 
-      {/* ── BODY TEXT (table cells) ──────────────────── */}
+      {/* ── BODY TEXT (all layouts) ──────────────────── */}
       <SectionLabel>Body Text</SectionLabel>
       <FieldGroup label="Font">
         <PFontSelect value={content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ bodyFont: v })} />
@@ -2312,43 +2591,46 @@ function InvestmentInspector({
         />
       </FieldGroup>
 
-      {PF_GROUP_DIVIDER}
+      {/* ── INCLUDES TEXT + TABLE STYLE (Table layout only) ── */}
+      {isTable && (
+        <>
+          {PF_GROUP_DIVIDER}
 
-      {/* ── INCLUDES TEXT (sub-line under each row label) ── */}
-      <SectionLabel>Includes Text</SectionLabel>
-      <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>
-        Sub-line shown beneath each row label, e.g. &ldquo;Includes: Primary Bedroom, Primary Bath, Primary Hallway&rdquo;.
-      </p>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.includesTextFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ includesTextFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.includesTextScale ?? 0.6).toFixed(2)}×`}>
-        <PSizeSlider value={content.includesTextScale ?? 0.6} onChange={(v) => updateContent({ includesTextScale: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow
-          value={content.includesTextColor}
-          defaultVal="#6B7280"
-          branding={branding}
-          onChange={(v) => updateContent({ includesTextColor: v })}
-          onReset={() => updateContent({ includesTextColor: null })}
-        />
-      </FieldGroup>
+          <SectionLabel>Includes Text</SectionLabel>
+          <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>
+            Sub-line shown beneath each row label, e.g. &ldquo;Includes: Primary Bedroom, Primary Bath, Primary Hallway&rdquo;.
+          </p>
+          <FieldGroup label="Font">
+            <PFontSelect value={content.includesTextFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ includesTextFont: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Size — ${(content.includesTextScale ?? 0.6).toFixed(2)}×`}>
+            <PSizeSlider value={content.includesTextScale ?? 0.6} onChange={(v) => updateContent({ includesTextScale: v })} accentColor={accent} />
+          </FieldGroup>
+          <FieldGroup label="Color">
+            <BrandingColorRow
+              value={content.includesTextColor}
+              defaultVal="#6B7280"
+              branding={branding}
+              onChange={(v) => updateContent({ includesTextColor: v })}
+              onReset={() => updateContent({ includesTextColor: null })}
+            />
+          </FieldGroup>
 
-      {/* ── Table Style (Investment-specific) ── */}
-      <Divider />
-      <SectionLabel>Table Style</SectionLabel>
-      <FieldGroup label={`Line Item Density — ${(content.lineItemPaddingY ?? 0.42).toFixed(2)}em`}>
-        <input
-          type="range"
-          min={0.2}
-          max={1.5}
-          step={0.02}
-          value={content.lineItemPaddingY ?? 0.42}
-          onChange={(e) => updateContent({ lineItemPaddingY: parseFloat(e.target.value) })}
-          style={{ width: "100%", accentColor: accent }}
-        />
-      </FieldGroup>
+          <Divider />
+          <SectionLabel>Table Style</SectionLabel>
+          <FieldGroup label={`Line Item Density — ${(content.lineItemPaddingY ?? 0.42).toFixed(2)}em`}>
+            <input
+              type="range"
+              min={0.2}
+              max={1.5}
+              step={0.02}
+              value={content.lineItemPaddingY ?? 0.42}
+              onChange={(e) => updateContent({ lineItemPaddingY: parseFloat(e.target.value) })}
+              style={{ width: "100%", accentColor: accent }}
+            />
+          </FieldGroup>
+        </>
+      )}
     </>
   );
 }
@@ -2377,6 +2659,8 @@ function WhyUsInspector({
   // Testimonial library state (same pattern as ClientTestimonialsInspector)
   const [libraryItems, setLibraryItems] = useState<WhyUsTestimonial[]>([]);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
+  // Guarantee Grid: isometric icon generation state
+  const [genIcons, setGenIcons] = useState(false);
 
   // selectedPillarIds: non-empty = explicit selection; empty/absent = all shown
   const selectedIds: string[] =
@@ -2407,6 +2691,38 @@ function WhyUsInspector({
 
   function updateContent(patch: Partial<WhyUsContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
+  }
+
+  // ── Comparison layouts ────────────────────────────────────────────────────
+  const layoutKeyStr = (slide.layoutKey as string) ?? "";
+  const isComparison = layoutKeyStr.startsWith("comparison");
+  const isGrid = layoutKeyStr === "guarantee-grid" || layoutKeyStr === "advantage-grid";
+  const cmpRows = content.comparisonRows && content.comparisonRows.length > 0
+    ? content.comparisonRows
+    : DEFAULT_WHY_US_COMPARISON_ROWS;
+  function updateCmpRow(idx: number, patch: Partial<(typeof cmpRows)[number]>) {
+    updateContent({ comparisonRows: cmpRows.map((r, i) => (i === idx ? { ...r, ...patch } : r)) });
+  }
+  function moveCmpRow(idx: number, dir: -1 | 1) {
+    const t = idx + dir;
+    if (t < 0 || t >= cmpRows.length) return;
+    const next = [...cmpRows];
+    [next[idx], next[t]] = [next[t], next[idx]];
+    updateContent({ comparisonRows: next });
+  }
+  function addCmpRow() {
+    updateContent({ comparisonRows: [...cmpRows, { id: `cmp-${Date.now()}`, label: "", traditional: "", hhiTitle: "", hhi: "" }] });
+  }
+  function removeCmpRow(idx: number) {
+    updateContent({ comparisonRows: cmpRows.filter((_, i) => i !== idx) });
+  }
+  function resetCmp() {
+    updateContent({
+      comparisonRows: DEFAULT_WHY_US_COMPARISON_ROWS,
+      comparisonLeftHeader: WHY_US_COMPARISON_DEFAULTS.leftHeader,
+      comparisonRightHeader: WHY_US_COMPARISON_DEFAULTS.rightHeader,
+      comparisonBottom: WHY_US_COMPARISON_DEFAULTS.bottom,
+    });
   }
 
   function togglePillar(id: string) {
@@ -2450,8 +2766,100 @@ function WhyUsInspector({
           placeholder={slide.headline ?? "The HHI Difference"}
         />
       </FieldGroup>
+      <FieldGroup label="Font">
+        <PFontSelect value={content.sectionTitleFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ sectionTitleFont: v })} />
+      </FieldGroup>
+      <FieldGroup label={`Size — ${(content.sectionTitleSize ?? 2.0).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.sectionTitleSize ?? 2.0} onChange={(v) => updateContent({ sectionTitleSize: v })} />
+      </FieldGroup>
+      <PStyleButtons bold={content.sectionTitleBold} italic={content.sectionTitleItalic} underline={content.sectionTitleUnderline}
+        onBold={(v) => updateContent({ sectionTitleBold: v })} onItalic={(v) => updateContent({ sectionTitleItalic: v })} onUnderline={(v) => updateContent({ sectionTitleUnderline: v })} />
+      <div style={{ marginTop: 8 }}>
+        <FieldGroup label="Color">
+          <BrandingColorRow branding={branding} value={content.sectionTitleColor} defaultVal={branding.textColor}
+            onChange={(v) => updateContent({ sectionTitleColor: v })} onReset={() => updateContent({ sectionTitleColor: null })} />
+        </FieldGroup>
+      </div>
+      <FieldGroup label="Outline">
+        <POutlineRow accentColor={branding.accentColor} value={content.sectionTitleOutline} onChangeFn={(v) => updateContent({ sectionTitleOutline: v })} />
+      </FieldGroup>
 
       <Divider />
+
+      {/* Comparison editor — only for comparison layouts */}
+      {isComparison && (
+        <>
+          <SectionLabel>Comparison Columns</SectionLabel>
+          <FieldGroup label="Left header (Traditional)">
+            <TextInput value={content.comparisonLeftHeader ?? ""} onChange={(v) => updateContent({ comparisonLeftHeader: v || null })} placeholder={WHY_US_COMPARISON_DEFAULTS.leftHeader} />
+          </FieldGroup>
+          <FieldGroup label="Right header (HHI)">
+            <TextInput value={content.comparisonRightHeader ?? ""} onChange={(v) => updateContent({ comparisonRightHeader: v || null })} placeholder={WHY_US_COMPARISON_DEFAULTS.rightHeader} />
+          </FieldGroup>
+          {layoutKeyStr === "comparison-table" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "4px 0 8px" }}>
+              <input type="checkbox" checked={content.showRowLabels ?? true} onChange={(e) => updateContent({ showRowLabels: e.target.checked })} />
+              Show row labels (left column)
+            </label>
+          )}
+          <FieldGroup label="Bottom line (clear to hide)">
+            <TextArea
+              value={content.comparisonBottom ?? WHY_US_COMPARISON_DEFAULTS.bottom}
+              onChange={(v) => updateContent({ comparisonBottom: v })}
+              rows={2}
+              placeholder={WHY_US_COMPARISON_DEFAULTS.bottom}
+            />
+          </FieldGroup>
+
+          <SectionLabel>Text Sizes</SectionLabel>
+          <FieldGroup label={`Headers — ${(content.comparisonHeaderSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.comparisonHeaderSize ?? 1} onChange={(v) => updateContent({ comparisonHeaderSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Row titles — ${(content.comparisonTitleSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.comparisonTitleSize ?? 1} onChange={(v) => updateContent({ comparisonTitleSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Descriptions — ${(content.comparisonBodySize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.comparisonBodySize ?? 1} onChange={(v) => updateContent({ comparisonBodySize: v })} />
+          </FieldGroup>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, marginBottom: 6 }}>
+            <SectionLabel>Rows</SectionLabel>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={resetCmp} style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px" }}>Reset</button>
+              <button onClick={addCmpRow} style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px" }}>+ Add</button>
+            </div>
+          </div>
+
+          {cmpRows.map((r, i) => (
+            <div key={r.id} style={{ marginBottom: 12, padding: 8, background: "#F9FAFB", borderRadius: 6, border: "1px solid #E5E7EB" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: "#374151" }}>Row {i + 1}</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => moveCmpRow(i, -1)} disabled={i === 0} style={{ fontSize: 11, color: i === 0 ? "#D1D5DB" : "#6B7280", cursor: i === 0 ? "default" : "pointer", background: "none", border: "none", padding: "0 3px" }}>▲</button>
+                  <button onClick={() => moveCmpRow(i, 1)} disabled={i === cmpRows.length - 1} style={{ fontSize: 11, color: i === cmpRows.length - 1 ? "#D1D5DB" : "#6B7280", cursor: i === cmpRows.length - 1 ? "default" : "pointer", background: "none", border: "none", padding: "0 3px" }}>▼</button>
+                  {cmpRows.length > 1 && <button onClick={() => removeCmpRow(i)} style={{ fontSize: 11, color: "#EF4444", cursor: "pointer", background: "none", border: "none", padding: "0 3px" }}>✕</button>}
+                </div>
+              </div>
+              {layoutKeyStr === "comparison-table" && (
+                <FieldGroup label="Row label">
+                  <TextInput value={r.label ?? ""} onChange={(v) => updateCmpRow(i, { label: v || null })} placeholder="e.g. Materials" />
+                </FieldGroup>
+              )}
+              <FieldGroup label="Traditional (left)">
+                <TextArea value={r.traditional} onChange={(v) => updateCmpRow(i, { traditional: v })} rows={2} placeholder="The pain point…" />
+              </FieldGroup>
+              <FieldGroup label="HHI lead-in (bold)">
+                <TextInput value={r.hhiTitle ?? ""} onChange={(v) => updateCmpRow(i, { hhiTitle: v || null })} placeholder="e.g. Zero Mark-up" />
+              </FieldGroup>
+              <FieldGroup label="HHI detail">
+                <TextArea value={r.hhi} onChange={(v) => updateCmpRow(i, { hhi: v })} rows={2} placeholder="The win…" />
+              </FieldGroup>
+            </div>
+          ))}
+
+          <Divider />
+        </>
+      )}
 
       {/* Testimonial picker — only for testimonials-split layout */}
       {isTestimonialsSplit && (
@@ -2542,7 +2950,72 @@ function WhyUsInspector({
         </>
       )}
 
+      {!isComparison && (
+      <>
       <SectionLabel>Pillars</SectionLabel>
+      {slide.layoutKey === "guarantee-grid" && allPillars.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {/* Primary: built-in default icons — no AI, survive a DB wipe. */}
+          <button
+            onClick={() => {
+              const updated = allPillars.map((p) => {
+                const def = whyUsDefaultIcon(p.title);
+                return def ? { ...p, iconImageUrl: def } : p;
+              });
+              updateContent({ pillars: updated });
+            }}
+            style={{
+              width: "100%",
+              fontSize: 11,
+              fontWeight: 600,
+              color: "#FFFFFF",
+              background: branding.accentColor,
+              border: "none",
+              borderRadius: 4,
+              padding: "6px 10px",
+              cursor: "pointer",
+            }}
+          >
+            Use default icons
+          </button>
+          <p style={{ fontSize: 9, color: "#9CA3AF", marginTop: 4, lineHeight: 1.4 }}>
+            Built-in isometric icons matched to each pillar by title — no AI needed. (Standard pillars also show them automatically.)
+          </p>
+          {/* Secondary: AI generation, only for custom pillars without a built-in match. */}
+          <button
+            onClick={async () => {
+              setGenIcons(true);
+              try {
+                const mod = await import("./actions");
+                const res = await mod.generateWhyUsPillarIconsAction({
+                  pillars: allPillars.map((p) => ({ id: p.id, title: p.title })),
+                });
+                if (res.ok) {
+                  const updated = allPillars.map((p) =>
+                    res.icons[p.id] ? { ...p, iconImageUrl: res.icons[p.id] } : p,
+                  );
+                  updateContent({ pillars: updated });
+                }
+              } finally {
+                setGenIcons(false);
+              }
+            }}
+            disabled={genIcons}
+            style={{
+              marginTop: 6,
+              fontSize: 10,
+              color: genIcons ? "#9CA3AF" : "#6B7280",
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: genIcons ? "default" : "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            {genIcons ? "Generating with AI…" : "✨ Generate with AI instead"}
+          </button>
+        </div>
+      )}
       {allPillars.length === 0 ? (
         <p style={{ fontSize: 11, color: "#9CA3AF", lineHeight: 1.5 }}>
           No pillars found. Go to{" "}
@@ -2630,6 +3103,29 @@ function WhyUsInspector({
       </p>
 
       <Divider />
+      </>
+      )}
+
+      {isGrid && (
+        <>
+          <SectionLabel>Sizes</SectionLabel>
+          {layoutKeyStr === "guarantee-grid" && (
+            <FieldGroup label={`Icon size — ${(content.gridIconSize ?? 1).toFixed(1)}×`}>
+              <PSizeSlider accentColor={branding.accentColor} value={content.gridIconSize ?? 1} onChange={(v) => updateContent({ gridIconSize: v })} />
+            </FieldGroup>
+          )}
+          <FieldGroup label={`Title size — ${(content.gridTitleSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.gridTitleSize ?? 1} onChange={(v) => updateContent({ gridTitleSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Description size — ${(content.gridBodySize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.gridBodySize ?? 1} onChange={(v) => updateContent({ gridBodySize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Cross thickness — ${(content.gridDividerSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.gridDividerSize ?? 1} onChange={(v) => updateContent({ gridDividerSize: v })} />
+          </FieldGroup>
+          <Divider />
+        </>
+      )}
 
       {/* ── Per-field: SECTION TITLE ──────────────────────────────────── */}
       {(() => {
@@ -2641,33 +3137,8 @@ function WhyUsInspector({
 
         return (
           <>
-            <SectionLabel>Section Title</SectionLabel>
-            <FieldGroup label="Text">
-              <TextInput value={content.sectionTitle ?? ""} onChange={(v) => updateContent({ sectionTitle: v || null })}
-                placeholder={slide.headline ?? "The HHI Difference"} />
-            </FieldGroup>
-            <FieldGroup label="Font">
-              <PFontSelect value={content.sectionTitleFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ sectionTitleFont: v })} />
-            </FieldGroup>
-            <FieldGroup label={`Size — ${(content.sectionTitleSize ?? 2.0).toFixed(1)}×`}>
-              <PSizeSlider accentColor={branding.accentColor} value={content.sectionTitleSize ?? 2.0} onChange={(v) => updateContent({ sectionTitleSize: v })} />
-            </FieldGroup>
-            <PStyleButtons bold={content.sectionTitleBold} italic={content.sectionTitleItalic} underline={content.sectionTitleUnderline}
-              onBold={(v) => updateContent({ sectionTitleBold: v })} onItalic={(v) => updateContent({ sectionTitleItalic: v })} onUnderline={(v) => updateContent({ sectionTitleUnderline: v })} />
-            <div style={{ marginTop: 8 }}>
-              <FieldGroup label="Color">
-                <BrandingColorRow branding={branding} value={content.sectionTitleColor} defaultVal={branding.textColor}
-                  onChange={(v) => updateContent({ sectionTitleColor: v })} onReset={() => updateContent({ sectionTitleColor: null })} />
-              </FieldGroup>
-            </div>
-            <FieldGroup label="Outline">
-              <POutlineRow accentColor={branding.accentColor} value={content.sectionTitleOutline} onChangeFn={(v) => updateContent({ sectionTitleOutline: v })} />
-            </FieldGroup>
-
-            {PF_GROUP_DIVIDER}
-
             {/* ── Per-item pillar controls ────────────────────────────────── */}
-            {visiblePillars2.length > 0 && (
+            {visiblePillars2.length > 0 && !isComparison && (
               <>
                 <SectionLabel>Pillar Styles</SectionLabel>
                 <PLockItemStylesToggle checked={locked} onChange={(v) => {
@@ -2763,9 +3234,6 @@ function WhyUsInspector({
       })()}
 
       <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      {slide.layoutKey === "editorial-cards" && (
-        <SharedCardStyleSection content={content} updateContent={updateContent} />
-      )}
       {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
@@ -2906,73 +3374,25 @@ function ScopeOverviewInspector({
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const selectedPhotos = content.selectedPhotos ?? [];
   const scopeItems = content.scopeItems ?? [];
-  const isSplitPanel = slide.layoutKey === "split-panel";
-  // Per-layout photo capacity. The structured layouts use 1 (or 3 for gallery);
-  // the legacy layouts use 2 / 4.
+  // Per-layout photo capacity. Single-photo layouts use 1; gallery uses 3.
   const PHOTO_CAP: Record<string, number> = {
     "editorial-split": 1,
     "blueprint-icons": 1,
     "photo-numbered": 1,
     "photo-checklist": 1,
     "gallery-grid": 3,
-    "split-panel": 2,
-    "image-row": 4,
   };
-  const maxPhotos = PHOTO_CAP[slide.layoutKey] ?? 4;
-  // Layouts driven by the structured scope-items editor (vs. the legacy paragraph).
-  const usesStructuredItems =
-    slide.layoutKey === "editorial-split" ||
-    slide.layoutKey === "blueprint-icons" ||
-    slide.layoutKey === "photo-numbered" ||
-    slide.layoutKey === "photo-checklist" ||
-    slide.layoutKey === "gallery-grid";
+  const maxPhotos = PHOTO_CAP[slide.layoutKey] ?? 1;
+  // All remaining scope layouts are driven by the structured scope-items editor.
+  const usesStructuredItems = true;
+  const isEditorialSplit = slide.layoutKey === "editorial-split";
+  const isBlueprint = slide.layoutKey === "blueprint-icons";
+  const blueprintMarker = content.itemMarker ?? "icon";
+  // Which content source this slide shows. Drives whether the Description
+  // (paragraph) text field is relevant. All layouts default to items.
+  const activeMode = content.contentMode ?? "items";
   const [pickerOpen, setPickerOpen] = useState(false);
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
-
-  // ── AI Edit (prompt-driven redesign) ──────────────────────────────────────
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiCopy, setAiCopy] = useState(true);
-  const [aiLayout, setAiLayout] = useState(true);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiMsg, setAiMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-
-  async function runAiEdit() {
-    if (!aiPrompt.trim()) {
-      setAiMsg({ kind: "err", text: "Type what you'd like changed." });
-      return;
-    }
-    if (!aiCopy && !aiLayout) {
-      setAiMsg({ kind: "err", text: "Check at least one: Copy and/or Layout." });
-      return;
-    }
-    setAiBusy(true);
-    setAiMsg(null);
-    try {
-      const res = await aiEditScopeSlideAction({
-        slideId: slide.id,
-        prompt: aiPrompt,
-        changeCopy: aiCopy,
-        changeLayout: aiLayout,
-      });
-      if (!res.ok) {
-        setAiMsg({ kind: "err", text: res.error });
-        return;
-      }
-      const next: ProposalSlide = {
-        ...slide,
-        content: { ...content, ...res.contentPatch },
-        isUserModified: true,
-      };
-      if (res.headline !== null) next.headline = res.headline;
-      if (res.layoutKey !== null) next.layoutKey = res.layoutKey;
-      onUpdate(next);
-      setAiMsg({ kind: "ok", text: res.note ?? "Slide updated." });
-    } catch {
-      setAiMsg({ kind: "err", text: "AI edit failed. Try again." });
-    } finally {
-      setAiBusy(false);
-    }
-  }
 
   function updateContent(patch: Partial<ScopeOverviewContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
@@ -3028,56 +3448,8 @@ function ScopeOverviewInspector({
 
   return (
     <>
-      {/* ── AI EDIT ────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          border: `1px solid ${branding.accentColor}55`,
-          background: branding.accentColor + "0E",
-          borderRadius: 8,
-          padding: 10,
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: branding.textColor }}>✦ AI Edit</span>
-        </div>
-        <p style={{ fontSize: 10, color: "#6B7280", lineHeight: 1.5, marginBottom: 8 }}>
-          Describe the change in plain language — e.g. &quot;make this blueprint style with icons and pull the square footage into an orange subtitle.&quot;
-        </p>
-        <TextArea
-          value={aiPrompt}
-          onChange={(v) => setAiPrompt(v)}
-          placeholder="Tell the AI what to change…"
-          rows={3}
-        />
-        <div style={{ display: "flex", gap: 14, margin: "8px 0" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#374151", cursor: "pointer" }}>
-            <input type="checkbox" checked={aiCopy} onChange={(e) => setAiCopy(e.target.checked)} style={{ accentColor: branding.accentColor }} />
-            Change copy &amp; items
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#374151", cursor: "pointer" }}>
-            <input type="checkbox" checked={aiLayout} onChange={(e) => setAiLayout(e.target.checked)} style={{ accentColor: branding.accentColor }} />
-            Change layout &amp; style
-          </label>
-        </div>
-        <button
-          onClick={runAiEdit}
-          disabled={aiBusy}
-          style={{
-            width: "100%", padding: "8px 10px",
-            background: aiBusy ? "#9CA3AF" : branding.accentColor,
-            color: "#FFFFFF", border: "none", borderRadius: 5,
-            cursor: aiBusy ? "default" : "pointer", fontSize: 12, fontWeight: 600,
-          }}
-        >
-          {aiBusy ? "Editing…" : "Apply AI Edit"}
-        </button>
-        {aiMsg && (
-          <p style={{ fontSize: 10, lineHeight: 1.4, marginTop: 6, color: aiMsg.kind === "ok" ? "#15803D" : "#DC2626" }}>
-            {aiMsg.text}
-          </p>
-        )}
-      </div>
+      {/* AI Edit box is rendered centrally by InspectorPanel for all supported
+          slide types — no per-inspector copy needed. */}
 
       {/* ── TITLE ──────────────────────────────────────────────────────── */}
       <SectionLabel>Title</SectionLabel>
@@ -3117,9 +3489,6 @@ function ScopeOverviewInspector({
           />
         </FieldGroup>
       </div>
-      <FieldGroup label="Outline">
-        <POutlineRow accentColor={branding.accentColor} value={content.titleOutline} onChangeFn={(v) => updateContent({ titleOutline: v })} />
-      </FieldGroup>
 
       {PF_GROUP_DIVIDER}
 
@@ -3129,11 +3498,6 @@ function ScopeOverviewInspector({
         Choose what this layout shows — the bullet items or the paragraph.
       </p>
       {(() => {
-        const defaultMode =
-          slide.layoutKey === "split-panel" || slide.layoutKey === "image-row"
-            ? "description"
-            : "items";
-        const activeMode = content.contentMode ?? defaultMode;
         const opt = (val: "items" | "description", label: string) => (
           <button
             onClick={() => updateContent({ contentMode: val })}
@@ -3162,14 +3526,39 @@ function ScopeOverviewInspector({
         The bullet items below — used when &quot;Content&quot; is set to Bullet items.
       </p>
 
-      <FieldGroup label="Intro (optional)">
-        <TextArea
-          value={content.intro ?? ""}
-          onChange={(v) => updateContent({ intro: v || null })}
-          placeholder="One short framing sentence (shown on the Editorial card)…"
-          rows={2}
-        />
-      </FieldGroup>
+      {isEditorialSplit && (
+        <FieldGroup label="“Vision” card text (Editorial)">
+          <TextArea
+            value={content.intro ?? ""}
+            onChange={(v) => updateContent({ intro: v || null })}
+            placeholder="One short framing sentence — shown on the floating card over the photo…"
+            rows={2}
+          />
+        </FieldGroup>
+      )}
+
+      {isEditorialSplit && (
+        <>
+          <FieldGroup label="Panel Background (Editorial)">
+            <BrandingColorRow
+              branding={branding}
+              value={content.panelColor}
+              defaultVal="#27323B"
+              onChange={(v) => updateContent({ panelColor: v })}
+              onReset={() => updateContent({ panelColor: null })}
+            />
+          </FieldGroup>
+          <FieldGroup label="Panel Text (Editorial)">
+            <BrandingColorRow
+              branding={branding}
+              value={content.panelTextColor}
+              defaultVal="#FFFFFF"
+              onChange={(v) => updateContent({ panelTextColor: v })}
+              onReset={() => updateContent({ panelTextColor: null })}
+            />
+          </FieldGroup>
+        </>
+      )}
 
       {usesStructuredItems && (
         <FieldGroup label={`Item Text Size — ${(content.scopeItemsSize ?? 1.0).toFixed(1)}×`}>
@@ -3191,9 +3580,9 @@ function ScopeOverviewInspector({
           Show item icons
         </label>
       )}
-      {(slide.layoutKey === "blueprint-icons" ||
+      {((isBlueprint && blueprintMarker !== "none") ||
         (slide.layoutKey === "editorial-split" && (content.showItemIcons ?? true))) && (
-        <FieldGroup label={`Icon Size — ${(content.scopeIconSize ?? 1.0).toFixed(1)}×`}>
+        <FieldGroup label={`${blueprintMarker === "check" ? "Marker" : "Icon"} Size — ${(content.scopeIconSize ?? 1.0).toFixed(1)}×`}>
           <PSizeSlider
             accentColor={branding.accentColor}
             value={content.scopeIconSize ?? 1.0}
@@ -3203,13 +3592,15 @@ function ScopeOverviewInspector({
       )}
 
       {/* Blueprint + Icons specifics */}
-      <FieldGroup label="Stat subtitle (Blueprint layout)">
-        <TextInput
-          value={content.stat ?? ""}
-          onChange={(v) => updateContent({ stat: v || null })}
-          placeholder="e.g. 168 square feet of extended living space"
-        />
-      </FieldGroup>
+      {slide.layoutKey === "blueprint-icons" && (
+        <FieldGroup label="Stat subtitle (Blueprint layout)">
+          <TextInput
+            value={content.stat ?? ""}
+            onChange={(v) => updateContent({ stat: v || null })}
+            placeholder="e.g. 168 square feet of extended living space"
+          />
+        </FieldGroup>
+      )}
       {slide.layoutKey === "blueprint-icons" && (
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "2px 0 10px", cursor: "pointer" }}>
           <input
@@ -3220,6 +3611,56 @@ function ScopeOverviewInspector({
           />
           Blueprint grid background + dimension marks
         </label>
+      )}
+
+      {isBlueprint && (
+        <>
+          <FieldGroup label="Item marker (Blueprint)">
+            <div style={{ display: "flex", gap: 4 }}>
+              {([
+                ["icon", "Icons"],
+                ["check", "Check marks"],
+                ["none", "Off"],
+              ] as const).map(([val, label]) => {
+                const active = blueprintMarker === val;
+                return (
+                  <button
+                    key={val}
+                    onClick={() => updateContent({ itemMarker: val })}
+                    style={{
+                      flex: 1, fontSize: 10, padding: "4px 4px", borderRadius: 3, cursor: "pointer",
+                      background: active ? branding.accentColor : "#F3F4F6",
+                      color: active ? "#fff" : "#374151",
+                      border: `1px solid ${active ? branding.accentColor : "#D1D5DB"}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </FieldGroup>
+          {blueprintMarker !== "none" && (
+            <FieldGroup label={blueprintMarker === "check" ? "Check mark color" : "Icon color"}>
+              <BrandingColorRow
+                branding={branding}
+                value={content.iconColor}
+                defaultVal={content.titleColor ?? branding.textColor}
+                onChange={(v) => updateContent({ iconColor: v })}
+                onReset={() => updateContent({ iconColor: null })}
+              />
+            </FieldGroup>
+          )}
+          <FieldGroup label="Item title color">
+            <BrandingColorRow
+              branding={branding}
+              value={content.itemTitleColor}
+              defaultVal={content.titleColor ?? branding.textColor}
+              onChange={(v) => updateContent({ itemTitleColor: v })}
+              onReset={() => updateContent({ itemTitleColor: null })}
+            />
+          </FieldGroup>
+        </>
       )}
 
       {scopeItems.length > 0 && (
@@ -3297,7 +3738,9 @@ function ScopeOverviewInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── DESCRIPTION ────────────────────────────────────────────────── */}
+      {/* ── DESCRIPTION (paragraph mode only) ──────────────────────────── */}
+      {activeMode === "description" && (
+      <>
       <SectionLabel>Description</SectionLabel>
       <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
         Paragraph form — shown when &quot;Content&quot; above is set to Paragraph.
@@ -3322,93 +3765,18 @@ function ScopeOverviewInspector({
           </p>
         );
       })()}
-      <FieldGroup label="Font">
-        <PFontSelect
-          value={content.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body}
-          onChange={(v) => updateContent({ descriptionFont: v })}
-        />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.descriptionSize ?? content.copySize ?? 1.0).toFixed(1)}×`}>
-        <PSizeSlider
-          accentColor={branding.accentColor}
-          value={content.descriptionSize ?? content.copySize ?? 1.0}
-          onChange={(v) => updateContent({ descriptionSize: v })}
-        />
-      </FieldGroup>
-      <PStyleButtons
-        bold={content.descriptionBold} italic={content.descriptionItalic} underline={content.descriptionUnderline}
-        onBold={(v) => updateContent({ descriptionBold: v })}
-        onItalic={(v) => updateContent({ descriptionItalic: v })}
-        onUnderline={(v) => updateContent({ descriptionUnderline: v })}
-      />
-      <div style={{ marginTop: 8 }}>
-        <FieldGroup label="Color">
-          <BrandingColorRow branding={branding}
-            value={content.descriptionColor ?? content.copyColor}
-            defaultVal="#4A5568"
-            onChange={(v) => updateContent({ descriptionColor: v })}
-            onReset={() => updateContent({ descriptionColor: null })}
-          />
-        </FieldGroup>
-      </div>
-      <FieldGroup label="Outline">
-        <POutlineRow accentColor={branding.accentColor} value={content.descriptionOutline} onChangeFn={(v) => updateContent({ descriptionOutline: v })} />
-      </FieldGroup>
 
       {PF_GROUP_DIVIDER}
-
-      {/* ── TEXT POSITION ──────────────────────────────────────────────── */}
-      <SectionLabel>Text Position</SectionLabel>
-      <FieldGroup label={`Title X — ${Math.round((content.titleX ?? 0.06) * 100)}%`}>
-        <input type="range" min={0} max={100} step={1}
-          value={Math.round((content.titleX ?? 0.06) * 100)}
-          onChange={(e) => updateContent({ titleX: parseInt(e.target.value) / 100 })}
-          style={{ width: "100%", accentColor: branding.accentColor }} />
-      </FieldGroup>
-      <FieldGroup label={`Title Y — ${Math.round((content.titleY ?? (isSplitPanel ? 0.35 : 0.16)) * 100)}%`}>
-        <input type="range" min={0} max={100} step={1}
-          value={Math.round((content.titleY ?? (isSplitPanel ? 0.35 : 0.16)) * 100)}
-          onChange={(e) => updateContent({ titleY: parseInt(e.target.value) / 100 })}
-          style={{ width: "100%", accentColor: branding.accentColor }} />
-      </FieldGroup>
-      <FieldGroup label={`Desc X — ${Math.round((content.copyX ?? 0.06) * 100)}%`}>
-        <input type="range" min={0} max={100} step={1}
-          value={Math.round((content.copyX ?? 0.06) * 100)}
-          onChange={(e) => updateContent({ copyX: parseInt(e.target.value) / 100 })}
-          style={{ width: "100%", accentColor: branding.accentColor }} />
-      </FieldGroup>
-      <FieldGroup label={`Desc Y — ${Math.round((content.copyY ?? (isSplitPanel ? 0.66 : 0.33)) * 100)}%`}>
-        <input type="range" min={0} max={100} step={1}
-          value={Math.round((content.copyY ?? (isSplitPanel ? 0.66 : 0.33)) * 100)}
-          onChange={(e) => updateContent({ copyY: parseInt(e.target.value) / 100 })}
-          style={{ width: "100%", accentColor: branding.accentColor }} />
-      </FieldGroup>
-      <button
-        onClick={() => updateContent({ titleX: null, titleY: null, copyX: null, copyY: null })}
-        style={{ fontSize: 10, color: "#9CA3AF", background: "none", border: "none", cursor: "pointer", marginBottom: 8 }}
-      >
-        Reset all positions
-      </button>
-
-      {PF_GROUP_DIVIDER}
+      </>
+      )}
 
       {/* ── Photo picker ────────────────────────────────────────────────── */}
-      <SectionLabel>Photos</SectionLabel>
+      <SectionLabel>{maxPhotos === 1 ? "Photo" : "Photos"}</SectionLabel>
       <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 8, lineHeight: 1.5 }}>
         {maxPhotos === 1
           ? "1 photo for this layout."
           : `Up to ${maxPhotos} photos for this layout.`}
       </p>
-
-      {/* Panel split ratio — Split Panel only */}
-      {isSplitPanel && (
-        <FieldGroup label={`Photo Panel Width — ${content.panelSplitRatio ?? 50}% photo / ${100 - (content.panelSplitRatio ?? 50)}% text`}>
-          <input type="range" min={20} max={80} step={5}
-            value={content.panelSplitRatio ?? 50}
-            onChange={(e) => updateContent({ panelSplitRatio: parseInt(e.target.value) })}
-            style={{ width: "100%", accentColor: branding.accentColor }} />
-        </FieldGroup>
-      )}
 
       {selectedPhotos.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
@@ -3443,8 +3811,8 @@ function ScopeOverviewInspector({
         }}
       >
         {selectedPhotos.length === 0
-          ? "Choose Photos"
-          : `Change Photos (${selectedPhotos.length}/${maxPhotos})`}
+          ? maxPhotos === 1 ? "Choose Photo" : "Choose Photos"
+          : maxPhotos === 1 ? "Change Photo" : `Change Photos (${selectedPhotos.length}/${maxPhotos})`}
       </button>
 
       {selectedPhotos.length > 0 && (
@@ -3462,7 +3830,6 @@ function ScopeOverviewInspector({
         projectMedia={projectMediaGroups}
       />
       <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={selectedPhotos.length > 0} />
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
   );
@@ -3549,6 +3916,31 @@ function BeforeAfterInspector({
       <FieldGroup label="Outline">
         <POutlineRow value={content.headlineOutline} onChangeFn={(v) => updateContent({ headlineOutline: v })} accentColor={accent} />
       </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      {/* ── TRANSFORMATION ──────────────────────────── */}
+      <SectionLabel>Transformation</SectionLabel>
+      <FieldGroup label="Stat chip (optional)">
+        <TextInput
+          value={content.transformationStat ?? ""}
+          onChange={(v) => updateContent({ transformationStat: v || null })}
+          placeholder="e.g. +168 SF · ceilings 8′ → 18′"
+        />
+      </FieldGroup>
+      {slide.layoutKey === "reveal-slider" && (
+        <FieldGroup label={`Reveal start — ${content.sliderPosition ?? 50}%`}>
+          <input
+            type="range" min={0} max={100} step={1}
+            value={content.sliderPosition ?? 50}
+            onChange={(e) => updateContent({ sliderPosition: parseInt(e.target.value, 10) })}
+            style={{ width: "100%", accentColor: accent }}
+          />
+          <p style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>
+            Where the divider sits when the slide opens. Drag the handle on the slide to preview.
+          </p>
+        </FieldGroup>
+      )}
 
       {PF_GROUP_DIVIDER}
 
@@ -3990,13 +4382,36 @@ function ScopeBreakdownInspector({
   const [pickerOpen, setPickerOpen] = useState(false);
   const MAX_PHOTOS = 4;
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
+  const locked = !!content.lockItemStyles;
+  const showsArt = slide.layoutKey === "utility-grid" || slide.layoutKey === "blueprint";
+
+  // Style/size keys that "Lock sections together" keeps consistent across rooms.
+  const ROOM_STYLE_KEYS: (keyof ScopeBreakdownRoom)[] = [
+    "illustrationSize",
+    "titleFont", "titleSize", "titleBold", "titleItalic", "titleUnderline", "titleColor", "titleOutline",
+    "descriptionFont", "descriptionSize", "descriptionBold", "descriptionItalic", "descriptionUnderline", "descriptionColor", "descriptionOutline",
+  ];
 
   function updateContent(patch: Partial<ScopeBreakdownContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
   }
 
   function updateRoom(id: string, patch: Partial<ScopeBreakdownRoom>) {
-    updateContent({ rooms: rooms.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
+    // When locked, the STYLE/SIZE portion of an edit propagates to every room so
+    // they stay consistent; per-room text (name/description/isIncluded) stays local.
+    const stylePatch: Partial<ScopeBreakdownRoom> = {};
+    if (locked) {
+      for (const k of ROOM_STYLE_KEYS) {
+        if (k in patch) (stylePatch as Record<string, unknown>)[k] = (patch as Record<string, unknown>)[k];
+      }
+    }
+    const hasStyle = Object.keys(stylePatch).length > 0;
+    updateContent({
+      rooms: rooms.map((r) => {
+        if (r.id === id) return { ...r, ...patch };
+        return hasStyle ? { ...r, ...stylePatch } : r;
+      }),
+    });
   }
 
   function handlePickerSelect(items: LibraryMediaItem[]) {
@@ -4107,6 +4522,18 @@ function ScopeBreakdownInspector({
       {/* ── SECTION ITEMS ─────────────────────────────────────────────── */}
       <SectionLabel>Sections</SectionLabel>
 
+      {rooms.length > 1 && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", margin: "2px 0 8px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={locked}
+            onChange={(e) => updateContent({ lockItemStyles: e.target.checked || null })}
+            style={{ accentColor: branding.accentColor }}
+          />
+          Lock sections together (style + size apply to all)
+        </label>
+      )}
+
       {rooms.length === 0 ? (
         <p style={{ fontSize: 11, color: "#9CA3AF", lineHeight: 1.5 }}>
           No sections yet. Use{" "}
@@ -4160,6 +4587,18 @@ function ScopeBreakdownInspector({
                       placeholder="Short description of this area's scope…"
                       rows={2}
                     />
+
+                    {showsArt && (
+                      <div style={{ marginTop: 6 }}>
+                        <FieldGroup label={`${slide.layoutKey === "blueprint" ? "Illustration" : "Icon"} Size — ${(room.illustrationSize ?? 1.0).toFixed(1)}×`}>
+                          <PSizeSlider
+                            accentColor={branding.accentColor}
+                            value={room.illustrationSize ?? 1.0}
+                            onChange={(v) => updateRoom(room.id, { illustrationSize: v })}
+                          />
+                        </FieldGroup>
+                      </div>
+                    )}
 
                     {/* Phase 8C.1: T6 category dropdown removed (scope
                         categorization feature reverted). Category data
@@ -4299,273 +4738,6 @@ function ScopeBreakdownInspector({
         projectMedia={projectMediaGroups}
       />
       <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
-    </>
-  );
-}
-
-// ─── Risk Brief Inspector ─────────────────────────────────────────────────────
-
-function RiskBriefInspector({
-  slide,
-  branding,
-  onUpdate,
-}: {
-  slide: ProposalSlide;
-  branding: DeckBranding;
-  onUpdate: (s: ProposalSlide) => void;
-}) {
-  const content = (slide.content ?? {}) as RiskBriefContent;
-
-  function updateContent(patch: Partial<RiskBriefContent>) {
-    onUpdate({ ...slide, content: { ...content, ...patch } });
-  }
-
-  const isComparisonTable = slide.layoutKey === "comparison-table";
-
-  function updateBullet(side: "leftBullets" | "rightBullets", index: number, value: string) {
-    const current = (content[side] ?? ["", "", ""]).slice();
-    while (current.length < 3) current.push("");
-    current[index] = value;
-    updateContent({ [side]: current });
-  }
-
-  function updateRowLabel(index: number, value: string) {
-    const current = (content.rowLabels ?? ["", "", ""]).slice();
-    while (current.length < 3) current.push("");
-    current[index] = value;
-    updateContent({ rowLabels: current });
-  }
-
-  const leftBullets  = (content.leftBullets  ?? ["", "", ""]).concat(Array(3).fill("")).slice(0, 3);
-  const rightBullets = (content.rightBullets ?? ["", "", ""]).concat(Array(3).fill("")).slice(0, 3);
-  const rowLabels    = (content.rowLabels    ?? ["", "", ""]).concat(Array(3).fill("")).slice(0, 3);
-
-  const accent = content.accentColor ?? branding.accentColor;
-
-  return (
-    <>
-      {/* ── Title ────────────────────────────────────────────────────────── */}
-      <SectionLabel>Title</SectionLabel>
-
-      <FieldGroup label="Title">
-        <TextInput
-          value={slide.headline ?? ""}
-          onChange={(v) => onUpdate({ ...slide, headline: v || null })}
-          placeholder={isComparisonTable ? "Diagnostic Matrix: The Traditional Model vs. HHI" : "The Stress-Free Remodel: How We Eliminate Common Risks"}
-        />
-      </FieldGroup>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ titleFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.titleSize ?? 1.5).toFixed(1)}×`}>
-        <PSizeSlider value={content.titleSize ?? 1.5} onChange={(v) => updateContent({ titleSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.titleBold ?? true} italic={content.titleItalic} underline={content.titleUnderline}
-          onBold={(v) => updateContent({ titleBold: v })} onItalic={(v) => updateContent({ titleItalic: v })} onUnderline={(v) => updateContent({ titleUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.titleColor}
-          defaultVal={isComparisonTable ? "#FFFFFF" : branding.textColor}
-          onChange={(v) => updateContent({ titleColor: v })}
-          onReset={() => updateContent({ titleColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.titleTextOutline} onChangeFn={(v) => updateContent({ titleTextOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      <Divider />
-
-      {/* ── Left Column ───────────────────────────────────────────────────── */}
-      <SectionLabel>Left Column</SectionLabel>
-
-      <FieldGroup label="Left Column Header">
-        <TextInput value={content.leftHeader ?? ""}
-          onChange={(v) => updateContent({ leftHeader: v || null })}
-          placeholder={isComparisonTable ? "Traditional Contracting" : "Why Remodels Go Wrong"} />
-      </FieldGroup>
-      {[0, 1, 2].map((i) => (
-        <FieldGroup key={i} label={`Left Bullet ${i + 1}`}>
-          <TextArea value={leftBullets[i]}
-            onChange={(v) => updateBullet("leftBullets", i, v)}
-            placeholder={`Problem bullet ${i + 1}…`} rows={2} />
-        </FieldGroup>
-      ))}
-      <FieldGroup label="Left Box Color">
-        <BrandingColorRow branding={branding} value={content.leftBoxColor} defaultVal="#0D1B2A"
-          onChange={(v) => updateContent({ leftBoxColor: v })}
-          onReset={() => updateContent({ leftBoxColor: null })} />
-      </FieldGroup>
-
-      <Divider />
-
-      {/* ── Right Column ─────────────────────────────────────────────────── */}
-      <SectionLabel>Right Column</SectionLabel>
-
-      <FieldGroup label="Right Column Header">
-        <TextInput value={content.rightHeader ?? ""}
-          onChange={(v) => updateContent({ rightHeader: v || null })}
-          placeholder={isComparisonTable ? "HHI Design-Build" : "How We Prevent That"} />
-      </FieldGroup>
-      {[0, 1, 2].map((i) => (
-        <FieldGroup key={i} label={`Right Bullet ${i + 1}`}>
-          <TextArea value={rightBullets[i]}
-            onChange={(v) => updateBullet("rightBullets", i, v)}
-            placeholder={`Solution bullet ${i + 1}…`} rows={2} />
-        </FieldGroup>
-      ))}
-      <FieldGroup label="Right Box Color">
-        <BrandingColorRow branding={branding} value={content.rightBoxColor} defaultVal={branding.accentColor}
-          onChange={(v) => updateContent({ rightBoxColor: v })}
-          onReset={() => updateContent({ rightBoxColor: null })} />
-      </FieldGroup>
-
-      <Divider />
-
-      {/* ── Column Headers ───────────────────────────────────────────────── */}
-      <SectionLabel>Column Headers</SectionLabel>
-
-      <FieldGroup label="Font">
-        <PFontSelect value={content.headerFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ headerFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.headerSize ?? 1.5).toFixed(1)}×`}>
-        <PSizeSlider value={content.headerSize ?? 1.5} onChange={(v) => updateContent({ headerSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.headerBold ?? true} italic={content.headerItalic} underline={content.headerUnderline}
-          onBold={(v) => updateContent({ headerBold: v })} onItalic={(v) => updateContent({ headerItalic: v })} onUnderline={(v) => updateContent({ headerUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.headerTextColor} defaultVal="#ffffff"
-          onChange={(v) => updateContent({ headerTextColor: v })}
-          onReset={() => updateContent({ headerTextColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.headerTextOutline} onChangeFn={(v) => updateContent({ headerTextOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      <Divider />
-
-      {/* ── Row Labels (comparison-table only) ───────────────────────────── */}
-      <SectionLabel>Row Labels</SectionLabel>
-      {!isComparisonTable && (
-        <p style={{ fontSize: 10, color: "#C4C0BB", marginBottom: 8, lineHeight: 1.4 }}>
-          Only applies to the Comparison Matrix layout.
-        </p>
-      )}
-
-      <FieldGroup label="Show Row Labels">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            onClick={() => updateContent({ showRowLabels: !content.showRowLabels })}
-            style={{
-              width: 40, height: 22, borderRadius: 11,
-              background: content.showRowLabels ? branding.accentColor : "#D1D5DB",
-              border: "none", cursor: "pointer", position: "relative", transition: "background 0.2s",
-            }}
-          >
-            <span style={{
-              position: "absolute", top: 3,
-              left: content.showRowLabels ? 21 : 3,
-              width: 16, height: 16, borderRadius: "50%",
-              background: "#fff", transition: "left 0.2s",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-            }} />
-          </button>
-          <span style={{ fontSize: 11, color: "#6B7280" }}>
-            {content.showRowLabels ? "On" : "Off"}
-          </span>
-        </div>
-      </FieldGroup>
-
-      {content.showRowLabels && (
-        <>
-          {[0, 1, 2].map((i) => (
-            <FieldGroup key={i} label={`Row ${i + 1} Label`}>
-              <TextInput value={rowLabels[i]}
-                onChange={(v) => updateRowLabel(i, v)}
-                placeholder={["Accountability", "Budgeting", "Design"][i] ?? `Row ${i + 1}`} />
-            </FieldGroup>
-          ))}
-        </>
-      )}
-
-      <Divider />
-
-      {/* ── Body / Bullets ────────────────────────────────────────────────── */}
-      <SectionLabel>Body / Bullets</SectionLabel>
-
-      <FieldGroup label={`Size — ${(content.bodySize ?? 1.5).toFixed(1)}×`}>
-        <PSizeSlider value={content.bodySize ?? 1.5} onChange={(v) => updateContent({ bodySize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.bodyBold} italic={content.bodyItalic} underline={content.bodyUnderline}
-          onBold={(v) => updateContent({ bodyBold: v })} onItalic={(v) => updateContent({ bodyItalic: v })} onUnderline={(v) => updateContent({ bodyUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.bodyTextColor} defaultVal="#ffffff"
-          onChange={(v) => updateContent({ bodyTextColor: v })}
-          onReset={() => updateContent({ bodyTextColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.bodyTextOutline} onChangeFn={(v) => updateContent({ bodyTextOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      <Divider />
-
-      {/* ── Box Icons ────────────────────────────────────────────────────── */}
-      <SectionLabel>Box Icons</SectionLabel>
-
-      <FieldGroup label="Cross ✕ Color">
-        <BrandingColorRow branding={branding} value={content.crossColor} defaultVal="#9CA3AF"
-          onChange={(v) => updateContent({ crossColor: v })} onReset={() => updateContent({ crossColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Check ✓ Color">
-        <BrandingColorRow branding={branding} value={content.checkColor} defaultVal={branding.accentColor}
-          onChange={(v) => updateContent({ checkColor: v })} onReset={() => updateContent({ checkColor: null })} />
-      </FieldGroup>
-      <FieldGroup label={`Icon Size — ${(content.iconSize ?? 1.5).toFixed(1)}×`}>
-        <PSizeSlider value={content.iconSize ?? 1.5} onChange={(v) => updateContent({ iconSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Icon Outline">
-        <POutlineRow value={content.iconOutline} onChangeFn={(v) => updateContent({ iconOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      <Divider />
-
-      {/* ── Bottom Statement ─────────────────────────────────────────────── */}
-      <SectionLabel>Bottom Statement</SectionLabel>
-
-      <FieldGroup label="">
-        <TextArea value={content.bottomStatement ?? ""}
-          onChange={(v) => updateContent({ bottomStatement: v || null })}
-          placeholder="A clear plan, a defined budget, and no surprises during construction."
-          rows={3} />
-      </FieldGroup>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.bottomFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ bottomFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.bottomSize ?? 1.5).toFixed(1)}×`}>
-        <PSizeSlider value={content.bottomSize ?? 1.5} onChange={(v) => updateContent({ bottomSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.bottomBold ?? true} italic={content.bottomItalic ?? true} underline={content.bottomUnderline}
-          onBold={(v) => updateContent({ bottomBold: v })} onItalic={(v) => updateContent({ bottomItalic: v })} onUnderline={(v) => updateContent({ bottomUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.bottomColor} defaultVal={branding.accentColor}
-          onChange={(v) => updateContent({ bottomColor: v })} onReset={() => updateContent({ bottomColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.bottomTextOutline} onChangeFn={(v) => updateContent({ bottomTextOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      <Divider />
-
-      <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      <SharedCardStyleSection content={content} updateContent={updateContent} />
-      {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
   );
@@ -4822,7 +4994,7 @@ function ProcessInspector({
       </FieldGroup>
 
       <SharedSectionLabelToggle content={content} updateContent={updateContent} />
-      <SharedCardStyleSection content={content} updateContent={updateContent} />
+      {/* Card Style removed — OurProcess StageCard hardcodes its chrome (dead controls). */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
   );
@@ -5098,7 +5270,6 @@ function ProjectTimelineInspector({
     "nameFont", "nameSize", "nameBold", "nameItalic", "nameUnderline", "nameColor", "nameOutline",
     "durationFont", "durationSize", "durationBold", "durationItalic", "durationUnderline", "durationColor", "durationOutline",
     "descriptionFont", "descriptionSize", "descriptionBold", "descriptionItalic", "descriptionUnderline", "descriptionColor", "descriptionOutline",
-    "noteFont", "noteSize", "noteBold", "noteItalic", "noteUnderline", "noteColor", "noteOutline",
   ];
 
   function updateContent(patch: Partial<TimelineContent>) {
@@ -5194,9 +5365,8 @@ function ProjectTimelineInspector({
       {PF_GROUP_DIVIDER}
 
       {/* ── TIMELINE DOTS ───────────────────────────── */}
-      {/* Dot size only matters on the two layouts that render dots; the
-          stepped-hierarchy layout uses left-border bars instead. */}
-      {(layoutKey === "vertical-dot" || layoutKey === "vertical-alternating") && (
+      {/* Dot size only matters on the layouts that render dots. */}
+      {(layoutKey === "vertical-dot" || layoutKey === "horizon-wave") && (
         <>
           <SectionLabel>Timeline Dots</SectionLabel>
           <FieldGroup label={`Dot Size — ${(content.dotSize ?? 1.0).toFixed(1)}×`}>
@@ -5241,6 +5411,13 @@ function ProjectTimelineInspector({
       <Divider />
 
       {/* ── PHASES ───────────────────────────────────── */}
+      {(layoutKey === "week-axis" || layoutKey === "chevron-phases" || layoutKey === "roadmap-cards") && (
+        <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.5, marginBottom: 8 }}>
+          Phases without a duration (the kickoff milestones) are spaced at the
+          front of the timeline; the measured weeks start at the first phase.
+          Durations sync from the project&apos;s Timeline tab.
+        </p>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <SectionLabel>Phases</SectionLabel>
         <button
@@ -5274,6 +5451,54 @@ function ProjectTimelineInspector({
               )}
             </div>
           </div>
+
+          {/* Timeline placement — Week Axis / Horizon Wave only */}
+          {(layoutKey === "week-axis" || layoutKey === "horizon-wave") && (
+            <>
+              <FieldGroup label="Placement">
+                <div style={{ display: "flex", gap: 4 }}>
+                  {(["auto", "above", "below"] as const).map((s) => {
+                    const active = (phase.side ?? "auto") === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => updatePhase(pi, { side: s === "auto" ? null : s })}
+                        style={{
+                          flex: 1,
+                          fontSize: 10,
+                          padding: "4px 0",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          border: `1px solid ${active ? accent : "#D1D5DB"}`,
+                          background: active ? `${accent}18` : "#FFFFFF",
+                          color: active ? "#374151" : "#6B7280",
+                          fontWeight: active ? 600 : 400,
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </FieldGroup>
+              <FieldGroup label={`Nudge — ${(phase.offsetX ?? 0) > 0 ? "+" : ""}${phase.offsetX ?? 0}%`}>
+                <input
+                  type="range"
+                  min={-20}
+                  max={20}
+                  step={1}
+                  value={phase.offsetX ?? 0}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    updatePhase(pi, { offsetX: v === 0 ? null : v });
+                  }}
+                  style={{ width: "100%", accentColor: accent }}
+                />
+              </FieldGroup>
+              {PF_GROUP_DIVIDER}
+            </>
+          )}
 
           {/* Name */}
           <FieldGroup label="Name">
@@ -5345,39 +5570,6 @@ function ProjectTimelineInspector({
             <POutlineRow value={phase.descriptionOutline} onChangeFn={(v) => updatePhase(pi, { descriptionOutline: v })} accentColor={accent} />
           </FieldGroup>
 
-          {/* Note (shown only for Stepped Hierarchy layout) */}
-          {layoutKey === "stepped-hierarchy" && (
-            <>
-              {PF_GROUP_DIVIDER}
-              <FieldGroup label="Note (optional)">
-                <TextInput value={phase.note ?? ""} onChange={(v) => updatePhase(pi, { note: v || null })} placeholder="Sub-note for Stepped layout" />
-              </FieldGroup>
-              <FieldGroup label="Note Font">
-                <PFontSelect value={phase.noteFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updatePhase(pi, { noteFont: v })} />
-              </FieldGroup>
-              <FieldGroup label={`Note Size — ${(phase.noteSize ?? 0.8).toFixed(1)}×`}>
-                <PSizeSlider value={phase.noteSize ?? 0.8} onChange={(v) => updatePhase(pi, { noteSize: v })} accentColor={accent} />
-              </FieldGroup>
-              <FieldGroup label="Note Style">
-                <PStyleButtons bold={phase.noteBold} italic={phase.noteItalic} underline={phase.noteUnderline}
-                  onBold={(v) => updatePhase(pi, { noteBold: v })} onItalic={(v) => updatePhase(pi, { noteItalic: v })} onUnderline={(v) => updatePhase(pi, { noteUnderline: v })} />
-              </FieldGroup>
-              <FieldGroup label="Note Color">
-                <BrandingColorRow branding={branding} value={phase.noteColor} defaultVal="#4A5568"
-                  onChange={(v) => updatePhase(pi, { noteColor: v })} onReset={() => updatePhase(pi, { noteColor: undefined })} />
-              </FieldGroup>
-              <FieldGroup label="Note Outline">
-                <POutlineRow value={phase.noteOutline} onChangeFn={(v) => updatePhase(pi, { noteOutline: v })} accentColor={accent} />
-              </FieldGroup>
-            </>
-          )}
-
-          {/* Note field always visible for non-stepped layouts (text only, no style) */}
-          {layoutKey !== "stepped-hierarchy" && (
-            <FieldGroup label="Note (optional)">
-              <TextInput value={phase.note ?? ""} onChange={(v) => updatePhase(pi, { note: v || null })} placeholder="Sub-note for Stepped layout" />
-            </FieldGroup>
-          )}
         </div>
       ))}
 
@@ -5388,6 +5580,363 @@ function ProjectTimelineInspector({
         className="w-full rounded"
         style={{ fontSize: 11, fontWeight: 500, padding: "6px 10px", border: "1px solid #D1D5DB", background: "#F9FAFB", color: "#6B7280", cursor: "pointer" }}
       >
+        Reset to Defaults
+      </button>
+    </>
+  );
+}
+
+// ─── Design Experience Inspector ────────────────────────────────────────────
+
+function DesignExperienceInspector({
+  slide,
+  branding,
+  onUpdate,
+  projectRoomsWithMedia = [],
+  projectLevelMedia = [],
+}: {
+  slide: ProposalSlide;
+  branding: DeckBranding;
+  onUpdate: (s: ProposalSlide) => void;
+  projectRoomsWithMedia?: RoomWithMedia[];
+  projectLevelMedia?: RoomMediaItem[];
+}) {
+  const content = (slide.content ?? {}) as DesignExperienceContent;
+  const stages = content.stages && content.stages.length > 0 ? content.stages : DEFAULT_DESIGN_EXPERIENCE_STAGES;
+  const accent = content.accentColor ?? branding.accentColor;
+  const layoutKey = (slide.layoutKey as string) ?? "stepped-circles";
+  const usesIcons = layoutKey === "stepped-circles";
+  const usesPhoto = layoutKey === "vertical-photo-steps" || layoutKey === "ladder-photo";
+  const usesSize = layoutKey === "stepped-circles" || layoutKey === "chevron-flow" || layoutKey === "serpentine-cards";
+  const sizeLabel = layoutKey === "chevron-flow" ? "Stage Size" : layoutKey === "serpentine-cards" ? "Card Size" : "Circle Size";
+  const usesDescription = layoutKey !== "chevron-flow"; // chevron shows title only
+  const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
+  const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
+
+  const [brandIcons, setBrandIcons] = useState<TemplateCIcon[]>([]);
+  const [iconsLoaded, setIconsLoaded] = useState(false);
+  useEffect(() => {
+    if (!usesIcons || iconsLoaded) return;
+    import("@/app/admin/settings/actions").then((mod) => {
+      mod.listBrandIcons().then((icons) => {
+        setBrandIcons(icons.map((i) => ({ id: i.id, imageUrl: i.imageUrl, name: i.name })));
+        setIconsLoaded(true);
+      });
+    });
+  }, [usesIcons, iconsLoaded]);
+
+  const locked = content.lockItemStyles ?? true;
+  const STAGE_STYLE_KEYS: (keyof DesignExperienceStage)[] = [
+    "titleFont", "titleSize", "titleBold", "titleItalic", "titleUnderline", "titleColor", "titleOutline",
+    "descriptionFont", "descriptionSize", "descriptionBold", "descriptionItalic", "descriptionUnderline", "descriptionColor", "descriptionOutline",
+  ];
+
+  function updateContent(patch: Partial<DesignExperienceContent>) {
+    onUpdate({ ...slide, content: { ...content, ...patch } });
+  }
+
+  function updateStage(idx: number, patch: Partial<DesignExperienceStage>) {
+    let updated = stages.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+    if (locked && idx === 0) {
+      const stylePatch: Partial<DesignExperienceStage> = {};
+      for (const k of STAGE_STYLE_KEYS) {
+        if (k in patch) (stylePatch as unknown as Record<string, unknown>)[k] = (patch as unknown as Record<string, unknown>)[k];
+      }
+      if (Object.keys(stylePatch).length > 0) {
+        updated = updated.map((s, i) => (i === 0 ? s : { ...s, ...stylePatch }));
+      }
+    }
+    updateContent({ stages: updated });
+  }
+
+  function moveStage(idx: number, dir: -1 | 1) {
+    const target = idx + dir;
+    if (target < 0 || target >= stages.length) return;
+    const updated = [...stages];
+    [updated[idx], updated[target]] = [updated[target], updated[idx]];
+    updateContent({ stages: updated });
+  }
+
+  function addStage() {
+    updateContent({ stages: [...stages, { id: `dx-${Date.now()}`, title: "New Stage", description: "", icon: "FileCheck" }] });
+  }
+
+  function removeStage(idx: number) {
+    updateContent({ stages: stages.filter((_, i) => i !== idx) });
+  }
+
+  function resetToDefaults() {
+    onUpdate({
+      ...slide,
+      headline: DESIGN_EXPERIENCE_DEFAULTS.headline,
+      content: {
+        ...content,
+        stages: DEFAULT_DESIGN_EXPERIENCE_STAGES,
+        sectionLabel: DESIGN_EXPERIENCE_DEFAULTS.sectionLabel,
+        subheadline: DESIGN_EXPERIENCE_DEFAULTS.subheadline,
+        stepWord: DESIGN_EXPERIENCE_DEFAULTS.stepWord,
+      },
+    });
+  }
+
+  const STEP_WORDS = ["Stage", "Stop", "Phase", "Step", ""];
+
+  // Committed isometric default icons (public/deck-icons/<key>.png).
+  const COMMITTED_ICONS = ["measure", "feasibility", "documentation", "selections", "contract"];
+  const deckIconUrl = (key: string | null | undefined) =>
+    key && COMMITTED_ICONS.includes(key) ? `/deck-icons/${key}.png` : null;
+
+  function applyDefaultIcons() {
+    updateContent({
+      stages: stages.map((s) => {
+        const url = deckIconUrl(s.icon);
+        return url
+          ? { ...s, iconUrl: url, iconImageUrl: null, iconId: null }
+          : { ...s, iconImageUrl: null };
+      }),
+    });
+  }
+
+  return (
+    <>
+      {/* ── Section Label ───────────────────────────────────────────── */}
+      <SectionLabel>Section Label</SectionLabel>
+      <FieldGroup label="">
+        <TextInput value={content.sectionLabel ?? ""} onChange={(v) => updateContent({ sectionLabel: v || null })} placeholder={DESIGN_EXPERIENCE_DEFAULTS.sectionLabel} />
+      </FieldGroup>
+      <SharedSectionLabelToggle content={content} updateContent={updateContent} />
+      <FieldGroup label="Label Font">
+        <PFontSelect value={content.sectionLabelFont ?? SLIDE_FONTS.defaults.label} onChange={(v) => updateContent({ sectionLabelFont: v })} />
+      </FieldGroup>
+      <FieldGroup label="Label Color">
+        <BrandingColorRow branding={branding} value={content.sectionLabelColor} defaultVal={accent}
+          onChange={(v) => updateContent({ sectionLabelColor: v })} onReset={() => updateContent({ sectionLabelColor: null })} />
+      </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      {/* ── Headline ────────────────────────────────────────────────── */}
+      <SectionLabel>Headline</SectionLabel>
+      <FieldGroup label="">
+        <TextInput value={slide.headline ?? ""} onChange={(v) => onUpdate({ ...slide, headline: v || null })} placeholder={DESIGN_EXPERIENCE_DEFAULTS.headline} />
+      </FieldGroup>
+      <FieldGroup label="Font">
+        <PFontSelect value={content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ slideTitleFont: v })} />
+      </FieldGroup>
+      <FieldGroup label={`Size — ${(content.slideTitleSize ?? 1.0).toFixed(1)}×`}>
+        <PSizeSlider value={content.slideTitleSize ?? 1.0} onChange={(v) => updateContent({ slideTitleSize: v })} accentColor={accent} />
+      </FieldGroup>
+      <FieldGroup label="Style">
+        <PStyleButtons bold={content.slideTitleBold ?? true} italic={content.slideTitleItalic} underline={content.slideTitleUnderline}
+          onBold={(v) => updateContent({ slideTitleBold: v })} onItalic={(v) => updateContent({ slideTitleItalic: v })} onUnderline={(v) => updateContent({ slideTitleUnderline: v })} />
+      </FieldGroup>
+      <FieldGroup label="Color">
+        <BrandingColorRow branding={branding} value={content.slideTitleColor} defaultVal={branding.textColor}
+          onChange={(v) => updateContent({ slideTitleColor: v })} onReset={() => updateContent({ slideTitleColor: null })} />
+      </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      {/* ── Subheadline ─────────────────────────────────────────────── */}
+      <SectionLabel>Subheadline (caption)</SectionLabel>
+      <FieldGroup label="">
+        <TextInput value={content.subheadline ?? ""} onChange={(v) => updateContent({ subheadline: v || null })} placeholder="One-line summary below the journey" />
+      </FieldGroup>
+      <FieldGroup label="Font">
+        <PFontSelect value={content.subheadlineFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ subheadlineFont: v })} />
+      </FieldGroup>
+      <FieldGroup label={`Size — ${(content.subheadlineSize ?? 1.0).toFixed(1)}×`}>
+        <PSizeSlider value={content.subheadlineSize ?? 1.0} onChange={(v) => updateContent({ subheadlineSize: v })} accentColor={accent} />
+      </FieldGroup>
+      <FieldGroup label="Color">
+        <BrandingColorRow branding={branding} value={content.subheadlineColor} defaultVal="#4A5568"
+          onChange={(v) => updateContent({ subheadlineColor: v })} onReset={() => updateContent({ subheadlineColor: null })} />
+      </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      {/* ── Step Word ───────────────────────────────────────────────── */}
+      <SectionLabel>Step Word</SectionLabel>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+        {STEP_WORDS.map((w) => {
+          const active = (content.stepWord ?? "Stage") === w;
+          return (
+            <button key={w || "none"} onClick={() => updateContent({ stepWord: w })}
+              style={{ fontSize: 11, padding: "4px 10px", borderRadius: 4, cursor: "pointer", background: active ? accent + "18" : "#F3F4F6", color: active ? branding.textColor : "#6B7280", border: `1px solid ${active ? accent : "#E5E7EB"}`, fontWeight: active ? 600 : 400 }}>
+              {w || "None"}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Step label size (when a "Stage N:" prefix is shown) ─────── */}
+      {(content.stepWord ?? "Stage") !== "" && (
+        <FieldGroup label={`Step Label Size — ${(content.stepLabelSize ?? 1).toFixed(2)}×`}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="range" min={0.5} max={1.8} step={0.05}
+              value={content.stepLabelSize ?? 1}
+              onChange={(e) => updateContent({ stepLabelSize: parseFloat(e.target.value) })}
+              style={{ flex: 1, accentColor: accent }}
+            />
+            <span style={{ fontSize: 11, color: "#6B7280", fontFamily: "monospace", minWidth: 34, textAlign: "right" }}>
+              {(content.stepLabelSize ?? 1).toFixed(2)}×
+            </span>
+          </div>
+        </FieldGroup>
+      )}
+
+      {/* ── Node size (stepped-circles / chevron-flow) ──────────────── */}
+      {usesSize && (
+        <FieldGroup label={`${sizeLabel} — ${(content.circleSize ?? 1).toFixed(2)}×`}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="range" min={0.6} max={1.5} step={0.05}
+              value={content.circleSize ?? 1}
+              onChange={(e) => updateContent({ circleSize: parseFloat(e.target.value) })}
+              style={{ flex: 1, accentColor: accent }}
+            />
+            <span style={{ fontSize: 11, color: "#6B7280", fontFamily: "monospace", minWidth: 34, textAlign: "right" }}>
+              {(content.circleSize ?? 1).toFixed(2)}×
+            </span>
+          </div>
+        </FieldGroup>
+      )}
+
+      {/* ── Photo (photo layouts only) ──────────────────────────────── */}
+      {usesPhoto && (
+        <>
+          {PF_GROUP_DIVIDER}
+          <SectionLabel>Project Photo</SectionLabel>
+          {content.heroImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={content.heroImageUrl} alt="Design experience" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid #E5E7EB", marginBottom: 6 }} />
+          )}
+          <button onClick={() => setPhotoPickerOpen(true)}
+            style={{ width: "100%", padding: "7px 10px", marginBottom: 6, background: content.heroImageUrl ? "#F3F4F6" : branding.accentColor + "18", color: content.heroImageUrl ? "#374151" : branding.textColor, border: `1px solid ${content.heroImageUrl ? "#D1D5DB" : branding.accentColor}`, borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
+            {content.heroImageUrl ? "Change Photo" : "Choose Photo"}
+          </button>
+          {content.heroImageUrl && (
+            <button onClick={() => updateContent({ heroImageUrl: null })} style={{ fontSize: 10, color: "#EF4444", background: "none", border: "none", cursor: "pointer", marginBottom: 8, padding: 0 }}>Remove photo</button>
+          )}
+          <LibraryMediaPicker open={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} onSelect={(items) => { if (items[0]) updateContent({ heroImageUrl: items[0].url }); setPhotoPickerOpen(false); }} multiple={false} includeUnapproved projectMedia={projectMediaGroups} />
+        </>
+      )}
+
+      <Divider />
+
+      {/* ── Stages ──────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <SectionLabel>Stages</SectionLabel>
+        <div style={{ display: "flex", gap: 6 }}>
+          {usesIcons && (
+            <button onClick={applyDefaultIcons} title="Reset every stage to its built-in isometric icon" style={{ fontSize: 11, color: accent, cursor: "pointer", background: "none", border: `1px solid ${accent}`, borderRadius: 4, padding: "2px 8px" }}>Use default icons</button>
+          )}
+          <button onClick={addStage} style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px" }}>+ Add</button>
+        </div>
+      </div>
+      <PLockItemStylesToggle checked={locked} onChange={(v) => {
+        if (v && stages.length > 1) {
+          const src = stages[0];
+          const stylePatch: Partial<DesignExperienceStage> = {};
+          for (const k of STAGE_STYLE_KEYS) (stylePatch as unknown as Record<string, unknown>)[k] = (src as unknown as Record<string, unknown>)[k];
+          updateContent({ lockItemStyles: true, stages: stages.map((s, i) => (i === 0 ? s : { ...s, ...stylePatch })) });
+        } else {
+          updateContent({ lockItemStyles: false });
+        }
+      }} />
+
+      {stages.map((stage, ii) => (
+        <div key={stage.id} style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionLabel>Stage {ii + 1}</SectionLabel>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => moveStage(ii, -1)} disabled={ii === 0} style={{ fontSize: 11, color: ii === 0 ? "#D1D5DB" : "#6B7280", cursor: ii === 0 ? "default" : "pointer", background: "none", border: "none", padding: "0 3px" }}>▲</button>
+              <button onClick={() => moveStage(ii, 1)} disabled={ii === stages.length - 1} style={{ fontSize: 11, color: ii === stages.length - 1 ? "#D1D5DB" : "#6B7280", cursor: ii === stages.length - 1 ? "default" : "pointer", background: "none", border: "none", padding: "0 3px" }}>▼</button>
+              {stages.length > 1 && (
+                <button onClick={() => removeStage(ii)} style={{ fontSize: 11, color: "#EF4444", cursor: "pointer", background: "none", border: "none", padding: "0 3px" }}>✕</button>
+              )}
+            </div>
+          </div>
+
+          <FieldGroup label="Title">
+            <TextInput value={stage.title} onChange={(v) => updateStage(ii, { title: v })} placeholder="Stage title" />
+          </FieldGroup>
+          {usesDescription && (
+            <FieldGroup label="Description">
+              <TextArea value={stage.description ?? ""} onChange={(v) => updateStage(ii, { description: v || null })} placeholder="" rows={2} />
+            </FieldGroup>
+          )}
+
+          {(!locked || ii === 0) && (
+            <>
+              <FieldGroup label={`Title Font${locked ? " (all)" : ""}`}>
+                <PFontSelect value={stage.titleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateStage(ii, { titleFont: v })} />
+              </FieldGroup>
+              <FieldGroup label={`Title Size — ${(stage.titleSize ?? 1.0).toFixed(1)}×`}>
+                <PSizeSlider value={stage.titleSize ?? 1.0} onChange={(v) => updateStage(ii, { titleSize: v })} accentColor={accent} />
+              </FieldGroup>
+              <FieldGroup label="Title Color">
+                <BrandingColorRow branding={branding} value={stage.titleColor} defaultVal={branding.textColor}
+                  onChange={(v) => updateStage(ii, { titleColor: v })} onReset={() => updateStage(ii, { titleColor: undefined })} />
+              </FieldGroup>
+              {usesDescription && (
+                <>
+                  <FieldGroup label={`Desc Size — ${(stage.descriptionSize ?? 1.0).toFixed(1)}×`}>
+                    <PSizeSlider value={stage.descriptionSize ?? 1.0} onChange={(v) => updateStage(ii, { descriptionSize: v })} accentColor={accent} />
+                  </FieldGroup>
+                  <FieldGroup label="Desc Color">
+                    <BrandingColorRow branding={branding} value={stage.descriptionColor} defaultVal="#4A5568"
+                      onChange={(v) => updateStage(ii, { descriptionColor: v })} onReset={() => updateStage(ii, { descriptionColor: undefined })} />
+                  </FieldGroup>
+                </>
+              )}
+            </>
+          )}
+
+          {usesIcons && (
+            <>
+              <FieldGroup label="Icon">
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                  {DUOTONE_ICONS.map((opt) => {
+                    const active = stage.icon === opt.key && !stage.iconImageUrl;
+                    const url = deckIconUrl(opt.key); // committed isometric PNG, if any
+                    return (
+                      <button key={opt.key} title={opt.label}
+                        onClick={() => updateStage(ii, { icon: opt.key, iconId: null, iconUrl: url, iconImageUrl: null })}
+                        style={{ width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 6, cursor: "pointer", background: active ? accent + "18" : "#F3F4F6", border: `1px solid ${active ? accent : "#E5E7EB"}` }}>
+                        {url
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={url} alt={opt.label} style={{ width: 22, height: 22, objectFit: "contain" }} />
+                          : <DuotoneIcon name={opt.key} ink={active ? branding.textColor : "#6B7280"} accent={accent} size="18px" />}
+                      </button>
+                    );
+                  })}
+                  <button title="No icon"
+                    onClick={() => updateStage(ii, { icon: null, iconId: null, iconUrl: null, iconImageUrl: null })}
+                    style={{ height: 30, padding: "0 8px", fontSize: 11, color: "#6B7280", borderRadius: 6, cursor: "pointer", background: !stage.icon && !stage.iconUrl && !stage.iconImageUrl ? accent + "18" : "#F3F4F6", border: `1px solid ${!stage.icon && !stage.iconUrl && !stage.iconImageUrl ? accent : "#E5E7EB"}` }}>
+                    None
+                  </button>
+                </div>
+              </FieldGroup>
+              <FieldGroup label="Custom / AI Icon">
+                <TemplateCIconPicker icons={brandIcons} value={stage.iconId ?? null}
+                  onChange={(iconId) => {
+                    const ic = iconId ? brandIcons.find((i) => i.id === iconId) : null;
+                    updateStage(ii, { iconId: iconId ?? null, iconUrl: ic?.imageUrl ?? null, iconImageUrl: null });
+                  }}
+                  label="" />
+              </FieldGroup>
+            </>
+          )}
+        </div>
+      ))}
+
+      <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
+
+      <Divider />
+
+      <button onClick={resetToDefaults} className="w-full rounded" style={{ fontSize: 11, fontWeight: 500, padding: "6px 10px", border: "1px solid #D1D5DB", background: "#F9FAFB", color: "#6B7280", cursor: "pointer" }}>
         Reset to Defaults
       </button>
     </>
@@ -5491,6 +6040,12 @@ function CopePageInspector({
   }
 
   const accent = content.accentColor ?? branding.accentColor;
+
+  // Which per-item fields each layout actually renders — drives field gating so
+  // the inspector doesn't show controls that have no effect on the chosen layout.
+  const layoutKey = (slide.layoutKey as string) ?? "icon-columns";
+  const usesIcons = layoutKey === "hexagon" || layoutKey === "icon-columns";
+  const usesBullets = layoutKey === "columns" || layoutKey === "icon-columns";
 
   return (
     <>
@@ -5647,27 +6202,64 @@ function CopePageInspector({
 
           {PF_GROUP_DIVIDER}
 
-          <FieldGroup label="">
-            <TemplateCIconPicker
-              icons={brandIcons}
-              value={item.iconId ?? null}
-              onChange={(iconId) => {
-                // Clear the legacy Lucide `icon` key on every change so picking
-                // "No icon" fully suppresses the icon (the render path falls
-                // back to renderCopeIcon(item.icon) when iconUrl is absent).
-                const ic = iconId ? brandIcons.find((i) => i.id === iconId) : null;
-                updateItem(ii, { iconId: iconId ?? null, iconUrl: ic?.imageUrl ?? null, icon: null });
-              }}
-              label="Icon"
-            />
-          </FieldGroup>
+          {usesIcons && (
+            <>
+              {/* Built-in icon picker — reflects item.icon so the icon that's
+                  visibly rendering is actually selectable/changeable. */}
+              <FieldGroup label="Icon">
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                  {COPE_BUILTIN_ICONS.map((opt) => {
+                    const active = item.icon === opt.key && !item.iconUrl && !item.iconImageUrl;
+                    return (
+                      <button
+                        key={opt.key}
+                        title={opt.label}
+                        onClick={() => updateItem(ii, { icon: opt.key, iconId: null, iconUrl: null, iconImageUrl: null })}
+                        style={{ width: 30, height: 30, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 6, cursor: "pointer", background: active ? accent + "18" : "#F3F4F6", border: `1px solid ${active ? accent : "#E5E7EB"}` }}
+                      >
+                        {renderCopeIcon(opt.key, active ? accent : "#6B7280")}
+                      </button>
+                    );
+                  })}
+                  <button
+                    title="No icon"
+                    onClick={() => updateItem(ii, { icon: null, iconId: null, iconUrl: null, iconImageUrl: null })}
+                    style={{ height: 30, padding: "0 8px", fontSize: 11, color: "#6B7280", borderRadius: 6, cursor: "pointer", background: !item.icon && !item.iconUrl && !item.iconImageUrl ? accent + "18" : "#F3F4F6", border: `1px solid ${!item.icon && !item.iconUrl && !item.iconImageUrl ? accent : "#E5E7EB"}` }}
+                  >
+                    None
+                  </button>
+                </div>
+              </FieldGroup>
+              {/* Custom / AI icon (uploaded brand icons + AI-generated PNGs) */}
+              <FieldGroup label="Custom / AI Icon">
+                <TemplateCIconPicker
+                  icons={brandIcons}
+                  value={item.iconId ?? null}
+                  onChange={(iconId) => {
+                    const ic = iconId ? brandIcons.find((i) => i.id === iconId) : null;
+                    // Picking a brand icon overrides both the built-in vector and
+                    // any AI PNG; "No icon" here falls back to the built-in above.
+                    updateItem(ii, { iconId: iconId ?? null, iconUrl: ic?.imageUrl ?? null, iconImageUrl: null });
+                  }}
+                  label=""
+                />
+              </FieldGroup>
+              {item.iconImageUrl && (
+                <p style={{ fontSize: 10, color: "#6B7280", margin: "2px 0 6px" }}>
+                  ✦ Using an AI-generated icon. Pick a built-in above to replace it.
+                </p>
+              )}
+            </>
+          )}
           {slide.layoutKey === "annotated-diagram" && (
             <FieldGroup label="Callout Label">
               <TextInput value={item.calloutLabel ?? ""} onChange={(v) => updateItem(ii, { calloutLabel: v || null })} placeholder="Short label for Annotated layout" />
             </FieldGroup>
           )}
 
-          {/* Bullets */}
+          {/* Bullets — only layouts that render them (Columns / Icon Columns) */}
+          {usesBullets && (
+          <>
           <div style={{ marginTop: 4, marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <label style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>Bullets</label>
@@ -5702,6 +6294,8 @@ function CopePageInspector({
                 <POutlineRow value={item.bulletsOutline} onChangeFn={(v) => updateItem(ii, { bulletsOutline: v })} accentColor={accent} />
               </FieldGroup>
             </>
+          )}
+          </>
           )}
         </div>
       ))}
@@ -5739,6 +6333,7 @@ function DesignRetainerInspector({
   // path stores explicit `false` (not null) so the new default actually
   // flips when the user unchecks.
   const locked = content.lockItemStyles ?? true;
+  const isThreeBand = (slide.layoutKey ?? "three-band-summary") === "three-band-summary";
 
   const BENEFIT_STYLE_KEYS: (keyof DesignRetainerBenefit)[] = [
     "textFont", "textSize", "textBold", "textItalic", "textUnderline", "textColor", "textOutline",
@@ -5801,23 +6396,79 @@ function DesignRetainerInspector({
 
   return (
     <>
-      {/* ── SECTION LABEL ─────────────────────────────────────── */}
-      <SectionLabel>Section Label</SectionLabel>
-      <FieldGroup label="Text">
-        <TextInput value={content.sectionLabel ?? ""} onChange={(v) => updateContent({ sectionLabel: v || null })} placeholder="YOUR INVESTMENT" />
-      </FieldGroup>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.sectionLabelFont ?? SLIDE_FONTS.defaults.label} onChange={(v) => updateContent({ sectionLabelFont: v })} />
-      </FieldGroup>
-      <div style={{ marginTop: 8 }}>
-        <FieldGroup label="Color">
-          <BrandingColorRow branding={branding} value={content.sectionLabelColor} defaultVal={resolvedAccent}
-            onChange={(v) => updateContent({ sectionLabelColor: v })} onReset={() => updateContent({ sectionLabelColor: null })} />
-        </FieldGroup>
-      </div>
-      <SharedSectionLabelToggle content={content} updateContent={updateContent} />
+      {/* ── Insurance Policy layout ───────────────────────────── */}
+      {slide.layoutKey === "insurance-policy" && (
+        <>
+          <SectionLabel>Insurance Statement</SectionLabel>
+          <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>
+            Leave blank for the default, which weaves in the retainer amount and
+            the Zero Change Order Guarantee with accent highlights.
+          </p>
+          <FieldGroup label="Statement">
+            <TextArea value={content.insuranceStatement ?? ""} onChange={(v) => updateContent({ insuranceStatement: v || null })}
+              rows={3} placeholder="The $17,000 design investment is the exact mechanism that unlocks our Zero Change Order Guarantee." />
+          </FieldGroup>
+          <SectionLabel>Sizes</SectionLabel>
+          <FieldGroup label={`Statement text — ${(content.insuranceStatementSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={resolvedAccent} value={content.insuranceStatementSize ?? 1} onChange={(v) => updateContent({ insuranceStatementSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Bullet text — ${(content.insuranceBulletSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={resolvedAccent} value={content.insuranceBulletSize ?? 1} onChange={(v) => updateContent({ insuranceBulletSize: v })} />
+          </FieldGroup>
+          <FieldGroup label={`Graphic size — ${(content.insuranceGraphicSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={resolvedAccent} value={content.insuranceGraphicSize ?? 1} onChange={(v) => updateContent({ insuranceGraphicSize: v })} />
+          </FieldGroup>
+          <Divider />
+        </>
+      )}
 
-      {PF_GROUP_DIVIDER}
+      {/* ── Retainer CTA layout ───────────────────────────────── */}
+      {slide.layoutKey === "retainer-cta" && (
+        <>
+          <SectionLabel>CTA Card</SectionLabel>
+          <FieldGroup label="Subtitle">
+            <TextInput value={content.ctaSubtitle ?? ""} onChange={(v) => updateContent({ ctaSubtitle: v || null })} placeholder="Initiate the Design & Feasibility Phase" />
+          </FieldGroup>
+          <FieldGroup label="Retainer note (clear for default)">
+            <TextArea value={content.ctaRetainerNote ?? ""} onChange={(v) => updateContent({ ctaRetainerNote: v || null })}
+              rows={2} placeholder="(Credited as part of your total project investment of $187,000 – $232,000)" />
+          </FieldGroup>
+          <FieldGroup label="Call-to-action line">
+            <TextArea value={content.ctaLine ?? ""} onChange={(v) => updateContent({ ctaLine: v || null })}
+              rows={2} placeholder="Sign the Initial Contract today to launch the Architectural Design phase." />
+          </FieldGroup>
+          <FieldGroup label="Thank-you line">
+            <TextArea value={content.ctaThanks ?? ""} onChange={(v) => updateContent({ ctaThanks: v || null })}
+              rows={2} placeholder="Thank you for choosing HHI Builders. We look forward to transforming your home." />
+          </FieldGroup>
+          <FieldGroup label={`Card text — ${(content.ctaTextSize ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={resolvedAccent} value={content.ctaTextSize ?? 1} onChange={(v) => updateContent({ ctaTextSize: v })} />
+          </FieldGroup>
+          <Divider />
+        </>
+      )}
+
+      {/* ── SECTION LABEL (Three-Band only) ───────────────────── */}
+      {isThreeBand && (
+        <>
+          <SectionLabel>Section Label</SectionLabel>
+          <FieldGroup label="Text">
+            <TextInput value={content.sectionLabel ?? ""} onChange={(v) => updateContent({ sectionLabel: v || null })} placeholder="YOUR INVESTMENT" />
+          </FieldGroup>
+          <FieldGroup label="Font">
+            <PFontSelect value={content.sectionLabelFont ?? SLIDE_FONTS.defaults.label} onChange={(v) => updateContent({ sectionLabelFont: v })} />
+          </FieldGroup>
+          <div style={{ marginTop: 8 }}>
+            <FieldGroup label="Color">
+              <BrandingColorRow branding={branding} value={content.sectionLabelColor} defaultVal={resolvedAccent}
+                onChange={(v) => updateContent({ sectionLabelColor: v })} onReset={() => updateContent({ sectionLabelColor: null })} />
+            </FieldGroup>
+          </div>
+          <SharedSectionLabelToggle content={content} updateContent={updateContent} />
+
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
 
       {/* ── HEADLINE ──────────────────────────────────────────── */}
       <SectionLabel>Headline</SectionLabel>
@@ -5844,7 +6495,9 @@ function DesignRetainerInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── TAGLINE ───────────────────────────────────────────── */}
+      {/* ── TAGLINE + RETAINER LABEL (Three-Band only) ────────── */}
+      {isThreeBand && (
+      <>
       <SectionLabel>Tagline</SectionLabel>
       <FieldGroup label="Text">
         <TextInput value={content.tagline ?? ""} onChange={(v) => updateContent({ tagline: v || null })} placeholder="Your investment in certainty before construction begins." />
@@ -5893,6 +6546,8 @@ function DesignRetainerInspector({
       </FieldGroup>
 
       {PF_GROUP_DIVIDER}
+      </>
+      )}
 
       {/* ── RETAINER AMOUNT (Band 1 row 1, right) ─────────────── */}
       <SectionLabel>Retainer Amount</SectionLabel>
@@ -5922,7 +6577,9 @@ function DesignRetainerInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── RETAINER DESCRIPTION (Band 1 row 2) ───────────────── */}
+      {/* ── RETAINER DESCRIPTION (Three-Band only) ────────────── */}
+      {isThreeBand && (
+      <>
       <SectionLabel>Retainer Description</SectionLabel>
       <p style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>
         Optional sentence shown beneath the retainer amount. Leave blank to hide.
@@ -5949,6 +6606,8 @@ function DesignRetainerInspector({
       </FieldGroup>
 
       {PF_GROUP_DIVIDER}
+      </>
+      )}
 
       {/* ── BULLETS (Band 1 row 3) ────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -6011,7 +6670,9 @@ function DesignRetainerInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── CONSTRUCTION LABEL (Band 2, left) ─────────────────── */}
+      {/* ── CONSTRUCTION LABEL (Three-Band only) ──────────────── */}
+      {isThreeBand && (
+      <>
       <SectionLabel>Construction Label</SectionLabel>
       <FieldGroup label="Text">
         <TextInput value={content.constructionLabelText ?? ""} onChange={(v) => updateContent({ constructionLabelText: v || null })} placeholder="Projected Construction Investment" />
@@ -6035,6 +6696,8 @@ function DesignRetainerInspector({
       </FieldGroup>
 
       {PF_GROUP_DIVIDER}
+      </>
+      )}
 
       {/* ── CONSTRUCTION AMOUNT (Band 2, right) ───────────────── */}
       <SectionLabel>Construction Amount</SectionLabel>
@@ -6070,7 +6733,9 @@ function DesignRetainerInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── TOTAL LABEL (Band 3, left) ────────────────────────── */}
+      {/* ── TOTAL LABEL + TOTAL AMOUNT (Three-Band only) ──────── */}
+      {isThreeBand && (
+      <>
       <SectionLabel>Total Label</SectionLabel>
       <FieldGroup label="Text">
         <TextInput value={content.totalLabelText ?? ""} onChange={(v) => updateContent({ totalLabelText: v || null })} placeholder="Total Project Investment" />
@@ -6117,6 +6782,8 @@ function DesignRetainerInspector({
       <FieldGroup label="Outline">
         <POutlineRow accentColor={branding.accentColor} value={content.totalAmountOutline} onChangeFn={(v) => updateContent({ totalAmountOutline: v })} />
       </FieldGroup>
+      </>
+      )}
 
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
 
@@ -6210,10 +6877,7 @@ function NextStepsInspector({
     updateContent({
       steps: HHI_DEFAULT_NEXT_STEPS,
       sectionLabel: HHI_NEXT_STEPS_DEFAULTS.defaultSectionLabel,
-      contactEmail: null,
-      contactPhone: null,
       rightPhoto: null,
-      showAddress: null,
     });
     onUpdate({
       ...slide,
@@ -6222,10 +6886,7 @@ function NextStepsInspector({
         ...content,
         steps: HHI_DEFAULT_NEXT_STEPS,
         sectionLabel: HHI_NEXT_STEPS_DEFAULTS.defaultSectionLabel,
-        contactEmail: null,
-        contactPhone: null,
         rightPhoto: null,
-        showAddress: null,
       },
     });
   }
@@ -6283,36 +6944,80 @@ function NextStepsInspector({
 
       {PF_GROUP_DIVIDER}
 
-      <FieldGroup label="Contact Email">
-        <TextInput
-          value={content.contactEmail ?? ""}
-          onChange={(v) => updateContent({ contactEmail: v || null })}
-          placeholder="email@example.com"
-        />
-      </FieldGroup>
+      {/* Contact info intentionally absent — it lives on the Closing slide. */}
 
-      <FieldGroup label="Contact Phone">
-        <TextInput
-          value={content.contactPhone ?? ""}
-          onChange={(v) => updateContent({ contactPhone: v || null })}
-          placeholder="(555) 123-4567"
-        />
-      </FieldGroup>
+      {/* Staircase geometry — card overlap controls (staircase-cards only) */}
+      {layoutKey === "staircase-cards" && (
+        <>
+          <SectionLabel>Staircase Layout</SectionLabel>
+          <FieldGroup label={`Card Width — ${(content.stairCardWidth ?? 1.0).toFixed(2)}×`}>
+            <input
+              type="range"
+              min={0.6}
+              max={1.3}
+              step={0.05}
+              value={content.stairCardWidth ?? 1.0}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                updateContent({ stairCardWidth: v === 1 ? null : v });
+              }}
+              style={{ width: "100%", accentColor: accent }}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Climb — ${(content.stairClimb ?? 1.0).toFixed(2)}×`}>
+            <input
+              type="range"
+              min={0.3}
+              max={1.5}
+              step={0.05}
+              value={content.stairClimb ?? 1.0}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                updateContent({ stairClimb: v === 1 ? null : v });
+              }}
+              style={{ width: "100%", accentColor: accent }}
+            />
+          </FieldGroup>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer", padding: "6px 0" }}>
+            <input
+              type="checkbox"
+              checked={content.stairFrontFirst ?? false}
+              onChange={(e) => updateContent({ stairFrontFirst: e.target.checked || null })}
+            />
+            Lower cards in front (text never covered)
+          </label>
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            To fix overlap: shrink Card Width (≈0.80× with 4 steps removes it entirely),
+            raise Climb to spread cards vertically, or check the box so each card&apos;s
+            text stays on top of the card behind it.
+          </p>
+          <Divider />
+        </>
+      )}
 
-      <FieldGroup label="">
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            checked={!!content.showAddress}
-            onChange={(e) => updateContent({ showAddress: e.target.checked || null })}
-          />
-          Show project address in footer
-        </label>
-      </FieldGroup>
+      {/* Footer tagline — Staircase Cards (navy band) + Large Number Hero (footer line) */}
+      {(layoutKey === "staircase-cards" || layoutKey === "large-number-hero") && (
+        <>
+          <SectionLabel>{layoutKey === "staircase-cards" ? "Footer Band" : "Footer Line"}</SectionLabel>
+          <FieldGroup label="Tagline">
+            <TextInput
+              value={content.footerTagline ?? ""}
+              onChange={(v) => updateContent({ footerTagline: v || null })}
+              placeholder={layoutKey === "staircase-cards" ? "Let’s build your vision." : "Turning Ideas into Ideal Spaces. Design - Build - Remodel."}
+            />
+          </FieldGroup>
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            {layoutKey === "staircase-cards"
+              ? "The slide headline isn’t drawn on this layout — the tagline carries the message. Contact info lives on the Closing slide."
+              : "Shown centered at the bottom. Clear the field to use the default; type a space to hide it. Contact info lives on the Closing slide."}
+          </p>
+          <Divider />
+        </>
+      )}
 
       {(layoutKey === "numbered-photo" || layoutKey === "large-number-hero") && (
         <>
-          <SectionLabel>Right Photo</SectionLabel>
+          <SectionLabel>{layoutKey === "numbered-photo" ? "Photo" : "Right Photo"}</SectionLabel>
           {content.rightPhoto ? (
             <div style={{ marginBottom: 8 }}>
               <div style={{ borderRadius: 6, overflow: "hidden", marginBottom: 6, background: "#F3F4F6" }}>
@@ -6525,49 +7230,8 @@ function NextStepsInspector({
 
       {PF_GROUP_DIVIDER}
 
-      {/* ── CONTACT INFO ─────────────────────────────── */}
-      <SectionLabel>Contact Info</SectionLabel>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.contactFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ contactFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.contactSize ?? 0.7).toFixed(1)}×`}>
-        <PSizeSlider value={content.contactSize ?? 0.7} onChange={(v) => updateContent({ contactSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.contactBold} italic={content.contactItalic} underline={content.contactUnderline}
-          onBold={(v) => updateContent({ contactBold: v })} onItalic={(v) => updateContent({ contactItalic: v })} onUnderline={(v) => updateContent({ contactUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.contactColor} defaultVal="#4A5568"
-          onChange={(v) => updateContent({ contactColor: v })} onReset={() => updateContent({ contactColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.contactOutline} onChangeFn={(v) => updateContent({ contactOutline: v })} accentColor={accent} />
-      </FieldGroup>
+      {/* Contact Info section removed — contact lives on the Closing slide. */}
 
-      {PF_GROUP_DIVIDER}
-
-      {/* ── FOOTER NOTE ──────────────────────────────── */}
-      <SectionLabel>Footer Note</SectionLabel>
-      <FieldGroup label="Font">
-        <PFontSelect value={content.footerNoteFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ footerNoteFont: v })} />
-      </FieldGroup>
-      <FieldGroup label={`Size — ${(content.footerNoteSize ?? 0.7).toFixed(1)}×`}>
-        <PSizeSlider value={content.footerNoteSize ?? 0.7} onChange={(v) => updateContent({ footerNoteSize: v })} accentColor={accent} />
-      </FieldGroup>
-      <FieldGroup label="Style">
-        <PStyleButtons bold={content.footerNoteBold} italic={content.footerNoteItalic} underline={content.footerNoteUnderline}
-          onBold={(v) => updateContent({ footerNoteBold: v })} onItalic={(v) => updateContent({ footerNoteItalic: v })} onUnderline={(v) => updateContent({ footerNoteUnderline: v })} />
-      </FieldGroup>
-      <FieldGroup label="Color">
-        <BrandingColorRow branding={branding} value={content.footerNoteColor} defaultVal="#6B7280"
-          onChange={(v) => updateContent({ footerNoteColor: v })} onReset={() => updateContent({ footerNoteColor: null })} />
-      </FieldGroup>
-      <FieldGroup label="Outline">
-        <POutlineRow value={content.footerNoteOutline} onChangeFn={(v) => updateContent({ footerNoteOutline: v })} accentColor={accent} />
-      </FieldGroup>
-
-      <SharedCTASection content={content} updateContent={updateContent} />
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
 
       <Divider />
@@ -6579,6 +7243,762 @@ function NextStepsInspector({
       >
         Reset to Defaults
       </button>
+    </>
+  );
+}
+
+// ─── Floor Plan Inspector ────────────────────────────────────────────────────
+
+function PctSlider({ label, value, fallback, onChange, accent }: { label: string; value: number | null | undefined; fallback: number; onChange: (v: number) => void; accent: string }) {
+  return (
+    <FieldGroup label={`${label} — ${Math.round(value ?? fallback)}%`}>
+      <input type="range" min={0} max={100} step={1} value={value ?? fallback}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{ width: "100%", accentColor: accent }} />
+    </FieldGroup>
+  );
+}
+
+/** AI zone blurbs are one Claude call per project — cache per page load so
+ *  re-selecting the slide doesn't re-bill. "Pull rooms & SF" refreshes it. */
+const floorPlanBlurbCache = new Map<string, Record<string, string>>();
+
+function FloorPlanInspector({
+  slide,
+  branding,
+  onUpdate,
+  projectId,
+  projectRoomsWithMedia = [],
+  projectLevelMedia = [],
+}: {
+  slide: ProposalSlide;
+  branding: DeckBranding;
+  onUpdate: (s: ProposalSlide) => void;
+  projectId: string;
+  projectRoomsWithMedia?: RoomWithMedia[];
+  projectLevelMedia?: RoomMediaItem[];
+}) {
+  const content = (slide.content ?? {}) as FloorPlanContent;
+  const zones = content.zones ?? [];
+  const layoutKey = slide.layoutKey as string;
+  const isCalloutMap = layoutKey !== "side-ledger";
+  const accent = content.accentColor ?? branding.accentColor;
+  const highlight = content.highlightColor ?? accent;
+  const [planPickerOpen, setPlanPickerOpen] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [autoCropping, setAutoCropping] = useState(false);
+  const [importPage, setImportPage] = useState(1);
+  // Rooms from the Sections area — powers the per-zone Room dropdown so the
+  // label/SF/description fill from the same data that drives pricing.
+  const [roomOptions, setRoomOptions] = useState<{ id: string; name: string; sqft: number | null; description: string | null }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetchFloorPlanRoomDataAction(projectId)
+      .then(async ({ rooms }) => {
+        if (!alive) return;
+        setRoomOptions(rooms);
+        // Swap in the AI-tightened blurbs so dropdown picks always fill a
+        // description that FITS the callout card.
+        let blurbs = floorPlanBlurbCache.get(projectId);
+        if (!blurbs) {
+          const res = await composeZoneDescriptionsAction(projectId);
+          blurbs = "blurbs" in res ? res.blurbs : {};
+          floorPlanBlurbCache.set(projectId, blurbs);
+        }
+        if (!alive) return;
+        const b = blurbs;
+        setRoomOptions((prev) => prev.map((r) => ({ ...r, description: b[r.id] ?? r.description })));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
+  const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
+
+  function updateContent(patch: Partial<FloorPlanContent>) {
+    onUpdate({ ...slide, content: { ...content, ...patch } });
+  }
+
+  // Manual trim semantics over the stored crop window: each slider shaves a
+  // percentage off one edge; the slide zooms to what's left.
+  const cropX0 = content.planCropX ?? 0;
+  const cropY0 = content.planCropY ?? 0;
+  const cropW0 = content.planCropW ?? 100;
+  const cropH0 = content.planCropH ?? 100;
+  const trimL = cropX0;
+  const trimT = cropY0;
+  const trimR = Math.max(0, 100 - cropX0 - cropW0);
+  const trimB = Math.max(0, 100 - cropY0 - cropH0);
+  function setTrims(next: { l?: number; r?: number; t?: number; b?: number }) {
+    const l = Math.min(next.l ?? trimL, 80);
+    const r = Math.min(next.r ?? trimR, 80);
+    const t = Math.min(next.t ?? trimT, 80);
+    const b = Math.min(next.b ?? trimB, 80);
+    const w = Math.max(100 - l - r, 10);
+    const h = Math.max(100 - t - b, 10);
+    const noop = l === 0 && t === 0 && w === 100 && h === 100;
+    updateContent(
+      noop
+        ? { planCropX: null, planCropY: null, planCropW: null, planCropH: null }
+        : { planCropX: l, planCropY: t, planCropW: w, planCropH: h }
+    );
+  }
+  function updateZone(idx: number, patch: Partial<FloorPlanZone>) {
+    updateContent({ zones: zones.map((z, i) => (i === idx ? { ...z, ...patch } : z)) });
+  }
+  function moveZone(idx: number, dir: -1 | 1) {
+    const t = idx + dir;
+    if (t < 0 || t >= zones.length) return;
+    const next = [...zones];
+    [next[idx], next[t]] = [next[t], next[idx]];
+    updateContent({ zones: next.map((z, i) => ({ ...z, number: i + 1 })) });
+  }
+  function addZone() {
+    updateContent({
+      zones: [...zones, { id: `zone-${Date.now()}`, number: zones.length + 1, label: `Zone ${zones.length + 1}`, sqft: null }],
+    });
+  }
+  function removeZone(idx: number) {
+    updateContent({ zones: zones.filter((_, i) => i !== idx).map((z, i) => ({ ...z, number: i + 1 })) });
+  }
+
+  /**
+   * One-click Rendr import: fetch the space's floor-plan PDF through our
+   * authed proxy, rasterize page 1 in the browser with pdf.js (no server
+   * native deps), persist the PNG to R2, and set it as the plan image.
+   */
+  async function importFromRendr() {
+    setImporting(true);
+    setImportError(null);
+    try {
+      const { rendrSpaceId } = await fetchFloorPlanRoomDataAction(projectId);
+      if (rendrSpaceId == null) {
+        setImportError("This project isn't linked to a Rendr space yet — link it on the Rendr tab first.");
+        return;
+      }
+      const res = await fetch(`/api/rendr/spaces/${rendrSpaceId}/floorplan`);
+      if (!res.ok) {
+        setImportError(`Rendr floor plan request failed (${res.status}).`);
+        return;
+      }
+      const data = await res.arrayBuffer();
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      const doc = await pdfjs.getDocument({ data }).promise;
+      const page = await doc.getPage(Math.min(Math.max(importPage, 1), doc.numPages));
+      // Scale so the long edge lands ~2200px — crisp on slides, safely under
+      // the 5mb server-action body limit once PNG-encoded.
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(2200 / Math.max(base.width, base.height), 4);
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setImportError("Canvas is unavailable in this browser.");
+        return;
+      }
+      await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+      const saved = await saveFloorPlanImageAction(projectId, canvas.toDataURL("image/png"));
+      if ("error" in saved) {
+        setImportError(saved.error);
+        return;
+      }
+      updateContent({ planImageUrl: saved.url });
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Rendr import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  /** Merge rooms + SF from the project: update matched zones' SF, append new rooms. */
+  async function pullRooms() {
+    setPulling(true);
+    try {
+      // Rooms+SF and the AI-tightened blurbs in parallel; blurbs OVERWRITE
+      // existing descriptions so they always fit the callout card.
+      const [{ rooms }, blurbRes] = await Promise.all([
+        fetchFloorPlanRoomDataAction(projectId),
+        composeZoneDescriptionsAction(projectId),
+      ]);
+      const blurbs: Record<string, string> = "blurbs" in blurbRes ? blurbRes.blurbs : {};
+      floorPlanBlurbCache.set(projectId, blurbs);
+      setRoomOptions(rooms.map((r) => ({ ...r, description: blurbs[r.id] ?? r.description })));
+      const byRoom = new Map(zones.filter((z) => z.roomId).map((z) => [z.roomId as string, z]));
+      const merged: FloorPlanZone[] = zones.map((z) => {
+        const r = z.roomId ? rooms.find((x) => x.id === z.roomId) : undefined;
+        if (!r) return z;
+        return { ...z, sqft: r.sqft ?? z.sqft, description: (z.roomId && blurbs[z.roomId]) || z.description || r.description };
+      });
+      for (const r of rooms) {
+        if (!byRoom.has(r.id)) {
+          merged.push({ id: `zone-${r.id}`, number: merged.length + 1, label: `Zone ${merged.length + 1}: ${r.name}`, sqft: r.sqft, description: blurbs[r.id] ?? r.description, roomId: r.id });
+        }
+      }
+      updateContent({ zones: merged.slice(0, 8).map((z, i) => ({ ...z, number: i + 1 })) });
+    } finally {
+      setPulling(false);
+    }
+  }
+
+  /** AI crop-to-grid: Gemini vision finds the drawing area's bounding box,
+   *  sharp cuts those exact pixels server-side (no generative redraw). */
+  async function autoCropPlan() {
+    if (!content.planImageUrl) return;
+    setAutoCropping(true);
+    setImportError(null);
+    try {
+      const res = await autoCropFloorPlanAction(projectId, content.planImageUrl);
+      if ("error" in res) {
+        setImportError(res.error);
+        return;
+      }
+      // The crop is now baked into the image — clear any manual trims.
+      updateContent({ planImageUrl: res.url, planCropX: null, planCropY: null, planCropW: null, planCropH: null });
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Auto-crop failed.");
+    } finally {
+      setAutoCropping(false);
+    }
+  }
+
+  /** Gemini pass that erases dimension chips, logos, and legends from the
+   *  current plan image. Writes a new copy — re-import to undo. */
+  async function cleanPlan() {
+    if (!content.planImageUrl) return;
+    setCleaning(true);
+    setImportError(null);
+    try {
+      const res = await cleanFloorPlanImageAction(projectId, content.planImageUrl);
+      if ("error" in res) {
+        setImportError(res.error);
+        return;
+      }
+      updateContent({ planImageUrl: res.url });
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Plan cleanup failed.");
+    } finally {
+      setCleaning(false);
+    }
+  }
+
+  return (
+    <>
+      <SectionLabel>Content</SectionLabel>
+      <FieldGroup label="Headline">
+        <TextInput value={slide.headline ?? ""} onChange={(v) => onUpdate({ ...slide, headline: v || null })} placeholder="Mapping the Project Footprint" />
+      </FieldGroup>
+      <FieldGroup label="Section Label">
+        <TextInput value={content.sectionLabel ?? ""} onChange={(v) => updateContent({ sectionLabel: v || null })} placeholder="PROJECT FOOTPRINT" />
+      </FieldGroup>
+      <FieldGroup label="Intro Line">
+        <TextInput value={content.introText ?? ""} onChange={(v) => updateContent({ introText: v || null })} placeholder="Three renovation zones, measured and mapped." />
+      </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      <SectionLabel>Plan Image</SectionLabel>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ borderRadius: 6, overflow: "hidden", marginBottom: 6, background: "#F3F4F6" }}>
+          <img src={content.planImageUrl ?? "/deck-art/closing-blueprint.png"} alt="Floor plan" style={{ width: "100%", height: 90, objectFit: "contain", display: "block", background: "#fff" }} />
+        </div>
+        <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+          <button
+            onClick={importFromRendr}
+            disabled={importing}
+            style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "#fff", cursor: importing ? "default" : "pointer", background: importing ? "#9CA3AF" : accent, border: "none", borderRadius: 4, padding: "6px 10px" }}
+          >
+            {importing ? "Importing from Rendr…" : "Import plan from Rendr"}
+          </button>
+          <select
+            value={importPage}
+            onChange={(e) => setImportPage(parseInt(e.target.value, 10) || 1)}
+            title="Which page of the Rendr PDF to import"
+            style={{ fontSize: 11, padding: "4px 4px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151" }}
+          >
+            {[1, 2, 3, 4].map((n) => (
+              <option key={n} value={n}>p. {n}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={autoCropPlan}
+          disabled={autoCropping || !content.planImageUrl}
+          style={{ width: "100%", fontSize: 11, fontWeight: 600, color: autoCropping || !content.planImageUrl ? "#9CA3AF" : "#374151", cursor: autoCropping || !content.planImageUrl ? "default" : "pointer", background: "#F9FAFB", border: "1px solid #D1D5DB", borderRadius: 4, padding: "6px 10px", marginBottom: 4 }}
+        >
+          {autoCropping ? "Auto-cropping…" : "✦ Auto-crop to plan (AI)"}
+        </button>
+        <button
+          onClick={cleanPlan}
+          disabled={cleaning || !content.planImageUrl}
+          style={{ width: "100%", fontSize: 11, fontWeight: 600, color: cleaning || !content.planImageUrl ? "#9CA3AF" : "#374151", cursor: cleaning || !content.planImageUrl ? "default" : "pointer", background: "#F9FAFB", border: "1px solid #D1D5DB", borderRadius: 4, padding: "6px 10px", marginBottom: 4 }}
+        >
+          {cleaning ? "Cleaning with AI…" : "✦ Remove dimensions & labels (AI)"}
+        </button>
+        {importError && (
+          <p style={{ fontSize: 10, color: "#EF4444", lineHeight: 1.4, marginBottom: 4 }}>{importError}</p>
+        )}
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => setPlanPickerOpen(true)} style={{ flex: 1, fontSize: 10, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "3px 8px" }}>
+            Pick from library
+          </button>
+          {content.planImageUrl && (
+            <button onClick={() => updateContent({ planImageUrl: null })} style={{ fontSize: 10, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "3px 8px" }}>
+              Use default sheet
+            </button>
+          )}
+        </div>
+        <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginTop: 6 }}>
+          Import pulls the linked Rendr space&apos;s floor-plan PDF and converts it
+          to an image automatically. Or pick any plan image from the media library.
+          The AI clean-up erases measurement chips, logos, and legends — re-import
+          to get the original back.
+        </p>
+      </div>
+
+      {PF_GROUP_DIVIDER}
+
+      <SectionLabel>Manual Trim</SectionLabel>
+      <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+        Shave a percentage off each edge (the view zooms to what&apos;s left).
+        Auto-crop above usually gets it right first — these are for fine-tuning.
+        Set the trim BEFORE placing pins.
+      </p>
+      <PctSlider label="Trim Top" value={trimT} fallback={0} onChange={(v) => setTrims({ t: v })} accent={highlight} />
+      <PctSlider label="Trim Bottom" value={trimB} fallback={0} onChange={(v) => setTrims({ b: v })} accent={highlight} />
+      <PctSlider label="Trim Left" value={trimL} fallback={0} onChange={(v) => setTrims({ l: v })} accent={highlight} />
+      <PctSlider label="Trim Right" value={trimR} fallback={0} onChange={(v) => setTrims({ r: v })} accent={highlight} />
+      {(trimL > 0 || trimR > 0 || trimT > 0 || trimB > 0) && (
+        <button
+          onClick={() => updateContent({ planCropX: null, planCropY: null, planCropW: null, planCropH: null })}
+          style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px", marginBottom: 8 }}
+        >
+          Reset trim
+        </button>
+      )}
+      <LibraryMediaPicker
+        open={planPickerOpen}
+        onClose={() => setPlanPickerOpen(false)}
+        onSelect={(items) => { if (items.length > 0) updateContent({ planImageUrl: items[0].url }); setPlanPickerOpen(false); }}
+        multiple={false}
+        includeUnapproved
+        projectMedia={projectMediaGroups}
+      />
+
+      {PF_GROUP_DIVIDER}
+
+      <SectionLabel>Display</SectionLabel>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer", padding: "4px 0" }}>
+        <input type="checkbox" checked={content.showSqft ?? true} onChange={(e) => updateContent({ showSqft: e.target.checked ? null : false })} />
+        Show square footage on cards
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer", padding: "4px 0" }}>
+        <input type="checkbox" checked={content.showTotal ?? true} onChange={(e) => updateContent({ showTotal: e.target.checked ? null : false })} />
+        Show total-footprint band
+      </label>
+      <FieldGroup label="Total Label">
+        <TextInput value={content.totalLabel ?? ""} onChange={(v) => updateContent({ totalLabel: v || null })} placeholder="Total renovation footprint" />
+      </FieldGroup>
+      <FieldGroup label="Zone Highlight Color">
+        <BrandingColorRow branding={branding} value={content.highlightColor} defaultVal={accent}
+          onChange={(v) => updateContent({ highlightColor: v })} onReset={() => updateContent({ highlightColor: null })} />
+      </FieldGroup>
+      <FieldGroup label={`Zone Text — ${(content.zoneTextSize ?? 1.0).toFixed(1)}×`}>
+        <PSizeSlider accentColor={accent} value={content.zoneTextSize ?? 1.0} onChange={(v) => updateContent({ zoneTextSize: v })} />
+      </FieldGroup>
+      <FieldGroup label={`Pin Size — ${(content.pinSize ?? 1.0).toFixed(1)}×`}>
+        <PSizeSlider accentColor={accent} value={content.pinSize ?? 1.0} onChange={(v) => updateContent({ pinSize: v })} />
+      </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <SectionLabel>Zones</SectionLabel>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={pullRooms} disabled={pulling} style={{ fontSize: 11, color: "#fff", cursor: pulling ? "default" : "pointer", background: pulling ? "#9CA3AF" : accent, border: "none", borderRadius: 4, padding: "2px 8px" }}>
+            {pulling ? "Pulling…" : "Pull rooms & SF"}
+          </button>
+          <button onClick={addZone} style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px" }}>
+            + Add
+          </button>
+        </div>
+      </div>
+      <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+        SF pulls from each room&apos;s length × width — the same dimensions that drive pricing.
+        Place each zone&apos;s pin with the X/Y sliders; the highlight box is optional.
+      </p>
+
+      {zones.map((z, zi) => (
+        <div key={z.id} style={{ marginBottom: 14, border: "1px solid #E5E7EB", borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionLabel>Zone {z.number}</SectionLabel>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => moveZone(zi, -1)} disabled={zi === 0} style={{ fontSize: 11, color: zi === 0 ? "#D1D5DB" : "#6B7280", cursor: zi === 0 ? "default" : "pointer", background: "none", border: "none", padding: "0 3px" }}>▲</button>
+              <button onClick={() => moveZone(zi, 1)} disabled={zi === zones.length - 1} style={{ fontSize: 11, color: zi === zones.length - 1 ? "#D1D5DB" : "#6B7280", cursor: zi === zones.length - 1 ? "default" : "pointer", background: "none", border: "none", padding: "0 3px" }}>▼</button>
+              <button onClick={() => removeZone(zi)} style={{ fontSize: 11, color: "#EF4444", cursor: "pointer", background: "none", border: "none", padding: "0 3px" }}>✕</button>
+            </div>
+          </div>
+          <FieldGroup label="Room">
+            <select
+              value={z.roomId ?? ""}
+              onChange={(e) => {
+                const room = roomOptions.find((r) => r.id === e.target.value);
+                if (!room) {
+                  updateZone(zi, { roomId: null });
+                  return;
+                }
+                // Selecting a room fills label + SF + description from the
+                // Sections data; all three stay editable below.
+                updateZone(zi, {
+                  roomId: room.id,
+                  label: `Zone ${z.number}: ${room.name}`,
+                  sqft: room.sqft,
+                  description: room.description,
+                });
+              }}
+              style={{ width: "100%", fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151" }}
+            >
+              <option value="">Custom (no room)</option>
+              {roomOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                  {r.sqft != null ? ` — ${r.sqft} SF` : ""}
+                </option>
+              ))}
+            </select>
+          </FieldGroup>
+          <FieldGroup label="Label">
+            <TextInput value={z.label} onChange={(v) => updateZone(zi, { label: v })} placeholder={`Zone ${z.number}: The Kitchen`} />
+          </FieldGroup>
+          <FieldGroup label="Square Feet">
+            <TextInput value={z.sqft != null ? String(z.sqft) : ""} onChange={(v) => { const n = parseInt(v.replace(/[^0-9]/g, ""), 10); updateZone(zi, { sqft: Number.isFinite(n) ? n : null }); }} placeholder="88" />
+          </FieldGroup>
+          <FieldGroup label="Description">
+            <TextInput value={z.description ?? ""} onChange={(v) => updateZone(zi, { description: v || null })} placeholder="Full gut renovation and re-plan" />
+          </FieldGroup>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer", padding: "4px 0" }}>
+            <input type="checkbox" checked={z.pinX != null} onChange={(e) => updateZone(zi, e.target.checked ? { pinX: 50, pinY: 50 } : { pinX: null, pinY: null })} />
+            Pin on plan
+          </label>
+          {z.pinX != null && (
+            <>
+              <PctSlider label="Pin X" value={z.pinX} fallback={50} onChange={(v) => updateZone(zi, { pinX: v })} accent={highlight} />
+              <PctSlider label="Pin Y" value={z.pinY} fallback={50} onChange={(v) => updateZone(zi, { pinY: v })} accent={highlight} />
+            </>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer", padding: "4px 0" }}>
+            <input type="checkbox" checked={z.boxX != null} onChange={(e) => updateZone(zi, e.target.checked ? { boxX: 40, boxY: 40, boxW: 20, boxH: 20 } : { boxX: null, boxY: null, boxW: null, boxH: null })} />
+            Highlight box
+          </label>
+          {z.boxX != null && (
+            <>
+              <PctSlider label="Box X" value={z.boxX} fallback={40} onChange={(v) => updateZone(zi, { boxX: v })} accent={highlight} />
+              <PctSlider label="Box Y" value={z.boxY} fallback={40} onChange={(v) => updateZone(zi, { boxY: v })} accent={highlight} />
+              <PctSlider label="Box Width" value={z.boxW} fallback={20} onChange={(v) => updateZone(zi, { boxW: v })} accent={highlight} />
+              <PctSlider label="Box Height" value={z.boxH} fallback={20} onChange={(v) => updateZone(zi, { boxH: v })} accent={highlight} />
+            </>
+          )}
+          {isCalloutMap && (
+            <FieldGroup label="Card Side">
+              <select value={z.side ?? ""} onChange={(e) => updateZone(zi, { side: (e.target.value || null) as FloorPlanZone["side"] })}
+                style={{ width: "100%", fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151" }}>
+                <option value="">Auto</option>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </FieldGroup>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ─── Craftsmanship Inspector ─────────────────────────────────────────────────
+
+function CraftsmanshipInspector({
+  slide,
+  branding,
+  onUpdate,
+  projectId,
+  projectRoomsWithMedia = [],
+  projectLevelMedia = [],
+}: {
+  slide: ProposalSlide;
+  branding: DeckBranding;
+  onUpdate: (s: ProposalSlide) => void;
+  projectId: string;
+  projectRoomsWithMedia?: RoomWithMedia[];
+  projectLevelMedia?: RoomMediaItem[];
+}) {
+  const content = (slide.content ?? {}) as CraftsmanshipContent;
+  const items = content.items && content.items.length > 0 ? content.items : HHI_DEFAULT_CRAFTSMANSHIP_ITEMS;
+  const layoutKey = slide.layoutKey as string;
+  const isAnnotated = layoutKey === "annotated-photo";
+  const accent = content.accentColor ?? branding.accentColor;
+  const [heroPickerOpen, setHeroPickerOpen] = useState(false);
+  const [collagePickerOpen, setCollagePickerOpen] = useState(false);
+  const [buildingPhoto, setBuildingPhoto] = useState(false);
+  const [buildingCollage, setBuildingCollage] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
+  const collage = content.collagePhotos ?? [];
+
+  function updateContent(patch: Partial<CraftsmanshipContent>) {
+    onUpdate({ ...slide, content: { ...content, ...patch } });
+  }
+  function updateItem(idx: number, patch: Partial<CraftsmanshipItem>) {
+    updateContent({ items: items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) });
+  }
+
+  /** AI builds the annotated photo FROM THE PROJECT'S RECOMMENDED MATERIALS:
+   *  Claude reviews the estimate's material line items + style presets and
+   *  art-directs one vignette; Gemini renders it; the callout items are
+   *  replaced to match what's in the photo (pins are then placed manually). */
+  async function buildPhotoFromMaterials() {
+    setBuildingPhoto(true);
+    setBuildError(null);
+    try {
+      const res = await generateCraftsmanshipPhotoAction(projectId, content.heroPhotoStyle ?? "vignette");
+      if ("error" in res) {
+        setBuildError(res.error);
+        return;
+      }
+      updateContent({
+        heroPhoto: res.url,
+        items: res.items.map((it, i) => ({ id: `craft-ai-${Date.now()}-${i}`, title: it.title, description: it.description })),
+      });
+    } catch (e) {
+      setBuildError(e instanceof Error ? e.message : "Photo build failed.");
+    } finally {
+      setBuildingPhoto(false);
+    }
+  }
+
+  /** Standards Grid build: one AI macro shot per recommended material fills
+   *  the collage, and the standards columns rewrite to match. */
+  async function buildCollageFromMaterials() {
+    setBuildingCollage(true);
+    setBuildError(null);
+    try {
+      const res = await generateCraftsmanshipCollageAction(projectId);
+      if ("error" in res) {
+        setBuildError(res.error);
+        return;
+      }
+      updateContent({
+        collagePhotos: res.photos,
+        items: res.items.map((it, i) => ({ id: `craft-ai-${Date.now()}-${i}`, title: it.title, description: it.description, column: it.column })),
+      });
+    } catch (e) {
+      setBuildError(e instanceof Error ? e.message : "Collage build failed.");
+    } finally {
+      setBuildingCollage(false);
+    }
+  }
+
+  return (
+    <>
+      <SectionLabel>Content</SectionLabel>
+      <FieldGroup label="Headline">
+        <TextInput value={slide.headline ?? ""} onChange={(v) => onUpdate({ ...slide, headline: v || null })} placeholder={CRAFTSMANSHIP_DEFAULTS.headline} />
+      </FieldGroup>
+      <FieldGroup label="Section Label">
+        <TextInput value={content.sectionLabel ?? ""} onChange={(v) => updateContent({ sectionLabel: v || null })} placeholder={CRAFTSMANSHIP_DEFAULTS.sectionLabel} />
+      </FieldGroup>
+      <FieldGroup label="Intro Line">
+        <TextInput value={content.introText ?? ""} onChange={(v) => updateContent({ introText: v || null })} placeholder={CRAFTSMANSHIP_DEFAULTS.introText} />
+      </FieldGroup>
+
+      {PF_GROUP_DIVIDER}
+
+      {!isAnnotated && (
+        <>
+          <SectionLabel>Standards Columns</SectionLabel>
+          <FieldGroup label="Left Column Title">
+            <TextInput value={content.columnATitle ?? ""} onChange={(v) => updateContent({ columnATitle: v || null })} placeholder={CRAFTSMANSHIP_DEFAULTS.columnATitle} />
+          </FieldGroup>
+          <FieldGroup label="Right Column Title">
+            <TextInput value={content.columnBTitle ?? ""} onChange={(v) => updateContent({ columnBTitle: v || null })} placeholder={CRAFTSMANSHIP_DEFAULTS.columnBTitle} />
+          </FieldGroup>
+
+          <SectionLabel>Macro Photo Collage</SectionLabel>
+          <button
+            onClick={buildCollageFromMaterials}
+            disabled={buildingCollage}
+            style={{ width: "100%", fontSize: 11, fontWeight: 600, color: "#fff", cursor: buildingCollage ? "default" : "pointer", background: buildingCollage ? "#9CA3AF" : accent, border: "none", borderRadius: 4, padding: "6px 10px", marginBottom: 4 }}
+          >
+            {buildingCollage ? "Building from project materials…" : "✦ Build collage from project materials (AI)"}
+          </button>
+          {buildError && (
+            <p style={{ fontSize: 10, color: "#EF4444", lineHeight: 1.4, marginBottom: 4 }}>{buildError}</p>
+          )}
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            Reviews this project&apos;s recommended materials, renders one macro
+            close-up per material (~30-45s), and rewrites both standards columns
+            to match. Replaces the list — Reset restores the HHI defaults.
+          </p>
+          {collage.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, marginBottom: 6 }}>
+              {collage.map((url, i) => (
+                <div key={i} style={{ position: "relative" }}>
+                  <img src={url} alt="" style={{ width: "100%", height: 44, objectFit: "cover", borderRadius: 4, display: "block" }} />
+                  <button onClick={() => updateContent({ collagePhotos: collage.filter((_, x) => x !== i) })}
+                    style={{ position: "absolute", top: 2, right: 2, fontSize: 9, lineHeight: 1, color: "#fff", background: "rgba(0,0,0,0.55)", border: "none", borderRadius: 3, padding: "2px 4px", cursor: "pointer" }}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setCollagePickerOpen(true)} disabled={collage.length >= 6}
+            style={{ width: "100%", fontSize: 11, color: collage.length >= 6 ? "#9CA3AF" : "#6B7280", cursor: collage.length >= 6 ? "default" : "pointer", background: "#F9FAFB", border: "1px dashed #D1D5DB", borderRadius: 6, padding: "8px 10px", marginBottom: 8 }}>
+            + Add macro photos ({collage.length}/6)
+          </button>
+          <LibraryMediaPicker
+            open={collagePickerOpen}
+            onClose={() => setCollagePickerOpen(false)}
+            onSelect={(picked) => { updateContent({ collagePhotos: [...collage, ...picked.map((p) => p.url)].slice(0, 6) }); setCollagePickerOpen(false); }}
+            multiple
+            includeUnapproved
+            projectMedia={projectMediaGroups}
+          />
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
+
+      {isAnnotated && (
+        <>
+          <SectionLabel>Hero Photo</SectionLabel>
+          <FieldGroup label="Build Style">
+            <select
+              value={content.heroPhotoStyle ?? "vignette"}
+              onChange={(e) => updateContent({ heroPhotoStyle: e.target.value as CraftsmanshipContent["heroPhotoStyle"] })}
+              style={{ width: "100%", fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151" }}
+            >
+              <option value="vignette">Photo vignette (photorealistic close-up)</option>
+              <option value="technical">Technical drawing (exploded isometric)</option>
+              <option value="collage">Collage (photo panels over blueprint)</option>
+            </select>
+          </FieldGroup>
+          <button
+            onClick={buildPhotoFromMaterials}
+            disabled={buildingPhoto}
+            style={{ width: "100%", fontSize: 11, fontWeight: 600, color: "#fff", cursor: buildingPhoto ? "default" : "pointer", background: buildingPhoto ? "#9CA3AF" : accent, border: "none", borderRadius: 4, padding: "6px 10px", marginBottom: 4 }}
+          >
+            {buildingPhoto ? "Building from project materials…" : "✦ Build photo from project materials (AI)"}
+          </button>
+          {buildError && (
+            <p style={{ fontSize: 10, color: "#EF4444", lineHeight: 1.4, marginBottom: 4 }}>{buildError}</p>
+          )}
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            Reviews the materials recommended in this project&apos;s estimates (plus
+            the style preset), renders one vignette showing them, and rewrites the
+            callouts to match. Takes ~20-30s; replaces the standards list — Reset
+            restores the HHI defaults.
+          </p>
+          {content.heroPhoto ? (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ borderRadius: 6, overflow: "hidden", marginBottom: 6, background: "#F3F4F6" }}>
+                <img src={content.heroPhoto} alt="Hero" style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }} />
+              </div>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={() => setHeroPickerOpen(true)} style={{ flex: 1, fontSize: 10, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "3px 8px" }}>Change</button>
+                <button onClick={() => updateContent({ heroPhoto: null })} style={{ fontSize: 10, color: "#EF4444", cursor: "pointer", background: "none", border: "1px solid #FCA5A5", borderRadius: 4, padding: "3px 8px" }}>Remove</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setHeroPickerOpen(true)} style={{ width: "100%", fontSize: 11, color: "#6B7280", cursor: "pointer", background: "#F9FAFB", border: "1px dashed #D1D5DB", borderRadius: 6, padding: "12px 10px", marginBottom: 8 }}>
+              + Select finished-detail photo
+            </button>
+          )}
+          <LibraryMediaPicker
+            open={heroPickerOpen}
+            onClose={() => setHeroPickerOpen(false)}
+            onSelect={(picked) => { if (picked.length > 0) updateContent({ heroPhoto: picked[0].url }); setHeroPickerOpen(false); }}
+            multiple={false}
+            includeUnapproved
+            projectMedia={projectMediaGroups}
+          />
+          <FieldGroup label={`Pin Size — ${(content.pinSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.pinSize ?? 1.0} onChange={(v) => updateContent({ pinSize: v })} />
+          </FieldGroup>
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <SectionLabel>Standards</SectionLabel>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => updateContent({ items: [...items, { id: `craft-${Date.now()}`, title: "New Standard", description: "" }] })}
+            style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px" }}>
+            + Add
+          </button>
+          <button onClick={() => updateContent({ items: HHI_DEFAULT_CRAFTSMANSHIP_ITEMS })}
+            style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "2px 8px" }}>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <FieldGroup label={`Text Size — ${(content.itemTextSize ?? 1.0).toFixed(1)}×`}>
+        <PSizeSlider accentColor={accent} value={content.itemTextSize ?? 1.0} onChange={(v) => updateContent({ itemTextSize: v })} />
+      </FieldGroup>
+
+      {items.map((it, ii) => (
+        <div key={it.id} style={{ marginBottom: 14, border: "1px solid #E5E7EB", borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionLabel>Standard {ii + 1}</SectionLabel>
+            {items.length > 1 && (
+              <button onClick={() => updateContent({ items: items.filter((_, x) => x !== ii) })} style={{ fontSize: 11, color: "#EF4444", cursor: "pointer", background: "none", border: "none", padding: "0 3px" }}>✕</button>
+            )}
+          </div>
+          <FieldGroup label="Title">
+            <TextInput value={it.title} onChange={(v) => updateItem(ii, { title: v })} placeholder="Dovetail Drawer Joinery" />
+          </FieldGroup>
+          <FieldGroup label="Description">
+            <TextArea value={it.description} onChange={(v) => updateItem(ii, { description: v })} placeholder="One sentence of concrete proof." rows={2} />
+          </FieldGroup>
+          {!isAnnotated && (
+            <FieldGroup label="Column">
+              <select value={it.column ?? ""} onChange={(e) => updateItem(ii, { column: (e.target.value || null) as CraftsmanshipItem["column"] })}
+                style={{ width: "100%", fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151" }}>
+                <option value="">Auto</option>
+                <option value="a">Left column</option>
+                <option value="b">Right column</option>
+              </select>
+            </FieldGroup>
+          )}
+          {isAnnotated && (
+            <>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280", cursor: "pointer", padding: "4px 0" }}>
+                <input type="checkbox" checked={it.pinX != null} onChange={(e) => updateItem(ii, e.target.checked ? { pinX: 50, pinY: 50 } : { pinX: null, pinY: null })} />
+                Pin on photo
+              </label>
+              {it.pinX != null && (
+                <>
+                  <PctSlider label="Pin X" value={it.pinX} fallback={50} onChange={(v) => updateItem(ii, { pinX: v })} accent={accent} />
+                  <PctSlider label="Pin Y" value={it.pinY} fallback={50} onChange={(v) => updateItem(ii, { pinY: v })} accent={accent} />
+                </>
+              )}
+              <FieldGroup label="Card Side">
+                <select value={it.side ?? ""} onChange={(e) => updateItem(ii, { side: (e.target.value || null) as CraftsmanshipItem["side"] })}
+                  style={{ width: "100%", fontSize: 11, padding: "4px 6px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151" }}>
+                  <option value="">Auto</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                </select>
+              </FieldGroup>
+            </>
+          )}
+        </div>
+      ))}
     </>
   );
 }
@@ -6601,6 +8021,7 @@ function ClosingSlideInspector({
   const content = (slide.content ?? {}) as ClosingContent;
   const layoutKey = slide.layoutKey as string;
   const [bgPhotoPickerOpen, setBgPhotoPickerOpen] = useState(false);
+  const [bpPickerOpen, setBpPickerOpen] = useState(false);
 
   function updateContent(patch: Partial<ClosingContent>) {
     onUpdate({ ...slide, content: { ...content, ...patch } });
@@ -6613,16 +8034,30 @@ function ClosingSlideInspector({
     setBgPhotoPickerOpen(false);
   }
 
+  function handleBpSelect(items: LibraryMediaItem[]) {
+    if (items.length > 0) {
+      updateContent({ blueprintPhoto: items[0].url });
+    }
+    setBpPickerOpen(false);
+  }
+
   const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
 
   // Layout-aware defaults
   const isDark = layoutKey === "dark-centered";
   const isPhoto = layoutKey === "photo-white-card";
-  const headlineColorDefault = isDark ? "#FFFFFF" : branding.textColor;
-  const contactColorDefault = isDark ? "rgba(255,255,255,0.75)" : "#4A5568";
-  const validityColorDefault = "#9CA3AF";
-  const subColorDefault = isDark ? "rgba(255,255,255,0.7)" : "#6B7280";
+  const isSplit = layoutKey === "blueprint-split";
+  const headlineColorDefault = isSplit ? "#3A3D42" : isDark ? "#FFFFFF" : branding.textColor;
+  const contactColorDefault = isSplit ? "#4A4D52" : isDark ? "rgba(255,255,255,0.8)" : "#4A5568";
+  const validityColorDefault = isSplit ? "#3A3D42" : "#9CA3AF";
+  const subColorDefault = isDark ? "rgba(255,255,255,0.92)" : "#6B7280";
   const resolvedAccent = content.accentColor ?? branding.accentColor;
+  // Per-layout slider defaults (keep the displayed value truthful)
+  const headlineSizeDefault = isSplit ? 2.5 : isDark ? 2.1 : isPhoto ? 1.2 : 1.4;
+  const taglineSizeDefault = isDark ? 0.8 : isPhoto ? 0.65 : 0.7;
+  const subSizeDefault = isDark ? 0.85 : 0.5;
+  const contactSizeDefault = isDark ? 0.55 : isPhoto ? 0.45 : 0.48;
+  const validitySizeDefault = isSplit ? 0.78 : isDark ? 0.45 : isPhoto ? 0.36 : 0.38;
 
   return (
     <>
@@ -6634,8 +8069,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.headlineFont2 ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ headlineFont2: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.headlineSize ?? 1.6).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.headlineSize ?? 1.6} onChange={(v) => updateContent({ headlineSize: v })} />
+      <FieldGroup label={`Size — ${(content.headlineSize ?? headlineSizeDefault).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.headlineSize ?? headlineSizeDefault} onChange={(v) => updateContent({ headlineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.headlineBold2} italic={content.headlineItalic} underline={content.headlineUnderline}
         onBold={(v) => updateContent({ headlineBold2: v })} onItalic={(v) => updateContent({ headlineItalic: v })} onUnderline={(v) => updateContent({ headlineUnderline: v })} />
@@ -6651,6 +8086,88 @@ function ClosingSlideInspector({
 
       {PF_GROUP_DIVIDER}
 
+      {/* ── BLUEPRINT SPLIT — CTA, contact box, sheet image ────────────── */}
+      {isSplit && (
+        <>
+          <SectionLabel>Call to Action</SectionLabel>
+          <FieldGroup label="Paragraph">
+            <TextArea
+              value={content.ctaParagraph ?? ""}
+              onChange={(v) => updateContent({ ctaParagraph: v || null })}
+              placeholder={CLOSING_SLIDE_DEFAULTS.ctaParagraph}
+              rows={4}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Paragraph Size — ${(content.ctaParagraphSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.ctaParagraphSize ?? 1.0} onChange={(v) => updateContent({ ctaParagraphSize: v })} />
+          </FieldGroup>
+
+          {PF_GROUP_DIVIDER}
+
+          <SectionLabel>Contact Box</SectionLabel>
+          <FieldGroup label="Bold Line">
+            <TextInput
+              value={content.contactBoxTitle ?? ""}
+              onChange={(v) => updateContent({ contactBoxTitle: v || null })}
+              placeholder={CLOSING_SLIDE_DEFAULTS.contactBoxTitle}
+            />
+          </FieldGroup>
+          <FieldGroup label={`Box Text Size — ${(content.contactBoxTextSize ?? 1.0).toFixed(1)}×`}>
+            <PSizeSlider accentColor={branding.accentColor} value={content.contactBoxTextSize ?? 1.0} onChange={(v) => updateContent({ contactBoxTextSize: v })} />
+          </FieldGroup>
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            The box shows the bold line, then email | phone, then the address —
+            edit those under Contact Info below.
+          </p>
+
+          {PF_GROUP_DIVIDER}
+
+          <SectionLabel>Blueprint Image</SectionLabel>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ borderRadius: 6, overflow: "hidden", marginBottom: 6, background: "#F3F4F6" }}>
+              <img
+                src={content.blueprintPhoto ?? CLOSING_SLIDE_DEFAULTS.blueprintImage}
+                alt="Blueprint sheet"
+                style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                onClick={() => setBpPickerOpen(true)}
+                style={{ flex: 1, fontSize: 10, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "3px 8px" }}
+              >
+                Change
+              </button>
+              {content.blueprintPhoto && (
+                <button
+                  onClick={() => updateContent({ blueprintPhoto: null })}
+                  style={{ fontSize: 10, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "3px 8px" }}
+                >
+                  Use default sheet
+                </button>
+              )}
+            </div>
+          </div>
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, marginBottom: 8 }}>
+            Swap in the client&apos;s actual floor plan for a personal touch — the
+            built-in sheet is the fallback.
+          </p>
+          <LibraryMediaPicker
+            open={bpPickerOpen}
+            onClose={() => setBpPickerOpen(false)}
+            onSelect={handleBpSelect}
+            multiple={false}
+            includeUnapproved
+            projectMedia={projectMediaGroups}
+          />
+
+          {PF_GROUP_DIVIDER}
+        </>
+      )}
+
+      {/* Tagline + subheadline aren't drawn on Blueprint Split */}
+      {!isSplit && (
+        <>
       {/* ── TAGLINE ────────────────────────────────────────────────────── */}
       <SectionLabel>Tagline</SectionLabel>
       <FieldGroup label="Text">
@@ -6659,8 +8176,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.taglineFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ taglineFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.taglineSize ?? 1.4).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.taglineSize ?? 1.4} onChange={(v) => updateContent({ taglineSize: v })} />
+      <FieldGroup label={`Size — ${(content.taglineSize ?? taglineSizeDefault).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.taglineSize ?? taglineSizeDefault} onChange={(v) => updateContent({ taglineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.taglineBold} italic={content.taglineItalic} underline={content.taglineUnderline}
         onBold={(v) => updateContent({ taglineBold: v })} onItalic={(v) => updateContent({ taglineItalic: v })} onUnderline={(v) => updateContent({ taglineUnderline: v })} />
@@ -6684,8 +8201,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.subheadlineFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ subheadlineFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.subheadlineSize ?? 0.5).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.subheadlineSize ?? 0.5} onChange={(v) => updateContent({ subheadlineSize: v })} />
+      <FieldGroup label={`Size — ${(content.subheadlineSize ?? subSizeDefault).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.subheadlineSize ?? subSizeDefault} onChange={(v) => updateContent({ subheadlineSize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.subheadlineBold} italic={content.subheadlineItalic} underline={content.subheadlineUnderline}
         onBold={(v) => updateContent({ subheadlineBold: v })} onItalic={(v) => updateContent({ subheadlineItalic: v })} onUnderline={(v) => updateContent({ subheadlineUnderline: v })} />
@@ -6700,6 +8217,8 @@ function ClosingSlideInspector({
       </FieldGroup>
 
       {PF_GROUP_DIVIDER}
+        </>
+      )}
 
       {/* ── CONTACT INFO ───────────────────────────────────────────────── */}
       <SectionLabel>Contact Info</SectionLabel>
@@ -6715,9 +8234,12 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.contactFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ contactFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.contactSize ?? 1.3).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.contactSize ?? 1.3} onChange={(v) => updateContent({ contactSize: v })} />
-      </FieldGroup>
+      {/* Blueprint Split sizes its box text with the Box Text Size slider above */}
+      {!isSplit && (
+        <FieldGroup label={`Size — ${(content.contactSize ?? contactSizeDefault).toFixed(1)}×`}>
+          <PSizeSlider accentColor={branding.accentColor} value={content.contactSize ?? contactSizeDefault} onChange={(v) => updateContent({ contactSize: v })} />
+        </FieldGroup>
+      )}
       <PStyleButtons bold={content.contactBold} italic={content.contactItalic} underline={content.contactUnderline}
         onBold={(v) => updateContent({ contactBold: v })} onItalic={(v) => updateContent({ contactItalic: v })} onUnderline={(v) => updateContent({ contactUnderline: v })} />
       <div style={{ marginTop: 8 }}>
@@ -6740,8 +8262,8 @@ function ClosingSlideInspector({
       <FieldGroup label="Font">
         <PFontSelect value={content.validityFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ validityFont: v })} />
       </FieldGroup>
-      <FieldGroup label={`Size — ${(content.validitySize ?? 2.0).toFixed(1)}×`}>
-        <PSizeSlider accentColor={branding.accentColor} value={content.validitySize ?? 2.0} onChange={(v) => updateContent({ validitySize: v })} />
+      <FieldGroup label={`Size — ${(content.validitySize ?? validitySizeDefault).toFixed(1)}×`}>
+        <PSizeSlider accentColor={branding.accentColor} value={content.validitySize ?? validitySizeDefault} onChange={(v) => updateContent({ validitySize: v })} />
       </FieldGroup>
       <PStyleButtons bold={content.validityBold} italic={content.validityItalic} underline={content.validityUnderline}
         onBold={(v) => updateContent({ validityBold: v })} onItalic={(v) => updateContent({ validityItalic: v })} onUnderline={(v) => updateContent({ validityUnderline: v })} />
@@ -6761,7 +8283,7 @@ function ClosingSlideInspector({
         <FieldGroup label="Background Color">
           <BrandingColorRow
             value={content.backgroundColor}
-            defaultVal="#1B2A4A"
+            defaultVal={CLOSING_SLIDE_DEFAULTS.backgroundColor}
             branding={branding}
             onChange={(v) => updateContent({ backgroundColor: v })}
             onReset={() => updateContent({ backgroundColor: null })}
@@ -6818,315 +8340,6 @@ function ClosingSlideInspector({
         <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={!!content.backgroundPhoto} />
       )}
       <SharedCTASection content={content} updateContent={updateContent} />
-      {/* Logo section moved to main InspectorPanel */}
-      <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
-    </>
-  );
-}
-
-// ─── Visual Inspiration Inspector ──────────────────────────────────────────
-
-function VisualInspirationInspector({
-  slide,
-  branding,
-  onUpdate,
-  projectRoomsWithMedia = [],
-  projectLevelMedia = [],
-}: {
-  slide: ProposalSlide;
-  branding: DeckBranding;
-  onUpdate: (s: ProposalSlide) => void;
-  projectRoomsWithMedia?: RoomWithMedia[];
-  projectLevelMedia?: RoomMediaItem[];
-}) {
-  const content = (slide.content ?? {}) as InspirationContent;
-  const layoutKey = slide.layoutKey as string;
-  const photos = content.photos ?? [];
-  const accent = content.accentColor ?? branding.accentColor;
-  const [heroPickerOpen, setHeroPickerOpen] = useState(false);
-  const [photosPickerOpen, setPhotosPickerOpen] = useState(false);
-  const projectMediaGroups = buildProjectMediaGroups(projectLevelMedia, projectRoomsWithMedia);
-
-  function updateContent(patch: Partial<InspirationContent>) {
-    onUpdate({ ...slide, content: { ...content, ...patch } });
-  }
-
-  function handleHeroPhotoSelect(items: LibraryMediaItem[]) {
-    if (items.length > 0) {
-      updateContent({ heroPhoto: items[0].url });
-    }
-    setHeroPickerOpen(false);
-  }
-
-  function handlePhotosSelect(items: LibraryMediaItem[]) {
-    const newUrls = items.map((item) => item.url);
-    updateContent({ photos: [...photos, ...newUrls] });
-    setPhotosPickerOpen(false);
-  }
-
-  function removePhoto(idx: number) {
-    updateContent({ photos: photos.filter((_, i) => i !== idx) });
-  }
-
-  function movePhoto(idx: number, dir: -1 | 1) {
-    const target = idx + dir;
-    if (target < 0 || target >= photos.length) return;
-    const updated = [...photos];
-    [updated[idx], updated[target]] = [updated[target], updated[idx]];
-    updateContent({ photos: updated });
-  }
-
-  // Photo count guidance per layout
-  const guidance =
-    layoutKey === "hero-plus-stacked" ? { label: "2 stacked photos", min: 2, max: 2 } :
-    layoutKey === "masonry-grid"      ? { label: "4\u20138 photos", min: 4, max: 8 } :
-    layoutKey === "side-by-side-bleed" ? { label: "2 photos", min: 2, max: 2 } :
-    { label: "photos", min: 0, max: 8 };
-
-  const countWarning =
-    photos.length < guidance.min ? `Need at least ${guidance.min} photos (have ${photos.length})` :
-    photos.length > guidance.max ? `Maximum ${guidance.max} photos recommended (have ${photos.length})` :
-    null;
-
-  // Phase 8A T7: when false, Regenerate Default Deck (replace-all) skips
-  // this slide. Addable manually via + Add Slide regardless.
-  const showByDefault = content.showByDefault ?? true;
-
-  return (
-    <>
-      {/* ── INCLUDE IN DEFAULT DECK (T7) ───────────────── */}
-      <SectionLabel>Default deck inclusion</SectionLabel>
-      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", marginBottom: 14 }}>
-        <input
-          type="checkbox"
-          checked={showByDefault}
-          onChange={(e) => updateContent({ showByDefault: e.target.checked })}
-          style={{ marginTop: 3 }}
-        />
-        <span style={{ fontSize: 11, lineHeight: 1.45, color: "#374151" }}>
-          Include in Generate Default Deck
-          <span style={{ display: "block", fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>
-            Uncheck to keep this slide out of regenerated default decks.
-            Manual + Add Slide still works.
-          </span>
-        </span>
-      </label>
-
-      {PF_GROUP_DIVIDER}
-
-      {/* ── HEADLINE — Layouts A and C ────────────────── */}
-      {(layoutKey === "hero-plus-stacked" || layoutKey === "side-by-side-bleed") && (
-        <>
-          <SectionLabel>Headline</SectionLabel>
-          <FieldGroup label="">
-            <TextInput
-              value={slide.headline ?? ""}
-              onChange={(v) => onUpdate({ ...slide, headline: v || null })}
-              placeholder={VISUAL_INSPIRATION_DEFAULTS.headline}
-            />
-          </FieldGroup>
-          <FieldGroup label="Font">
-            <PFontSelect value={content.headlineFont ?? SLIDE_FONTS.defaults.headline} onChange={(v) => updateContent({ headlineFont: v })} />
-          </FieldGroup>
-          <FieldGroup label={`Size — ${(content.headlineSize ?? 2.0).toFixed(1)}×`}>
-            <PSizeSlider value={content.headlineSize ?? 2.0} onChange={(v) => updateContent({ headlineSize: v })} accentColor={accent} />
-          </FieldGroup>
-          <FieldGroup label="Style">
-            <PStyleButtons bold={content.headlineBold ?? true} italic={content.headlineItalic} underline={content.headlineUnderline}
-              onBold={(v) => updateContent({ headlineBold: v })} onItalic={(v) => updateContent({ headlineItalic: v })} onUnderline={(v) => updateContent({ headlineUnderline: v })} />
-          </FieldGroup>
-          <FieldGroup label="Color">
-            <BrandingColorRow branding={branding} value={content.headlineColor} defaultVal="#FFFFFF"
-              onChange={(v) => updateContent({ headlineColor: v })} onReset={() => updateContent({ headlineColor: null })} />
-          </FieldGroup>
-          <FieldGroup label="Outline">
-            <POutlineRow value={content.headlineOutline} onChangeFn={(v) => updateContent({ headlineOutline: v })} accentColor={accent} />
-          </FieldGroup>
-          {PF_GROUP_DIVIDER}
-        </>
-      )}
-
-      {/* ── SUBTITLE — Layout A only ────────────────── */}
-      {layoutKey === "hero-plus-stacked" && (
-        <>
-          <SectionLabel>Subtitle</SectionLabel>
-          <FieldGroup label="">
-            <TextInput
-              value={content.subtitle ?? ""}
-              onChange={(v) => updateContent({ subtitle: v || null })}
-              placeholder={VISUAL_INSPIRATION_DEFAULTS.subtitle}
-            />
-          </FieldGroup>
-          <FieldGroup label="Font">
-            <PFontSelect value={content.subtitleFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ subtitleFont: v })} />
-          </FieldGroup>
-          <FieldGroup label={`Size — ${(content.subtitleSize ?? 1.0).toFixed(1)}×`}>
-            <PSizeSlider value={content.subtitleSize ?? 1.0} onChange={(v) => updateContent({ subtitleSize: v })} accentColor={accent} />
-          </FieldGroup>
-          <FieldGroup label="Style">
-            <PStyleButtons bold={content.subtitleBold} italic={content.subtitleItalic} underline={content.subtitleUnderline}
-              onBold={(v) => updateContent({ subtitleBold: v })} onItalic={(v) => updateContent({ subtitleItalic: v })} onUnderline={(v) => updateContent({ subtitleUnderline: v })} />
-          </FieldGroup>
-          <FieldGroup label="Color">
-            <BrandingColorRow branding={branding} value={content.subtitleColor} defaultVal="#FFFFFF"
-              onChange={(v) => updateContent({ subtitleColor: v })} onReset={() => updateContent({ subtitleColor: null })} />
-          </FieldGroup>
-          <FieldGroup label="Outline">
-            <POutlineRow value={content.subtitleOutline} onChangeFn={(v) => updateContent({ subtitleOutline: v })} accentColor={accent} />
-          </FieldGroup>
-          {PF_GROUP_DIVIDER}
-        </>
-      )}
-
-      {/* ── CAPTION — Layouts B and C ───────────────── */}
-      {(layoutKey === "masonry-grid" || layoutKey === "side-by-side-bleed") && (
-        <>
-          <SectionLabel>Caption</SectionLabel>
-          <FieldGroup label="">
-            <TextInput
-              value={content.caption ?? ""}
-              onChange={(v) => updateContent({ caption: v || null })}
-              placeholder="Optional caption"
-            />
-          </FieldGroup>
-          <FieldGroup label="Font">
-            <PFontSelect value={content.captionFont ?? SLIDE_FONTS.defaults.body} onChange={(v) => updateContent({ captionFont: v })} />
-          </FieldGroup>
-          <FieldGroup label={`Size — ${(content.captionSize ?? 1.0).toFixed(1)}×`}>
-            <PSizeSlider value={content.captionSize ?? 1.0} onChange={(v) => updateContent({ captionSize: v })} accentColor={accent} />
-          </FieldGroup>
-          <FieldGroup label="Style">
-            <PStyleButtons bold={content.captionBold} italic={content.captionItalic} underline={content.captionUnderline}
-              onBold={(v) => updateContent({ captionBold: v })} onItalic={(v) => updateContent({ captionItalic: v })} onUnderline={(v) => updateContent({ captionUnderline: v })} />
-          </FieldGroup>
-          <FieldGroup label="Color">
-            <BrandingColorRow branding={branding} value={content.captionColor} defaultVal="#FFFFFF"
-              onChange={(v) => updateContent({ captionColor: v })} onReset={() => updateContent({ captionColor: null })} />
-          </FieldGroup>
-          <FieldGroup label="Outline">
-            <POutlineRow value={content.captionOutline} onChangeFn={(v) => updateContent({ captionOutline: v })} accentColor={accent} />
-          </FieldGroup>
-          {PF_GROUP_DIVIDER}
-        </>
-      )}
-
-      <Divider />
-
-      {/* Hero photo — Layout A only */}
-      {layoutKey === "hero-plus-stacked" && (
-        <>
-          <SectionLabel>Hero Photo</SectionLabel>
-          {content.heroPhoto ? (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ borderRadius: 6, overflow: "hidden", marginBottom: 6, background: "#F3F4F6" }}>
-                <img
-                  src={content.heroPhoto}
-                  alt="Hero photo"
-                  style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }}
-                />
-              </div>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button
-                  onClick={() => setHeroPickerOpen(true)}
-                  style={{ flex: 1, fontSize: 10, color: "#6B7280", cursor: "pointer", background: "none", border: "1px solid #D1D5DB", borderRadius: 4, padding: "3px 8px" }}
-                >
-                  Change
-                </button>
-                <button
-                  onClick={() => updateContent({ heroPhoto: null })}
-                  style={{ fontSize: 10, color: "#EF4444", cursor: "pointer", background: "none", border: "1px solid #FCA5A5", borderRadius: 4, padding: "3px 8px" }}
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setHeroPickerOpen(true)}
-              style={{ width: "100%", fontSize: 11, color: "#6B7280", cursor: "pointer", background: "#F9FAFB", border: "1px dashed #D1D5DB", borderRadius: 6, padding: "12px 10px", marginBottom: 8 }}
-            >
-              + Select Hero Photo
-            </button>
-          )}
-          <LibraryMediaPicker
-            open={heroPickerOpen}
-            onClose={() => setHeroPickerOpen(false)}
-            onSelect={handleHeroPhotoSelect}
-            multiple={false}
-            includeUnapproved
-            projectMedia={projectMediaGroups}
-          />
-          <Divider />
-        </>
-      )}
-
-      {/* Photos list */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <SectionLabel>Photos ({guidance.label})</SectionLabel>
-      </div>
-
-      {/* Count warning */}
-      {countWarning && (
-        <div style={{ fontSize: 10, color: "#F59E0B", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 4, padding: "4px 8px", marginBottom: 8 }}>
-          {countWarning}
-        </div>
-      )}
-
-      {/* Photo thumbnails */}
-      {photos.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
-          {photos.map((url, i) => (
-            <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
-                <button
-                  onClick={() => movePhoto(i, -1)}
-                  disabled={i === 0}
-                  style={{ fontSize: 9, color: i === 0 ? "#D1D5DB" : "#6B7280", cursor: i === 0 ? "default" : "pointer", background: "none", border: "none", padding: 0, lineHeight: 1 }}
-                >
-                  ▲
-                </button>
-                <button
-                  onClick={() => movePhoto(i, 1)}
-                  disabled={i === photos.length - 1}
-                  style={{ fontSize: 9, color: i === photos.length - 1 ? "#D1D5DB" : "#6B7280", cursor: i === photos.length - 1 ? "default" : "pointer", background: "none", border: "none", padding: 0, lineHeight: 1 }}
-                >
-                  ▼
-                </button>
-              </div>
-              <div style={{ width: 48, height: 36, borderRadius: 4, overflow: "hidden", flexShrink: 0, background: "#F3F4F6" }}>
-                <img src={url} alt={`Photo ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              </div>
-              <span style={{ flex: 1, fontSize: 10, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                Photo {i + 1}
-              </span>
-              <button
-                onClick={() => removePhoto(i)}
-                style={{ fontSize: 10, color: "#EF4444", cursor: "pointer", background: "none", border: "none", padding: "0 2px", flexShrink: 0 }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <button
-        onClick={() => setPhotosPickerOpen(true)}
-        style={{ width: "100%", fontSize: 11, color: "#6B7280", cursor: "pointer", background: "#F9FAFB", border: "1px dashed #D1D5DB", borderRadius: 6, padding: "10px 10px", marginBottom: 8 }}
-      >
-        + Add Photos from Library
-      </button>
-      <LibraryMediaPicker
-        open={photosPickerOpen}
-        onClose={() => setPhotosPickerOpen(false)}
-        onSelect={handlePhotosSelect}
-        multiple
-        includeUnapproved
-        projectMedia={projectMediaGroups}
-      />
-      {(layoutKey === "hero-plus-stacked" || layoutKey === "side-by-side-bleed") && (
-        <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={!!content.heroPhoto || photos.length > 0} />
-      )}
       {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
     </>
@@ -7459,7 +8672,7 @@ function ClientTestimonialsInspector({
       >
         Manage Testimonials in Settings
       </a>
-      <SharedCardStyleSection content={content} updateContent={updateContent} />
+      {/* Card Style removed — testimonial cards hardcode their chrome (dead controls). */}
       <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={!!content.backgroundPhoto} />
       {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
@@ -7900,7 +9113,10 @@ function DesignBuildAdvantageInspector({
       >
         Manage defaults in Settings
       </a>
-      <SharedCardStyleSection content={content} updateContent={updateContent} />
+      {/* Card Style only affects the icon-cards layout; gate it so it isn't a no-op elsewhere. */}
+      {slide.layoutKey === "icon-cards" && (
+        <SharedCardStyleSection content={content} updateContent={updateContent} />
+      )}
       <SharedOverlaySection content={content} updateContent={updateContent} hasPhoto={!!content.backgroundPhoto} />
       {/* Logo section moved to main InspectorPanel */}
       <SharedAccentColorSection content={content} updateContent={updateContent} branding={branding} />
@@ -9047,6 +10263,9 @@ export function InspectorPanel({
   onBackgroundChange,
   onTextZoneChange,
   onResyncInvestment,
+  pushAiSnapshot,
+  onAiUndo,
+  aiUndoDepth = 0,
 }: Props) {
   if (!slide) {
     return (
@@ -9094,6 +10313,18 @@ export function InspectorPanel({
       </div>
 
       <Divider />
+
+      {/* Universal AI Edit smart box (slide types with a descriptor). */}
+      {aiEditSupported(slide.type) && pushAiSnapshot && onAiUndo && (
+        <AiEditBox
+          slide={slide}
+          branding={branding}
+          onUpdate={onUpdate}
+          pushUndo={pushAiSnapshot}
+          onUndo={() => onAiUndo(slide.id)}
+          canUndo={aiUndoDepth > 0}
+        />
+      )}
 
       {/* Visibility */}
       <SectionLabel>Visibility</SectionLabel>
@@ -9193,7 +10424,7 @@ export function InspectorPanel({
             brandBackgrounds={brandBackgrounds}
             onBackgroundChange={onBackgroundChange}
             onTextZoneChange={onTextZoneChange}
-            showTextZone={slide.type !== "before-after" && slide.type !== "risk-brief" && slide.type !== "scope-overview" && slide.type !== "objective" && slide.type !== "investment-by-space" && slide.type !== "timeline"}
+            showTextZone={slide.type !== "before-after" && slide.type !== "scope-overview" && slide.type !== "objective" && slide.type !== "investment-by-space" && slide.type !== "timeline"}
           />
           <Divider />
         </>
@@ -9204,7 +10435,7 @@ export function InspectorPanel({
         <CoverInspector slide={slide} branding={branding} onUpdate={onUpdate} projectId={projectId} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
       {slide.type === "objective" && (
-        <ObjectiveInspector slide={slide} branding={branding} onUpdate={onUpdate} />
+        <ObjectiveInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
       {slide.type === "investment-by-space" && (
         <InvestmentInspector slide={slide} branding={branding} onUpdate={onUpdate} onResyncInvestment={onResyncInvestment} />
@@ -9226,9 +10457,6 @@ export function InspectorPanel({
       {slide.type === "scope-breakdown" && (
         <ScopeBreakdownInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
-      {slide.type === "risk-brief" && (
-        <RiskBriefInspector slide={slide} branding={branding} onUpdate={onUpdate} />
-      )}
       {slide.type === "our-process" && (
         <ProcessInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
@@ -9241,6 +10469,9 @@ export function InspectorPanel({
       {slide.type === "cope" && (
         <CopePageInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
+      {slide.type === "design-experience" && (
+        <DesignExperienceInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
+      )}
       {slide.type === "overall-investment" && (
         <DesignRetainerInspector slide={slide} branding={branding} onUpdate={onUpdate} />
       )}
@@ -9250,8 +10481,11 @@ export function InspectorPanel({
       {slide.type === "closing" && (
         <ClosingSlideInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
-      {slide.type === "inspiration" && (
-        <VisualInspirationInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
+      {slide.type === "floor-plan" && (
+        <FloorPlanInspector slide={slide} branding={branding} onUpdate={onUpdate} projectId={projectId} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
+      )}
+      {slide.type === "craftsmanship" && (
+        <CraftsmanshipInspector slide={slide} branding={branding} onUpdate={onUpdate} projectId={projectId} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />
       )}
       {slide.type === "testimonials" && (
         <ClientTestimonialsInspector slide={slide} branding={branding} onUpdate={onUpdate} projectRoomsWithMedia={projectRoomsWithMedia} projectLevelMedia={projectLevelMedia} />

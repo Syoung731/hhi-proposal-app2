@@ -37,7 +37,6 @@ const VALID_SLIDE_TYPES: SlideType[] = [
   "scope-overview",
   "before-after",
   "scope-breakdown",
-  "risk-brief",
   "our-process",
 ];
 

@@ -4,6 +4,7 @@ import { requireAdmin } from "@/app/lib/auth";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getDeckForProject } from "@/app/lib/deck/db";
+import { isDeckThemeKey, type DeckThemeKey } from "@/app/lib/deck/themes";
 import { getDesignBuildDefaults } from "@/app/lib/design-build-defaults.server";
 import { isRendrConfigured } from "@/app/lib/rendr/rendrClient";
 // Note: we fetch backgrounds directly with Prisma here (not via the server action)
@@ -321,8 +322,9 @@ export default async function DeckEditorPage({ params }: PageProps) {
     where: { projectId: id },
     select: { deckTheme: true },
   });
-  const deckTheme: "blueprint" | "editorial" =
-    deckRow?.deckTheme === "editorial" ? "editorial" : "blueprint";
+  const deckTheme: DeckThemeKey = isDeckThemeKey(deckRow?.deckTheme)
+    ? deckRow.deckTheme
+    : "blueprint";
 
   // Inject the live cover hero URL into every cover slide.
   // We do this here (not in db.ts) because the hero image is managed

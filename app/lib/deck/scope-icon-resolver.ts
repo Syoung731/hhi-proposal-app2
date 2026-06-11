@@ -118,3 +118,89 @@ export async function resolveScopeIconImages(
 export function scopeIconSlug(concept: string | null | undefined): string {
   return normalizeIconKey(concept);
 }
+
+const DUOTONE_CATEGORY = "duotone";
+
+/**
+ * Self-growing DUOTONE icon resolver — the higher-fidelity sibling of
+ * resolveScopeIconImages. Generates two-tone (navy linework + orange accents)
+ * line icons on a transparent background and caches them in the BrandIcon
+ * library under a `duo-` slug namespace so they never collide with the
+ * monochrome scope icons. Returned map is keyed by the BARE concept slug
+ * (scopeIconSlug) → public PNG URL, so callers look up identically.
+ *
+ * These are rendered UN-masked (as a plain <img>) so their colour survives —
+ * that's the whole point (mask-tinting would flatten them back to one colour).
+ */
+export async function resolveDuotoneIconImages(
+  rawConcepts: string[],
+  opts: { generateMissing?: boolean; dark?: boolean } = {},
+): Promise<Map<string, string>> {
+  const generateMissing = opts.generateMissing ?? true;
+  // `dark` swaps to the dark-background palette (orange + grey/cream, no navy)
+  // and a separate `isod-` cache namespace so it never collides with the
+  // light-background isometric icons.
+  const dark = opts.dark === true;
+  const prefix = dark ? "isod-" : "iso-";
+
+  const bareBySlug = new Map<string, string>(); // duo-slug → bare slug
+  const labelBySlug = new Map<string, string>(); // bare slug → label
+  for (const raw of rawConcepts) {
+    const bare = normalizeIconKey(raw);
+    if (!bare) continue;
+    bareBySlug.set(`${prefix}${bare}`, bare);
+    if (!labelBySlug.has(bare)) labelBySlug.set(bare, raw.trim());
+  }
+  const result = new Map<string, string>();
+  if (bareBySlug.size === 0) return result;
+
+  // 1) Match against existing duotone icons by slug only (no tag fallback, to
+  //    avoid pulling in monochrome scope icons that share concept tags).
+  const existing = await prisma.brandIcon.findMany({
+    where: { isActive: true, slug: { in: Array.from(bareBySlug.keys()) } },
+    select: { slug: true, imageUrl: true },
+  });
+  for (const ic of existing) {
+    const bare = bareBySlug.get(ic.slug);
+    if (bare && ic.imageUrl) result.set(bare, ic.imageUrl);
+  }
+
+  const missing = Array.from(bareBySlug.entries()).filter(([, bare]) => !result.has(bare));
+  if (!generateMissing || missing.length === 0) return result;
+
+  await Promise.all(
+    missing.map(async ([duoSlug, bare]) => {
+      const label = labelBySlug.get(bare) ?? bare.replace(/-/g, " ");
+      try {
+        const gen = await generateBrandIconPngAction({
+          name: label,
+          visual: `a few clear objects or tools that represent "${label}" in a residential design-build / remodeling context`,
+          description: `On-brand isometric process icon for a luxury design-build remodeling proposal representing "${label}".`,
+          isometric: true,
+          isometricDark: dark,
+        });
+        if (gen.error || !gen.imageUrl || !gen.imageKey) return;
+
+        const created = await createBrandIcon({
+          slug: duoSlug,
+          name: label,
+          imageUrl: gen.imageUrl,
+          imageKey: gen.imageKey,
+          tags: Array.from(new Set([duoSlug, dark ? "duotone-dark" : "duotone", ...label.toLowerCase().split(/\s+/)])).filter(Boolean),
+          category: dark ? "duotone-dark" : DUOTONE_CATEGORY,
+        });
+
+        if (created.error) {
+          const row = await prisma.brandIcon.findUnique({ where: { slug: duoSlug }, select: { imageUrl: true } });
+          if (row?.imageUrl) result.set(bare, row.imageUrl);
+          return;
+        }
+        result.set(bare, gen.imageUrl);
+      } catch {
+        /* fall back to the built-in vector icon */
+      }
+    }),
+  );
+
+  return result;
+}

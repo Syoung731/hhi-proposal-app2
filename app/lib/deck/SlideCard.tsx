@@ -17,7 +17,6 @@ const TEXT_ZONE_OVERLAY_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
   "scope-overview",
   "before-after",
   "scope-breakdown",
-  "risk-brief",
   "our-process",
   "core-values",
   "timeline",
@@ -25,7 +24,6 @@ const TEXT_ZONE_OVERLAY_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
   "overall-investment",
   "next-steps",
   "closing",
-  "inspiration",
   "testimonials",
   "design-build",
   "addition-overview",
@@ -41,8 +39,8 @@ interface Props {
    */
   hideTextZoneOverlay?: boolean;
   /**
-   * When true, slide components render editor-only affordances (e.g. the
-   * inspiration slide's empty-photo placeholders). The admin SlideCanvas
+   * When true, slide components render editor-only affordances (e.g.
+   * empty-photo placeholders). The admin SlideCanvas
    * passes true; client-facing PrintStack / PresentationFrame leave it
    * false so empty slots render as plain panels in the published PDF.
    */

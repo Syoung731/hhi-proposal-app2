@@ -1023,7 +1023,7 @@ model PricingSourceTrade {
 model ProposalDeck {
   id        String      @id @default(cuid())
   projectId String      @unique
-  deckTheme String      @default("blueprint") // visual theme key: "blueprint" | "editorial"
+  deckTheme String      @default("blueprint") // DeckThemeKey — see app/lib/deck/themes.ts (blueprint | editorial | gallery | coastal | palmetto)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   slides    DeckSlide[]

@@ -43,9 +43,6 @@ const SLIDE_SUBJECTS: Record<SlideType, string> = {
   "scope-breakdown":
     "Fine dot-grid pattern on warm off-white. Very subtle, minimal, professional. No objects.",
 
-  "risk-brief":
-    "Abstract two-tone split. Left half deep navy texture. Right half warm amber texture. Geometric, no objects.",
-
   "our-process":
     "Soft horizontal gradient wash, warm cream to light gray. No objects, no rooms.",
 
@@ -67,9 +64,6 @@ const SLIDE_SUBJECTS: Record<SlideType, string> = {
   closing:
     "Dark moody architectural interior with deep navy tones, soft warm light spill from a window. Elegant, quiet, premium closing feel.",
 
-  inspiration:
-    "Soft warm linen texture with very subtle watercolor wash, no objects. Gallery wall feel, neutral background for photo overlay.",
-
   testimonials:
     "Warm elegant interior with soft natural light, muted warm tones, slightly out of focus. Luxurious residential feel, perfect testimonial backdrop.",
 
@@ -78,6 +72,15 @@ const SLIDE_SUBJECTS: Record<SlideType, string> = {
 
   "addition-overview":
     "Warm linen background with very subtle architectural drafting elements — faint dashed construction lines and light pencil sketches of building additions. Professional, elegant, no objects.",
+
+  "design-experience":
+    "Clean warm parchment surface with a faint horizontal progression of light pathway lines suggesting a journey from left to right. Minimal, professional, no objects.",
+
+  "floor-plan":
+    "Very faint architectural graph-paper grid on warm white. Extremely subtle, drafting-table feel. No objects, no rooms, no plans.",
+
+  craftsmanship:
+    "Macro close-up texture of fine natural wood grain in warm honey tones, softly lit. Abstract material study, no objects, no tools, no rooms.",
 };
 
 // ─── Style-preset colour / mood overlays ─────────────────────────────────────

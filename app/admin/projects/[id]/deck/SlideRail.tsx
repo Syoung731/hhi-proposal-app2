@@ -24,7 +24,6 @@ const TYPE_ICON: Record<SlideType, string> = {
   "scope-overview":      "🏗",
   "before-after":        "🔄",
   "scope-breakdown":     "📝",
-  "risk-brief":          "🛡",
   "our-process":         "📐",
   "core-values":         "💎",
   timeline:              "📅",
@@ -32,10 +31,12 @@ const TYPE_ICON: Record<SlideType, string> = {
   "overall-investment":  "📄",
   "next-steps":          "➡",
   closing:               "🏁",
-  inspiration:           "🖼",
+  "design-experience":   "🧭",
   testimonials:          "💬",
   "design-build":        "🏗",
   "addition-overview":   "🏠",
+  "floor-plan":          "🗺",
+  craftsmanship:         "🛠",
 };
 
 // ─── Constraint helpers ───────────────────────────────────────────────────────

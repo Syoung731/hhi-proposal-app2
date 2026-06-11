@@ -96,7 +96,7 @@ export function getMockDeck(
       {
         id: "slide-scope-overview",
         type: "scope-overview" as const,
-        layoutKey: "split-panel" as const,
+        layoutKey: "editorial-split" as const,
         order: 2,
         isEnabled: true,
         headline: "What We're Building",
@@ -110,7 +110,7 @@ export function getMockDeck(
       {
         id: "slide-why-us",
         type: "why-us" as const,
-        layoutKey: "pillars-grid" as const,
+        layoutKey: "guarantee-grid" as const,
         order: 4,
         isEnabled: true,
         headline: "The HHI Difference",

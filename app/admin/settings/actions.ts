@@ -1908,7 +1908,7 @@ export async function seedSectionTypesAction(): Promise<{ error?: string; insert
 
 import { getGeminiApiKey as _getGeminiApiKey } from "@/app/integrations/gemini";
 import { getGeminiImageModel as _getGeminiImageModel } from "@/app/lib/ai/gemini-models";
-const BRAND_ICON_NORMALIZED_SIZE = 256;
+const BRAND_ICON_NORMALIZED_SIZE = 512;
 
 async function normalizeAndValidateIconPng(
   buffer: Buffer
@@ -2275,7 +2275,7 @@ Hard constraints:
 }
 
 export async function generateBrandIconPngAction(
-  input: { name: string; visual: string; description?: string | null; monochrome?: boolean; mode?: "icon" | "illustration" }
+  input: { name: string; visual: string; description?: string | null; monochrome?: boolean; mode?: "icon" | "illustration"; isometric?: boolean; isometricDark?: boolean }
 ): Promise<{ error?: string; imageUrl?: string; imageKey?: string; width?: number; height?: number }> {
   await requireAdmin();
 
@@ -2286,6 +2286,8 @@ export async function generateBrandIconPngAction(
   const description = (input.description ?? "").toString().trim();
   const monochrome = input.monochrome === true;
   const illustration = input.mode === "illustration";
+  const isometric = input.isometric === true;
+  const isometricDark = input.isometricDark === true;
   const subj = illustration ? "line-art illustration" : "icon";
 
   if (!name) {
@@ -2345,6 +2347,66 @@ Output:
 - Return a single PNG image that follows ALL of the above rules.
 `.trim();
 
+  // Isometric duotone illustration — the curated "NotebookLM-grade" recipe
+  // (locked in after the icon-lab comparison). Overrides the icon/illustration
+  // template above when input.isometric is set.
+  const isometricPrompt = `
+You are designing a single premium ISOMETRIC line illustration, used as an icon, for a luxury design-build remodeling company.
+
+Subject: ${name}
+Depict: ${visual || name}
+${description ? `Context: ${description}` : ""}
+
+STYLE — match EXACTLY:
+- Clean ISOMETRIC perspective (a slight 3D angle), like a polished modern infographic icon.
+- TWO-TONE palette ONLY: dark navy (#1A2332) outlines as the primary linework, with selective burnt-orange (#F47216) accents. Subtle light warm-gray / cream flat fills are allowed for depth.
+- ABSOLUTELY NO other accent colors — no red, no blue, no green, no yellow. Orange is the ONLY warm accent.
+- Confident, even medium stroke weight. Modern, minimal, uncluttered — a few clear objects, not a busy scene.
+- The subject FILLS about 80% of the frame, centered, with comfortable even margins.
+
+OUTPUT REQUIREMENTS (STRICT):
+- Output exactly ONE illustration, not a sheet or grid.
+- PNG on a 1:1 square canvas.
+- The BACKGROUND must be SOLID pure white (#FFFFFF) — no gradient, texture, pattern, or fake-transparency checkerboard.
+- No drop shadows, glows, halos, or cast shadows.
+- NO text, letters, words, numbers, labels, or signage of ANY kind anywhere in the image.
+- No people, no faces.
+
+Output: return a single PNG image that follows ALL of the above rules.
+`.trim();
+
+  // Dark-background isometric variant — for icons that sit on a dark charcoal
+  // panel (Why Us "Guarantee Grid"). Orange primary linework + warm grey/cream
+  // shading; NO navy/black/pure-white (navy would vanish on dark, and pure white
+  // collides with the white-background→transparent keying). Rendered un-masked so
+  // the multi-tone shading survives.
+  const isometricDarkPrompt = `
+You are designing a single premium ISOMETRIC line illustration, used as an icon, for a luxury design-build remodeling company. The icon will be placed on a DARK charcoal background, so it must use only light, warm colors that stay visible on dark.
+
+Subject: ${name}
+Depict: ${visual || name}
+${description ? `Context: ${description}` : ""}
+
+STYLE — match EXACTLY:
+- Clean ISOMETRIC perspective (a slight 3D angle), like a polished modern infographic icon.
+- Palette: burnt-orange (#F47216) is the PRIMARY linework. Use a warm light GREY (#CFC9BF) and a soft CREAM (#EFE9DD) for secondary lines, highlights, and subtle shading — for depth and clarity.
+- ABSOLUTELY NO navy, NO black, NO pure white (#FFFFFF), and NO other colors — only orange, warm grey, and cream. (Dark colors vanish on the dark background; pure white is reserved for the canvas.)
+- Crisp, confident, even THIN-to-MEDIUM stroke weight. Modern, minimal, uncluttered line-art with light shading — a few clear objects, NOT a busy filled scene.
+- The subject FILLS about 80% of the frame, centered, with comfortable even margins.
+
+OUTPUT REQUIREMENTS (STRICT):
+- Output exactly ONE illustration, not a sheet or grid.
+- PNG on a 1:1 square canvas.
+- The BACKGROUND must be SOLID pure white (#FFFFFF) — no gradient, texture, pattern, or fake-transparency checkerboard.
+- No drop shadows, glows, halos, or cast shadows.
+- NO text, letters, words, numbers, labels, or signage of ANY kind anywhere in the image.
+- No people, no faces.
+
+Output: return a single PNG image that follows ALL of the above rules.
+`.trim();
+
+  const finalPrompt = isometricDark ? isometricDarkPrompt : isometric ? isometricPrompt : prompt;
+
   let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
   try {
     response = await ai.models.generateContent({
@@ -2352,7 +2414,7 @@ Output:
       contents: [
         {
           role: "user",
-          parts: [{ text: prompt }],
+          parts: [{ text: finalPrompt }],
         },
       ],
       config: {

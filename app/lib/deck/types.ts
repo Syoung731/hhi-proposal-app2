@@ -3,7 +3,7 @@
 // Phase 1: cover | objective | investment
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type SlideType = "cover" | "objective" | "investment-by-space" | "why-us" | "scope-overview" | "before-after" | "scope-breakdown" | "risk-brief" | "our-process" | "core-values" | "timeline" | "cope" | "overall-investment" | "next-steps" | "closing" | "inspiration" | "testimonials" | "design-build" | "addition-overview";
+export type SlideType = "cover" | "objective" | "investment-by-space" | "why-us" | "scope-overview" | "before-after" | "scope-breakdown" | "our-process" | "core-values" | "timeline" | "cope" | "overall-investment" | "next-steps" | "closing" | "testimonials" | "design-build" | "addition-overview" | "design-experience" | "floor-plan" | "craftsmanship";
 
 // ─── Text Zone Types ────────────────────────────────────────────────────────
 
@@ -48,35 +48,46 @@ export type ObjectiveLayoutKey =
   | "statement-left"
   | "executive-summary"
   | "blueprint-overlay";
-export type InvestmentLayoutKey = "table-callout";
+export type InvestmentLayoutKey = "table-callout" | "range-bars" | "stacked-blocks" | "blueprint-breakdown";
 export type WhyUsLayoutKey =
-  | "pillars-grid"
-  | "editorial-cards"
-  | "stacked-list"
-  | "testimonials-split";
+  | "guarantee-grid"
+  | "advantage-grid"
+  | "testimonials-split"
+  | "comparison-table"
+  | "comparison-columns"
+  | "comparison-cards";
 export type ScopeOverviewLayoutKey =
   | "editorial-split"
   | "blueprint-icons"
   | "photo-numbered"
   | "photo-checklist"
-  | "gallery-grid"
-  | "split-panel"
-  | "image-row";
-export type BeforeAfterLayoutKey = "side-by-side" | "after-emphasis";
-// LEGACY: "three-pillars" caps at 3 rooms and offers no value with the new pagination model. Remove from the union and from ScopeBreakdownSlide.tsx in cleanup pass.
-export type ScopeBreakdownLayoutKey = "text-grid" | "dark-table" | "icon-columns" | "cards-split" | "photo-grid" | "three-pillars";
-export type RiskBriefLayoutKey = "two-column" | "comparison-table";
+  | "gallery-grid";
+export type BeforeAfterLayoutKey =
+  | "side-by-side"
+  | "after-emphasis"
+  | "reveal-slider"
+  | "cards"
+  | "offset"
+  | "diagonal";
+export type ScopeBreakdownLayoutKey = "text-grid" | "dark-table" | "utility-grid" | "blueprint";
 export type ProcessLayoutKey = "three-stages";
 export type CoreValuesLayoutKey = "quad-grid" | "cards-row" | "labeled-list" | "icon-cards";
-export type ProjectTimelineLayoutKey = "vertical-dot" | "vertical-alternating" | "stepped-hierarchy";
-export type CopePageLayoutKey = "icon-columns" | "quad-photos" | "annotated-diagram";
-export type DesignRetainerLayoutKey = "three-band-summary";
-export type NextStepsLayoutKey = "numbered-photo" | "column-grid-photos" | "two-by-two-grid" | "large-number-hero";
-export type ClosingSlideLayoutKey = "dark-centered" | "light-logo-centered" | "photo-white-card";
-export type VisualInspirationLayoutKey = "hero-plus-stacked" | "masonry-grid" | "side-by-side-bleed";
+export type ProjectTimelineLayoutKey =
+  | "week-axis"
+  | "chevron-phases"
+  | "horizon-wave"
+  | "roadmap-cards"
+  | "vertical-dot";
+export type CopePageLayoutKey = "icon-columns" | "annotated-diagram" | "columns" | "hexagon";
+export type DesignRetainerLayoutKey = "three-band-summary" | "insurance-policy" | "retainer-cta";
+export type NextStepsLayoutKey = "numbered-photo" | "staircase-cards" | "column-grid-photos" | "two-by-two-grid" | "large-number-hero";
+export type ClosingSlideLayoutKey = "blueprint-split" | "dark-centered" | "light-logo-centered" | "photo-white-card";
 export type ClientTestimonialsLayoutKey = "quote-cards" | "single-feature" | "photo-overlay";
 export type DesignBuildAdvantageLayoutKey = "icon-cards" | "bold-guarantee" | "quad-grid" | "cycle-diagram";
 export type AdditionOverviewLayoutKey = "photo-cad-overlay" | "photo-bullet-card" | "combined";
+export type DesignExperienceLayoutKey = "stepped-circles" | "chevron-flow" | "serpentine-cards" | "vertical-photo-steps" | "ladder-photo";
+export type FloorPlanLayoutKey = "callout-map" | "side-ledger";
+export type CraftsmanshipLayoutKey = "standards-grid" | "annotated-photo";
 export type SlideLayoutKey =
   | CoverLayoutKey
   | ObjectiveLayoutKey
@@ -85,7 +96,6 @@ export type SlideLayoutKey =
   | ScopeOverviewLayoutKey
   | BeforeAfterLayoutKey
   | ScopeBreakdownLayoutKey
-  | RiskBriefLayoutKey
   | ProcessLayoutKey
   | CoreValuesLayoutKey
   | ProjectTimelineLayoutKey
@@ -93,10 +103,12 @@ export type SlideLayoutKey =
   | DesignRetainerLayoutKey
   | NextStepsLayoutKey
   | ClosingSlideLayoutKey
-  | VisualInspirationLayoutKey
   | ClientTestimonialsLayoutKey
   | DesignBuildAdvantageLayoutKey
-  | AdditionOverviewLayoutKey;
+  | AdditionOverviewLayoutKey
+  | DesignExperienceLayoutKey
+  | FloorPlanLayoutKey
+  | CraftsmanshipLayoutKey;
 
 // ─── Branding ────────────────────────────────────────────────────────────────
 
@@ -316,8 +328,9 @@ export interface ObjectiveContent extends SharedSlideFields {
   /** Exactly 3 pillars for the pillars / hub-spoke layouts. */
   pillars?: ObjectivePillar[];
   // LEGACY: "statement" is the pre-pillar prose mode. "pillars" = 3-column grid,
+  // "pillars-photo" = hero photo + pillars (60 Leamington style),
   // "hub-spoke" = radial hub + 3 zones (94 Coggins style).
-  layout?: "pillars" | "statement" | "hub-spoke" | null;
+  layout?: "pillars" | "pillars-photo" | "statement" | "hub-spoke" | null;
   /** Icon key for the central hub on the hub-spoke layout. Default "house". */
   hubIcon?: string | null;
   /** Bespoke AI-generated line-art illustration of the home for the hub. */
@@ -413,6 +426,10 @@ export interface ObjectiveContent extends SharedSlideFields {
   showCard?: boolean | null;
   cardColor?: string | null;   // hex, default "#000000"
   cardOpacity?: number | null; // 0–100, default 60
+
+  // ── Photo-pillars layout ─────────────────────────────────────────────────
+  /** Hero photo (URL) shown on the left of the "Photo + Pillars" layout. */
+  heroImageUrl?: string | null;
 }
 
 export interface InvestmentLineItem {
@@ -480,6 +497,64 @@ export interface InvestmentBySpaceContent extends SharedSlideFields {
   includesTextScale?: number | null;
   includesTextColor?: string | null;
 
+  // ── Range Bars layout ─────────────────────────────────────────────────────
+  /** Show the circular guarantee badge (Range Bars layout). Default: true. */
+  showGuaranteeBadge?: boolean | null;
+  /** Badge copy. Default: "Includes Zero Mark-up on Materials Guarantee". */
+  guaranteeBadgeText?: string | null;
+  /** Bottom note band (Range Bars layout). Empty string hides it; absent falls
+   *  back to the default COPE explainer line. */
+  footnoteText?: string | null;
+  /** Range Bars: bar base color (hex). The lighter range-extension tail and the
+   *  beside-bar numbers derive from it. Default: theme panel navy. */
+  barColor?: string | null;
+  /** Range Bars: space-label text size multiplier. Default 1.0. */
+  barLabelSize?: number | null;
+  /** Range Bars: range-number text size multiplier (inside + outside bars). Default 1.0. */
+  barValueSize?: number | null;
+  /** Range Bars: bottom-note text size multiplier. Default 1.0. */
+  barNoteSize?: number | null;
+  /** Range Bars: guarantee-badge size multiplier (circle + its text). Default 1.0. */
+  badgeSize?: number | null;
+
+  // ── Construction-subtotal anchor (range-bars / stacked-blocks / blueprint) ─
+  /** Show the money anchor — the sum of every displayed line item (rooms +
+   *  COPE). On Stacked Blocks, when the retainer foundation is shown, the
+   *  retainer is added and the default label becomes "Total Projected
+   *  Investment". Default true. */
+  showConstructionTotal?: boolean | null;
+  /** Anchor label override. Default: "Projected Construction Investment"
+   *  (or "Total Projected Investment" on Stacked Blocks with the retainer). */
+  constructionTotalLabel?: string | null;
+
+  // ── Retainer foundation (Stacked Blocks) — synced by syncInvestmentSlide ──
+  /** Retainer dollar amount snapshot (numeric). Null when disabled. */
+  retainerAmount?: number | null;
+  /** Whether the retainer is enabled — snapshotted from the project. */
+  retainerEnabled?: boolean | null;
+  /** Hourly design rate snapshot, used in the foundation caption. */
+  designHourlyRate?: number | null;
+  /** Show the dark retainer foundation block under the tower. Default true. */
+  showRetainer?: boolean | null;
+  /** Foundation caption override. Default composes from the hourly rate. */
+  retainerCaption?: string | null;
+
+  // ── Per-layout sizing (stacked-blocks / blueprint-breakdown) ──────────────
+  /** Stacked Blocks: block text size multiplier. Default 1.0. */
+  blockTextSize?: number | null;
+  /** Stacked Blocks: tower width multiplier. Default 1.0. */
+  towerWidth?: number | null;
+  /** Anchor text size multiplier (brace text / navy box). Default 1.0. */
+  anchorTextSize?: number | null;
+  /** Stacked Blocks: retainer foundation text size multiplier. Default 1.0. */
+  retainerTextSize?: number | null;
+  /** Stacked Blocks: bracket + total horizontal nudge in em. Default 0. */
+  braceOffsetX?: number | null;
+  /** Stacked Blocks: bracket + total vertical nudge in em. Default 0. */
+  braceOffsetY?: number | null;
+  /** Blueprint Breakdown: build-zones list text size multiplier. Default 1.0. */
+  zoneTextSize?: number | null;
+
   // ── Per-field: Headline ──────────────────────────────────────────────────
   headlineSize?: number | null;
   headlineBold?: boolean | null;
@@ -541,6 +616,9 @@ export interface WhyUsPillarItem {
   body: string;
   /** Public URL of the BrandIcon PNG. Null if no icon was assigned. */
   iconUrl: string | null;
+  /** Public URL of an AI-generated isometric icon (Guarantee Grid). Takes
+   *  precedence over iconUrl when present; rendered mask-tinted in the accent. */
+  iconImageUrl?: string | null;
 
   // ── Per-item: title style ─────────────────────────────────────────────────
   titleFont?: string;
@@ -569,6 +647,22 @@ export interface WhyUsPillarItem {
  * Pillars are baked in at deck-load time from the ValuePillar table so the
  * slide renderer is fully self-contained — no extra props required.
  */
+/**
+ * One row in a Why Us comparison layout — a Traditional vs HHI pairing.
+ * Used by comparison-table (with `label`), comparison-columns, comparison-cards.
+ */
+export interface WhyUsComparisonRow {
+  id: string;
+  /** Row category label (matrix table only), e.g. "Materials", "Budget Accuracy". */
+  label?: string | null;
+  /** Left / "Traditional" cell — the pain point. */
+  traditional: string;
+  /** HHI side bold lead-in, e.g. "Zero Mark-up". Optional. */
+  hhiTitle?: string | null;
+  /** HHI side description. */
+  hhi: string;
+}
+
 export interface WhyUsContent extends SharedSlideFields {
   /** Section heading shown above the grid. Falls back to slide.headline. */
   sectionTitle?: string | null;
@@ -612,6 +706,34 @@ export interface WhyUsContent extends SharedSlideFields {
 
   /** When true, all visible pillars mirror the first pillar's style values. */
   lockItemStyles?: boolean | null;
+
+  // ── Comparison layouts (comparison-table / -columns / -cards) ─────────────
+  /** Left/"Traditional" column header. */
+  comparisonLeftHeader?: string | null;
+  /** Right/"HHI" column header. */
+  comparisonRightHeader?: string | null;
+  /** Paired Traditional-vs-HHI rows. */
+  comparisonRows?: WhyUsComparisonRow[];
+  /** Optional full-width closing line under the comparison. */
+  comparisonBottom?: string | null;
+  /** Matrix table: show the left row-label column. Default true. */
+  showRowLabels?: boolean | null;
+  /** Comparison layouts: column-header text size multiplier. Default 1.0. */
+  comparisonHeaderSize?: number | null;
+  /** Comparison layouts: row-label / HHI lead-in title size multiplier. Default 1.0. */
+  comparisonTitleSize?: number | null;
+  /** Comparison layouts: description (body) text size multiplier. Default 1.0. */
+  comparisonBodySize?: number | null;
+
+  // ── Guarantee / Advantage grid sizing ────────────────────────────────────
+  /** Grid: icon size multiplier (Guarantee Grid). Default 1.0. */
+  gridIconSize?: number | null;
+  /** Grid: item title size multiplier. Default 1.0. */
+  gridTitleSize?: number | null;
+  /** Grid: item description size multiplier. Default 1.0. */
+  gridBodySize?: number | null;
+  /** Grid: cross-divider thickness multiplier. Default 1.0. */
+  gridDividerSize?: number | null;
 }
 
 /**
@@ -668,16 +790,13 @@ export interface ScopeItem {
 
 export interface ScopeOverviewContent extends SharedSlideFields {
   /**
-   * Structured scope lines (preferred). When present, the editorial-split,
-   * photo-numbered, photo-checklist, and gallery-grid layouts render these.
-   * The legacy split-panel / image-row layouts use `description` instead.
+   * Structured scope lines (preferred). All scope layouts render these in
+   * "items" mode; "description" mode renders the `description` paragraph instead.
    */
   scopeItems?: ScopeItem[];
   /**
-   * Which content source the layout renders: "items" (bullet items) or
-   * "description" (the paragraph). When unset, defaults by layout — legacy
-   * split-panel / image-row default to "description", all others to "items".
-   * Setting this lets ANY layout use either source.
+   * Which content source the layout renders: "items" (bullet items, default) or
+   * "description" (the paragraph). Any layout can use either source.
    */
   contentMode?: "items" | "description" | null;
   /**
@@ -713,16 +832,42 @@ export interface ScopeOverviewContent extends SharedSlideFields {
    * (default) leaves it clean. Currently consumed by blueprint-icons.
    */
   backgroundSkin?: "none" | "blueprint" | null;
+  /**
+   * Blueprint-icons: the marker shown before each scope item.
+   *   "icon"  (default) — the per-item icon (AI PNG or built-in vector)
+   *   "check" — a checkmark in the icon color
+   *   "none"  — no marker (text only)
+   */
+  itemMarker?: "icon" | "check" | "none" | null;
+  /**
+   * Blueprint-icons: color of the per-item markers (icons / check marks),
+   * independent of the title. Null → falls back to the title color.
+   */
+  iconColor?: string | null;
+  /**
+   * Blueprint-icons: color of the bold item-title lead in each bullet,
+   * independent of the title + icons. Null → falls back to the title color.
+   */
+  itemTitleColor?: string | null;
   /** 3–4 sentence description of the project scope. */
   description?: string | null;
   /**
-   * Photos chosen via the Library Media Picker.
-   * split-panel renders the first 2; image-row renders up to 4.
+   * Photos chosen via the Library Media Picker. Single-photo layouts use the
+   * first; gallery-grid uses up to 3.
    */
   selectedPhotos?: ScopeOverviewSelectedPhoto[];
 
-  /** Split Panel only: photo panel width as percentage 20–80. Default 50 (equal split). */
-  panelSplitRatio?: number | null;
+  /**
+   * Editorial-split only: override the dark left column's background color.
+   * Null → falls back to the deck theme's panel color.
+   */
+  panelColor?: string | null;
+  /**
+   * Editorial-split only: override the color of the writing inside the left
+   * column (title + items). Null → falls back to the theme's panel ink (white).
+   * Muted/secondary text is derived from this color at reduced opacity.
+   */
+  panelTextColor?: string | null;
 
   // ── Per-field: Title ─────────────────────────────────────────────────────
   titleFont?: string | null;
@@ -733,32 +878,6 @@ export interface ScopeOverviewContent extends SharedSlideFields {
   titleUnderline?: boolean | null;
   /** Title text color (hex). */
   titleColor?: string | null;
-  titleOutline?: string | null;
-
-  // ── Per-field: Description ───────────────────────────────────────────────
-  descriptionFont?: string | null;
-  descriptionSize?: number | null;
-  descriptionBold?: boolean | null;
-  descriptionItalic?: boolean | null;
-  descriptionUnderline?: boolean | null;
-  descriptionColor?: string | null;
-  descriptionOutline?: string | null;
-
-  // ── Text position ────────────────────────────────────────────────────────
-  /** Title horizontal position on slide (0–1). */
-  titleX?: number | null;
-  /** Title vertical position on slide (0–1). */
-  titleY?: number | null;
-  /** Copy horizontal position on slide (0–1). */
-  copyX?: number | null;
-  /** Copy vertical position on slide (0–1). */
-  copyY?: number | null;
-
-  // ── Deprecated (migrated to per-field) ───────────────────────────────────
-  /** @deprecated Use descriptionSize instead. */
-  copySize?: number | null;
-  /** @deprecated Use descriptionColor instead. */
-  copyColor?: string | null;
 }
 
 /**
@@ -855,6 +974,15 @@ export interface ScopeBreakdownRoom {
    */
   manuallyClassified?: boolean | null;
 
+  /** Built-in vector icon key (utility-grid). Falls back to a keyword guess from the name. */
+  icon?: string | null;
+  /** Bespoke AI icon PNG (utility-grid). Preferred over the vector icon. */
+  iconImageUrl?: string | null;
+  /** Bespoke AI line-art illustration (blueprint layout). */
+  illustrationUrl?: string | null;
+  /** Art size multiplier (0.5–2.0, default 1.0) — scales the blueprint illustration / utility-grid icon. */
+  illustrationSize?: number | null;
+
   // ── Per-item: title style ────────────────────────────────────────────────
   titleFont?: string;
   titleSize?: number;
@@ -886,6 +1014,8 @@ export interface ScopeBreakdownContent extends SharedSlideFields {
   introText?: string | null;
   /** Room items baked in at auto-gen time. Each room is independently toggleable. */
   rooms?: ScopeBreakdownRoom[];
+  /** When true, per-room style/size adjustments apply to ALL rooms (kept consistent). */
+  lockItemStyles?: boolean | null;
   /**
    * Optional supporting photos from the Library Media Picker.
    * Rendered as a horizontal photo strip at the bottom of the slide.
@@ -910,78 +1040,6 @@ export interface ScopeBreakdownContent extends SharedSlideFields {
   introUnderline?: boolean | null;
   introColor?: string | null;
   introOutline?: string | null;
-}
-
-/**
- * Content shape for risk-brief slides.
- * Two-column problem/solution layout with a bottom statement.
- */
-export interface RiskBriefContent extends SharedSlideFields {
-  /** Left column header. two-column default: "Why Remodels Go Wrong". comparison-table default: "Traditional Contracting". */
-  leftHeader?: string | null;
-  /** Problem bullet points (left column). */
-  leftBullets?: string[];
-  /** Right column header. two-column default: "How We Prevent That". comparison-table default: "HHI Design-Build". */
-  rightHeader?: string | null;
-  /** Solution bullet points (right column). */
-  rightBullets?: string[];
-  /** Full-width closing statement shown at the bottom of the slide. */
-  bottomStatement?: string | null;
-  /**
-   * Optional row category labels shown to the left of the table in comparison-table layout.
-   * E.g. ["Accountability", "Budgeting", "Design", "Transparency"].
-   * Omit to hide the label column.
-   */
-  rowLabels?: string[];
-  /** Left column/panel box background color (hex). Applied when a brand background is set. */
-  leftBoxColor?: string | null;
-  /** Right column/panel box background color (hex). Applied when a brand background is set. */
-  rightBoxColor?: string | null;
-  /** Whether row category labels are shown (comparison-table only). Default false. */
-  showRowLabels?: boolean | null;
-  /** ✕ cross icon color (hex). */
-  crossColor?: string | null;
-  /** ✓ check icon / circle color (hex). */
-  checkColor?: string | null;
-  /** Icon size multiplier (0.5–3.0). Default 1.5. */
-  iconSize?: number | null;
-  /** Icon outline color (hex). null = no outline. */
-  iconOutline?: string | null;
-
-  // ── Per-field: Slide title ──────────────────────────────────────────────
-  titleFont?: string | null;
-  titleSize?: number | null;
-  titleBold?: boolean | null;
-  titleItalic?: boolean | null;
-  titleUnderline?: boolean | null;
-  titleColor?: string | null;
-  titleTextOutline?: string | null;
-
-  // ── Per-field: Column headers ───────────────────────────────────────────
-  headerFont?: string | null;
-  headerSize?: number | null;
-  headerBold?: boolean | null;
-  headerItalic?: boolean | null;
-  headerUnderline?: boolean | null;
-  headerTextColor?: string | null;
-  headerTextOutline?: string | null;
-
-  // ── Per-field: Body / bullets ───────────────────────────────────────────
-  bodySize?: number | null;
-  bodyBold?: boolean | null;
-  bodyItalic?: boolean | null;
-  bodyUnderline?: boolean | null;
-  bodyTextColor?: string | null;
-  bodyTextOutline?: string | null;
-
-  // ── Per-field: Bottom statement ─────────────────────────────────────────
-  bottomFont?: string | null;
-  bottomSize?: number | null;
-  bottomBold?: boolean | null;
-  bottomItalic?: boolean | null;
-  bottomUnderline?: boolean | null;
-  bottomColor?: string | null;
-  bottomTextOutline?: string | null;
 }
 
 /** A single stage in a process slide. */
@@ -1112,8 +1170,12 @@ export interface ProjectPhase {
   /** Human-readable duration, e.g. "8 – 12 weeks". */
   duration: string;
   description: string;
-  /** Sub-note displayed in stepped-hierarchy layout only. */
-  note?: string | null;
+  /** Week Axis / Horizon Wave: which side of the line this entry sits on.
+   *  Null/absent = alternating default. */
+  side?: "above" | "below" | null;
+  /** Week Axis / Horizon Wave: horizontal nudge along the timeline, in % of
+   *  slide width (clamped to the slide). Default 0. */
+  offsetX?: number | null;
 
   // ── Per-item: name style ─────────────────────────────────────────────────
   nameFont?: string;
@@ -1141,15 +1203,6 @@ export interface ProjectPhase {
   descriptionUnderline?: boolean;
   descriptionColor?: string;
   descriptionOutline?: string | null;
-
-  // ── Per-item: note style (stepped-hierarchy only) ────────────────────────
-  noteFont?: string;
-  noteSize?: number;          // default: 0.8
-  noteBold?: boolean;
-  noteItalic?: boolean;
-  noteUnderline?: boolean;
-  noteColor?: string;
-  noteOutline?: string | null;
 }
 
 /** Content shape for timeline slides. */
@@ -1190,8 +1243,8 @@ export interface TimelineContent extends SharedSlideFields {
 
   /**
    * Multiplier applied to the dot size on layouts that render dots
-   * (vertical-dot, vertical-alternating). 1.0 = baseline. Range: 0.5–4.0
-   * to match the other size sliders. Ignored on stepped-hierarchy.
+   * (vertical-dot, horizon-wave). 1.0 = baseline. Range: 0.5–4.0
+   * to match the other size sliders. Ignored elsewhere.
    */
   dotSize?: number | null;
 }
@@ -1205,11 +1258,13 @@ export interface CopeItem {
   iconId?: string | null;
   /** Resolved BrandIcon.imageUrl. Preferred over inline SVG when available. */
   iconUrl?: string | null;
+  /** Bespoke AI icon PNG (self-growing library). Preferred over iconUrl/vector; mask-tinted to accent. */
+  iconImageUrl?: string | null;
   title: string;
   description: string;
-  /** Bullet points — used in icon-columns layout. */
+  /** Bullet points — used in icon-columns / columns layouts. */
   bullets?: string[];
-  /** Image URL — used in quad-photos layout. */
+  /** Image URL — used in quad-photos layout (legacy). */
   photo?: string | null;
   /** Short label — used in annotated-diagram layout. */
   calloutLabel?: string | null;
@@ -1278,6 +1333,87 @@ export interface CopeContent extends SharedSlideFields {
   subheadlineOutline?: string | null;
 }
 
+/** A single stage in a design-experience (project journey) slide. */
+export interface DesignExperienceStage {
+  id: string;
+  /** Stage title, e.g. "As-Built & First Proposal". */
+  title: string;
+  /** Supporting description shown beneath the title. */
+  description?: string | null;
+  /** Optional per-stage duration label, e.g. "4–8 Weeks" (shown where layout supports it). */
+  duration?: string | null;
+
+  // ── Icon (stepped-circles layout) — same resolution order as COPE ─────────
+  /** Built-in vector icon key (see COPE_BUILTIN_ICONS). */
+  icon?: string | null;
+  /** Brand-icon library id. */
+  iconId?: string | null;
+  /** Brand-icon image URL. */
+  iconUrl?: string | null;
+  /** AI-generated monochrome PNG (mask-tinted to accent). */
+  iconImageUrl?: string | null;
+
+  // ── Per-item: title style ─────────────────────────────────────────────────
+  titleFont?: string | null;
+  titleSize?: number | null;
+  titleBold?: boolean | null;
+  titleItalic?: boolean | null;
+  titleUnderline?: boolean | null;
+  titleColor?: string | null;
+  titleOutline?: string | null;
+
+  // ── Per-item: description style ───────────────────────────────────────────
+  descriptionFont?: string | null;
+  descriptionSize?: number | null;
+  descriptionBold?: boolean | null;
+  descriptionItalic?: boolean | null;
+  descriptionUnderline?: boolean | null;
+  descriptionColor?: string | null;
+  descriptionOutline?: string | null;
+}
+
+/** Content shape for design-experience (project journey) slides. */
+export interface DesignExperienceContent extends SharedSlideFields {
+  /** Section label above the headline. Default: "YOUR DESIGN EXPERIENCE". */
+  sectionLabel?: string | null;
+  /** Optional supporting line below the headline / stages. */
+  subheadline?: string | null;
+  /** The journey stages. Falls back to built-in HHI defaults when absent. */
+  stages?: DesignExperienceStage[];
+  /** Word used before the auto-number, e.g. "Stage" → "Stage 1". Default: "Stage". */
+  stepWord?: string | null;
+  /** Hero/project image for the photo-bearing layouts (ladder-photo, vertical-photo-steps). */
+  heroImageUrl?: string | null;
+  /** Stepped-circles: scale multiplier for the circle + ring + icon + connector (0.6–1.5). Default 1.0. */
+  circleSize?: number | null;
+  /** Scale multiplier for the "Stage N:" prefix label (0.5–1.8). Default 1.0. */
+  stepLabelSize?: number | null;
+  /** When true, all stages inherit style fields from stages[0]. */
+  lockItemStyles?: boolean | null;
+
+  // ── Per-field: Section label ──────────────────────────────────────────────
+  sectionLabelFont?: string | null;
+  sectionLabelColor?: string | null;
+
+  // ── Per-field: Slide title (headline) ─────────────────────────────────────
+  slideTitleFont?: string | null;
+  slideTitleSize?: number | null;
+  slideTitleBold?: boolean | null;
+  slideTitleItalic?: boolean | null;
+  slideTitleUnderline?: boolean | null;
+  slideTitleColor?: string | null;
+  slideTitleOutline?: string | null;
+
+  // ── Per-field: Subheadline ────────────────────────────────────────────────
+  subheadlineFont?: string | null;
+  subheadlineSize?: number | null;
+  subheadlineBold?: boolean | null;
+  subheadlineItalic?: boolean | null;
+  subheadlineUnderline?: boolean | null;
+  subheadlineColor?: string | null;
+  subheadlineOutline?: string | null;
+}
+
 /** A single benefit item in an overall-investment slide. */
 export interface DesignRetainerBenefit {
   text: string;
@@ -1296,10 +1432,35 @@ export interface OverallInvestmentContent extends SharedSlideFields {
   sectionLabel?: string | null;
   /** Tagline shown below headline. */
   tagline?: string | null;
-  /** Benefit bullet points (Band 1). Supports legacy string[] and new object[]. */
+  /** Benefit bullet points (Band 1 / Insurance bullets / CTA deliverables). */
   benefits?: (string | DesignRetainerBenefit)[];
   /** When true, all bullets inherit style fields from benefits[0]. */
   lockItemStyles?: boolean | null;
+
+  // ── Insurance Policy layout ───────────────────────────────────────────────
+  /** Big left statement override. Default composes the retainer amount into
+   *  "The $X design investment … unlocks our Zero Change Order Guarantee." */
+  insuranceStatement?: string | null;
+  /** Statement text size multiplier. Default 1.0. */
+  insuranceStatementSize?: number | null;
+  /** Bullet text size multiplier. Default 1.0. */
+  insuranceBulletSize?: number | null;
+  /** Center shield/umbrella graphic size multiplier. Default 1.0. */
+  insuranceGraphicSize?: number | null;
+
+  // ── Retainer CTA layout ───────────────────────────────────────────────────
+  /** Accent subtitle. Default: "Initiate the Design & Feasibility Phase". */
+  ctaSubtitle?: string | null;
+  /** Note under the retainer amount. Default composes the total range:
+   *  "(Credited as part of your total project investment of $X – $Y)". */
+  ctaRetainerNote?: string | null;
+  /** Bold call-to-action line. Default: "Sign the Initial Contract today to
+   *  launch the Architectural Design phase." */
+  ctaLine?: string | null;
+  /** Closing thank-you line. */
+  ctaThanks?: string | null;
+  /** Card text size multiplier. Default 1.0. */
+  ctaTextSize?: number | null;
 
   // ── Auto-sync inputs (written by syncRetainerFromProject) ──────────────
   /** Hourly rate snapshotted from CompanySettings.designHourlyRate. */
@@ -1448,18 +1609,26 @@ export interface NextStep {
   descriptionOutline?: string | null;
 }
 
-/** Content shape for next-steps slides. */
+/** Content shape for next-steps slides. Contact info is intentionally absent —
+ *  it lives on the Closing slide (the next slide). */
 export interface NextStepsContent extends SharedSlideFields {
   /** Section label above the headline. Default: "WHAT HAPPENS NEXT". */
   sectionLabel?: string | null;
-  /** Contact email shown in footer. */
-  contactEmail?: string | null;
-  /** Contact phone shown in footer. */
-  contactPhone?: string | null;
-  /** Whether to show the project address in footer. */
-  showAddress?: boolean | null;
   /** Right-side photo URL — used in numbered-photo and large-number-hero layouts. */
   rightPhoto?: string | null;
+  /** Staircase Cards: serif tagline in the navy footer band.
+   *  Default: "Let's build your vision." */
+  footerTagline?: string | null;
+  /** Staircase Cards: card width multiplier (1.0 = default). Cards always
+   *  spread edge-to-edge, so narrower cards = less horizontal overlap;
+   *  ~0.8 with 4 steps eliminates it entirely. */
+  stairCardWidth?: number | null;
+  /** Staircase Cards: vertical climb multiplier (1.0 = 50% total rise). */
+  stairClimb?: number | null;
+  /** Staircase Cards: when true, lower-numbered cards render in front so a
+   *  card's text is never covered by the next card. Default false (classic
+   *  ascending stack — each higher card sits on top). */
+  stairFrontFirst?: boolean | null;
   /** The next steps. Falls back to built-in HHI defaults when absent. */
   steps?: NextStep[];
   /** When true, all steps inherit style fields from step[0]. */
@@ -1477,15 +1646,6 @@ export interface NextStepsContent extends SharedSlideFields {
   slideTitleUnderline?: boolean | null;
   slideTitleColor?: string | null;
   slideTitleOutline?: string | null;
-
-  // ── Per-field: Contact info ──────────────────────────────────────────────
-  contactFont?: string | null;
-  contactSize?: number | null;
-  contactBold?: boolean | null;
-  contactItalic?: boolean | null;
-  contactUnderline?: boolean | null;
-  contactColor?: string | null;
-  contactOutline?: string | null;
 
   // ── Per-field: Footer note ───────────────────────────────────────────────
   footerNoteFont?: string | null;
@@ -1515,6 +1675,19 @@ export interface ClosingContent extends SharedSlideFields {
   backgroundColor?: string | null;
   /** Background photo URL for dark-centered and photo-white-card layouts. */
   backgroundPhoto?: string | null;
+
+  // ── Blueprint Split layout ────────────────────────────────────────────────
+  /** Left-panel blueprint image override. Falls back to the committed default
+   *  sheet at /deck-art/closing-blueprint.png. */
+  blueprintPhoto?: string | null;
+  /** CTA paragraph under the headline. Default: the sign-the-design-contract
+   *  close (see CLOSING_SLIDE_DEFAULTS.ctaParagraph). */
+  ctaParagraph?: string | null;
+  ctaParagraphSize?: number | null;
+  /** Bold first line of the orange-topped contact box.
+   *  Default: "Turning Ideas into Ideal Spaces." */
+  contactBoxTitle?: string | null;
+  contactBoxTextSize?: number | null;
 
   // ── Per-field: Headline ──────────────────────────────────────────────────
   /** Headline font (overrides shared headlineFont). */
@@ -1569,47 +1742,111 @@ export interface ClosingContent extends SharedSlideFields {
   validityOutline?: string | null;
 }
 
-/** Content shape for inspiration slides. */
-export interface InspirationContent extends SharedSlideFields {
-  /** Subtitle shown below headline in hero-plus-stacked layout. */
-  subtitle?: string | null;
-  /** Caption text for masonry-grid and side-by-side-bleed layouts. */
-  caption?: string | null;
-  /** Hero photo URL for hero-plus-stacked layout. */
-  heroPhoto?: string | null;
-  /** Photo URLs selected from the photo library. */
-  photos?: string[];
-  /**
-   * When false, the Visual Inspiration slide is skipped when regenerating
-   * the default deck (Phase 8A T7). The slide can still be added manually
-   * from the + Add Slide dropdown. Default when absent = true.
-   */
-  showByDefault?: boolean;
+// ─── Floor Plan (zone map) ───────────────────────────────────────────────────
 
-  // ── Per-field: Headline ──────────────────────────────────────────────────
+/** One renovation zone pinned onto the client's floor plan. */
+export interface FloorPlanZone {
+  id: string;
+  /** Pin numeral (1-based display order). */
+  number: number;
+  /** e.g. "Zone 1: The Kitchen". */
+  label: string;
+  /** Square footage shown on the callout card. Null hides the SF line. */
+  sqft: number | null;
+  /** Optional one-line scope note under the SF. */
+  description?: string | null;
+  /** Pin position as % of the plan image area. Null = pin not placed yet. */
+  pinX?: number | null;
+  pinY?: number | null;
+  /** Which callout column the card sits in (callout-map layout). Null = auto-alternate. */
+  side?: "left" | "right" | null;
+  /** Optional translucent highlight box over the zone (% of plan area). */
+  boxX?: number | null;
+  boxY?: number | null;
+  boxW?: number | null;
+  boxH?: number | null;
+  /** Room provenance for re-sync. */
+  roomId?: string | null;
+}
+
+/** Content shape for floor-plan (Project Footprint) slides. The plan image is
+ *  the client's actual floor plan; falls back to the committed default sheet. */
+export interface FloorPlanContent extends SharedSlideFields {
+  /** Section label. Default: "PROJECT FOOTPRINT". */
+  sectionLabel?: string | null;
+  sectionLabelFont?: string | null;
+  sectionLabelColor?: string | null;
   headlineSize?: number | null;
   headlineBold?: boolean | null;
   headlineItalic?: boolean | null;
   headlineUnderline?: boolean | null;
-  headlineOutline?: string | null;
+  /** One-line intro under the headline. */
+  introText?: string | null;
+  /** Floor plan image URL. Default: /deck-art/closing-blueprint.png. */
+  planImageUrl?: string | null;
+  /** Non-destructive crop of the plan image, as % of the plan area.
+   *  Defaults: x 0, y 0, w 100, h 100 (no crop). Set the crop BEFORE
+   *  placing pins — pins are positioned against the cropped view. */
+  planCropX?: number | null;
+  planCropY?: number | null;
+  planCropW?: number | null;
+  planCropH?: number | null;
+  zones?: FloorPlanZone[];
+  /** Show SF lines on cards. Default true. */
+  showSqft?: boolean | null;
+  /** Show the total-footprint band (sum of zone SF). Default true. */
+  showTotal?: boolean | null;
+  /** Total band label. Default: "Total renovation footprint". */
+  totalLabel?: string | null;
+  /** Zone highlight/pin color. Default: accent. */
+  highlightColor?: string | null;
+  zoneTextSize?: number | null;
+  pinSize?: number | null;
+}
 
-  // ── Per-field: Subtitle ──────────────────────────────────────────────────
-  subtitleFont?: string | null;
-  subtitleSize?: number | null;
-  subtitleBold?: boolean | null;
-  subtitleItalic?: boolean | null;
-  subtitleUnderline?: boolean | null;
-  subtitleColor?: string | null;
-  subtitleOutline?: string | null;
+// ─── Craftsmanship (materials & assembly standards) ─────────────────────────
 
-  // ── Per-field: Caption ───────────────────────────────────────────────────
-  captionFont?: string | null;
-  captionSize?: number | null;
-  captionBold?: boolean | null;
-  captionItalic?: boolean | null;
-  captionUnderline?: boolean | null;
-  captionColor?: string | null;
-  captionOutline?: string | null;
+/** One craftsmanship standard — a named detail we guarantee on every build. */
+export interface CraftsmanshipItem {
+  id: string;
+  title: string;
+  description: string;
+  /** Macro/detail photo for this standard (collage cell or annotation target). */
+  photoUrl?: string | null;
+  /** Annotated-photo layout: pin position as % of the hero photo. */
+  pinX?: number | null;
+  pinY?: number | null;
+  /** Annotated-photo layout: which callout column. Null = auto-alternate. */
+  side?: "left" | "right" | null;
+  /** Standards-grid layout: which column the item lists under. Null = auto-split. */
+  column?: "a" | "b" | null;
+}
+
+/** Content shape for craftsmanship (build-quality proof) slides. */
+export interface CraftsmanshipContent extends SharedSlideFields {
+  /** Section label. Default: "BUILT TO LAST". */
+  sectionLabel?: string | null;
+  sectionLabelFont?: string | null;
+  sectionLabelColor?: string | null;
+  headlineSize?: number | null;
+  headlineBold?: boolean | null;
+  headlineItalic?: boolean | null;
+  headlineUnderline?: boolean | null;
+  /** One-line intro under the headline. */
+  introText?: string | null;
+  items?: CraftsmanshipItem[];
+  /** Annotated-photo layout: the hero photo the callouts pin onto. */
+  heroPhoto?: string | null;
+  /** Art direction for the AI-built hero: photorealistic vignette, exploded
+   *  isometric technical drawing, or staggered photo collage. */
+  heroPhotoStyle?: "vignette" | "technical" | "collage" | null;
+  /** Standards-grid layout: up to 6 macro photos for the collage. */
+  collagePhotos?: string[];
+  /** Standards-grid column titles. */
+  columnATitle?: string | null;
+  columnBTitle?: string | null;
+  itemTextSize?: number | null;
+  pinSize?: number | null;
 }
 
 /** A single testimonial entry snapshotted from the Testimonial Library. */
@@ -1897,6 +2134,12 @@ export interface BeforeAfterContent extends SharedSlideFields {
   /** Before photo thumbnail scale as a percentage (30–100). Default: 100. Only used in after-emphasis layout. */
   beforePhotoScale?: number | null;
 
+  // ── Transformation stat + reveal slider ──────────────────────────────────
+  /** Optional headline metric for the transformation, e.g. "+168 SF" or "ceilings 8′ → 18′". */
+  transformationStat?: string | null;
+  /** reveal-slider layout: initial wipe position 0–100 (% from left). Default 50. */
+  sliderPosition?: number | null;
+
   // ── Phase 8C: bullet strip ──────────────────────────────────────────────
   /**
    * Client-facing bullets describing key visual changes. Auto-generated at
@@ -2010,15 +2253,14 @@ export type SlideContent =
   | ScopeOverviewContent
   | BeforeAfterContent
   | ScopeBreakdownContent
-  | RiskBriefContent
   | OurProcessContent
   | CoreValuesContent
   | TimelineContent
   | CopeContent
+  | DesignExperienceContent
   | OverallInvestmentContent
   | NextStepsContent
   | ClosingContent
-  | InspirationContent
   | TestimonialsContent
   | DesignBuildContent
   | AdditionOverviewContent;
@@ -2148,13 +2390,19 @@ export const OBJECTIVE_LAYOUTS: { key: ObjectiveLayoutKey; label: string }[] = [
   { key: "dark-statement",    label: "Dark Statement"    },
 ];
 
-export const INVESTMENT_LAYOUTS: { key: InvestmentLayoutKey; label: string }[] =
-  [{ key: "table-callout", label: "Table Callout" }];
+export const INVESTMENT_LAYOUTS: { key: InvestmentLayoutKey; label: string }[] = [
+  { key: "table-callout",       label: "Table" },
+  { key: "range-bars",          label: "Range Bars" },
+  { key: "stacked-blocks",      label: "Stacked Blocks" },
+  { key: "blueprint-breakdown", label: "Blueprint Breakdown" },
+];
 
 export const WHY_US_LAYOUTS: { key: WhyUsLayoutKey; label: string }[] = [
-  { key: "pillars-grid",       label: "Pillars Grid"        },
-  { key: "editorial-cards",    label: "Editorial Cards"     },
-  { key: "stacked-list",       label: "Stacked List"        },
+  { key: "guarantee-grid",     label: "Guarantee Grid"      },
+  { key: "advantage-grid",     label: "Advantage Grid"      },
+  { key: "comparison-table",   label: "Comparison Table"    },
+  { key: "comparison-columns", label: "Comparison Columns"  },
+  { key: "comparison-cards",   label: "Comparison Cards"    },
   { key: "testimonials-split", label: "Testimonials Split"  },
 ];
 
@@ -2164,28 +2412,22 @@ export const SCOPE_OVERVIEW_LAYOUTS: { key: ScopeOverviewLayoutKey; label: strin
   { key: "photo-numbered",  label: "Numbered + Photo" },
   { key: "photo-checklist", label: "Checklist + Photo" },
   { key: "gallery-grid",    label: "Gallery + Grid" },
-  { key: "split-panel",     label: "Split Panel" },
-  { key: "image-row",       label: "Image Row"   },
 ];
 
 export const BEFORE_AFTER_LAYOUTS: { key: BeforeAfterLayoutKey; label: string }[] = [
+  { key: "reveal-slider",  label: "Reveal Slider"  },
   { key: "side-by-side",   label: "Side by Side"   },
   { key: "after-emphasis", label: "After Emphasis"  },
+  { key: "cards",          label: "Cards"          },
+  { key: "offset",         label: "Offset"         },
+  { key: "diagonal",       label: "Diagonal"       },
 ];
 
 export const SCOPE_BREAKDOWN_LAYOUTS: { key: ScopeBreakdownLayoutKey; label: string }[] = [
   { key: "text-grid", label: "Text Grid" },
   { key: "dark-table", label: "Dark Table" },
-  { key: "icon-columns", label: "Icon Columns" },
-  { key: "cards-split", label: "Cards Split" },
-  { key: "photo-grid", label: "Photo Grid" },
-  // LEGACY: Three Pillars caps at 3 rooms — incompatible with 8-rooms-per-slide pagination. User confirmed no value. Remove this entry in cleanup pass.
-  { key: "three-pillars", label: "Three Pillars" },
-];
-
-export const RISK_BRIEF_LAYOUTS: { key: RiskBriefLayoutKey; label: string }[] = [
-  { key: "two-column",       label: "Two Column"        },
-  { key: "comparison-table", label: "Comparison Matrix" },
+  { key: "utility-grid", label: "Utility Grid" },
+  { key: "blueprint", label: "Blueprint" },
 ];
 
 export const PROCESS_LAYOUTS: { key: ProcessLayoutKey; label: string }[] = [
@@ -2200,29 +2442,54 @@ export const CORE_VALUES_LAYOUTS: { key: CoreValuesLayoutKey; label: string }[] 
 ];
 
 export const PROJECT_TIMELINE_LAYOUTS: { key: ProjectTimelineLayoutKey; label: string }[] = [
-  { key: "vertical-dot", label: "Vertical Dot" },
-  { key: "vertical-alternating", label: "Alternating" },
-  { key: "stepped-hierarchy", label: "Stepped" },
+  { key: "week-axis",      label: "Week Axis" },
+  { key: "chevron-phases", label: "Chevron Phases" },
+  { key: "horizon-wave",   label: "Horizon Wave" },
+  { key: "roadmap-cards",  label: "Roadmap Cards" },
+  { key: "vertical-dot",   label: "Vertical Dot" },
 ];
 
 export const COPE_PAGE_LAYOUTS: { key: CopePageLayoutKey; label: string }[] = [
+  { key: "columns", label: "Columns" },
+  { key: "hexagon", label: "Hexagon" },
   { key: "icon-columns", label: "Icon Columns" },
-  { key: "quad-photos", label: "Quad Photos" },
   { key: "annotated-diagram", label: "Annotated Diagram" },
+];
+
+export const DESIGN_EXPERIENCE_LAYOUTS: { key: DesignExperienceLayoutKey; label: string }[] = [
+  { key: "stepped-circles", label: "Stepped Circles" },
+  { key: "chevron-flow", label: "Chevron Flow" },
+  { key: "serpentine-cards", label: "Serpentine Cards" },
+  { key: "vertical-photo-steps", label: "Steps + Photo" },
+  { key: "ladder-photo", label: "Ladder + Photo" },
 ];
 
 export const DESIGN_RETAINER_LAYOUTS: { key: DesignRetainerLayoutKey; label: string }[] = [
   { key: "three-band-summary", label: "Three-Band Summary" },
+  { key: "insurance-policy",   label: "Insurance Policy" },
+  { key: "retainer-cta",       label: "Retainer CTA" },
 ];
 
 export const NEXT_STEPS_LAYOUTS: { key: NextStepsLayoutKey; label: string }[] = [
   { key: "numbered-photo", label: "Numbered + Photo" },
+  { key: "staircase-cards", label: "Staircase Cards" },
   { key: "column-grid-photos", label: "Column Grid" },
   { key: "two-by-two-grid", label: "2\u00d72 Grid" },
   { key: "large-number-hero", label: "Large Number Hero" },
 ];
 
+export const FLOOR_PLAN_LAYOUTS: { key: FloorPlanLayoutKey; label: string }[] = [
+  { key: "callout-map", label: "Callout Map" },
+  { key: "side-ledger", label: "Side Ledger" },
+];
+
+export const CRAFTSMANSHIP_LAYOUTS: { key: CraftsmanshipLayoutKey; label: string }[] = [
+  { key: "standards-grid", label: "Standards Grid" },
+  { key: "annotated-photo", label: "Annotated Photo" },
+];
+
 export const CLOSING_SLIDE_LAYOUTS: { key: ClosingSlideLayoutKey; label: string }[] = [
+  { key: "blueprint-split", label: "Blueprint Split" },
   { key: "dark-centered", label: "Dark Centered" },
   { key: "light-logo-centered", label: "Light Logo" },
   { key: "photo-white-card", label: "Photo + Card" },
@@ -2241,18 +2508,23 @@ export const DESIGN_BUILD_ADVANTAGE_LAYOUTS: { key: DesignBuildAdvantageLayoutKe
   { key: "cycle-diagram", label: "Cycle Diagram" },
 ];
 
-export const VISUAL_INSPIRATION_LAYOUTS: { key: VisualInspirationLayoutKey; label: string }[] = [
-  { key: "hero-plus-stacked", label: "Hero + Stacked" },
-  { key: "masonry-grid", label: "Masonry Grid" },
-  { key: "side-by-side-bleed", label: "Side by Side" },
-];
-
 export const ADDITION_OVERVIEW_LAYOUTS: { key: AdditionOverviewLayoutKey; label: string }[] = [
   { key: "photo-cad-overlay", label: "CAD Overlay" },
   { key: "photo-bullet-card", label: "Photo + Card" },
   { key: "combined", label: "Combined" },
 ];
 
+
+/**
+ * Slide types with a full AI-Edit capability descriptor (see app/lib/deck/ai-edit.ts).
+ * Client-safe (ai-edit.ts is server-only); the inspector uses this to decide
+ * whether to show the AI Edit box. Grow this as each slide type gets a descriptor.
+ */
+export const AI_EDIT_SUPPORTED_TYPES: SlideType[] = ["cover", "objective", "scope-overview", "before-after", "scope-breakdown", "cope", "design-experience", "why-us", "timeline", "investment-by-space", "overall-investment", "closing", "floor-plan", "craftsmanship"];
+
+export function aiEditSupported(type: SlideType): boolean {
+  return AI_EDIT_SUPPORTED_TYPES.includes(type);
+}
 
 export function getLayoutsForType(type: SlideType) {
   switch (type) {
@@ -2270,8 +2542,6 @@ export function getLayoutsForType(type: SlideType) {
       return BEFORE_AFTER_LAYOUTS;
     case "scope-breakdown":
       return SCOPE_BREAKDOWN_LAYOUTS;
-    case "risk-brief":
-      return RISK_BRIEF_LAYOUTS;
     case "our-process":
       return PROCESS_LAYOUTS;
     case "core-values":
@@ -2286,14 +2556,18 @@ export function getLayoutsForType(type: SlideType) {
       return NEXT_STEPS_LAYOUTS;
     case "closing":
       return CLOSING_SLIDE_LAYOUTS;
-    case "inspiration":
-      return VISUAL_INSPIRATION_LAYOUTS;
     case "testimonials":
       return CLIENT_TESTIMONIALS_LAYOUTS;
     case "design-build":
       return DESIGN_BUILD_ADVANTAGE_LAYOUTS;
     case "addition-overview":
       return ADDITION_OVERVIEW_LAYOUTS;
+    case "design-experience":
+      return DESIGN_EXPERIENCE_LAYOUTS;
+    case "floor-plan":
+      return FLOOR_PLAN_LAYOUTS;
+    case "craftsmanship":
+      return CRAFTSMANSHIP_LAYOUTS;
   }
 }
 
@@ -2305,7 +2579,6 @@ export const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
   "scope-overview":      "Scope Overview",
   "before-after":        "Before / After",
   "scope-breakdown":     "Scope Breakdown",
-  "risk-brief":          "Risk Brief",
   "our-process":         "Our Process",
   "core-values":         "Core Values",
   timeline:              "Timeline",
@@ -2313,10 +2586,12 @@ export const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
   "overall-investment":  "Overall Investment",
   "next-steps":          "Next Steps",
   closing:               "Closing",
-  inspiration:           "Inspiration",
   testimonials:          "Testimonials",
   "design-build":        "Design-Build",
   "addition-overview":   "Addition Overview",
+  "design-experience":   "Design Experience",
+  "floor-plan":          "Floor Plan Map",
+  craftsmanship:         "Craftsmanship",
 };
 
 /**

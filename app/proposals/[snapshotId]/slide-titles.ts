@@ -15,11 +15,9 @@ export function slideTitle(slide: ProposalSlide, index: number): string {
     "scope-overview": "Scope",
     "scope-breakdown": "Scope Breakdown",
     "before-after": "Before & After",
-    inspiration: "Inspiration",
     "why-us": "Why HHI",
     "design-build": "Design-Build Advantage",
     "core-values": "Our Values",
-    "risk-brief": "Risk Brief",
     "our-process": "Our Process",
     timeline: "Timeline",
     testimonials: "Testimonials",
@@ -29,6 +27,9 @@ export function slideTitle(slide: ProposalSlide, index: number): string {
     "next-steps": "Next Steps",
     closing: "Thank You",
     "addition-overview": "Overview",
+    "design-experience": "Design Experience",
+    "floor-plan": "Project Footprint",
+    craftsmanship: "Craftsmanship",
   };
 
   return typeLabels[slide.type] ?? `Slide ${index + 1}`;

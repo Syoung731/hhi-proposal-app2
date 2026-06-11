@@ -104,6 +104,23 @@ export function resolvePhaseDescription(
 }
 
 /**
+ * Parse a human duration string ("4 to 8 weeks", "12-16 weeks", "6 weeks")
+ * into a numeric week range. Returns null when no number is present
+ * (milestones carry empty durations). The week-axis layout sizes segments
+ * by `high` — the conservative upper bound of the range.
+ */
+export function parseWeeksRange(
+  duration: string | null | undefined
+): { low: number; high: number } | null {
+  const nums = (duration ?? "").match(/\d+(?:\.\d+)?/g);
+  if (!nums || nums.length === 0) return null;
+  const low = Number(nums[0]);
+  const high = Number(nums[1] ?? nums[0]);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  return { low, high: Math.max(low, high) };
+}
+
+/**
  * Build the full 5-entry ProjectPhase array for a timeline slide,
  * merging TimelinePhase override fields onto the hardcoded definitions.
  * Milestone entries (hasDuration: false) get an empty `duration` string.

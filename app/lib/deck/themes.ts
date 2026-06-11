@@ -8,7 +8,7 @@
  * SLIDE_FONTS convention — a literal family name would silently fall back.
  */
 
-export type DeckThemeKey = "blueprint" | "editorial";
+export type DeckThemeKey = "blueprint" | "editorial" | "gallery" | "coastal" | "palmetto";
 
 export interface DeckTheme {
   key: DeckThemeKey;
@@ -97,15 +97,102 @@ export const EDITORIAL_THEME: DeckTheme = {
   numeralStyle: "serif",
 };
 
-export const DECK_THEMES: DeckTheme[] = [BLUEPRINT_THEME, EDITORIAL_THEME];
+/** Gallery — bright white modern luxury. Pure white surface, high-contrast
+ *  Playfair headlines, charcoal-black panel, hairline rules. */
+export const GALLERY_THEME: DeckTheme = {
+  key: "gallery",
+  label: "Gallery",
+  fonts: {
+    headline: "var(--font-playfair), serif",
+    body: "var(--font-inter), sans-serif",
+    label: "var(--font-inter), sans-serif",
+    numeral: "var(--font-playfair), serif",
+  },
+  color: {
+    ink: "#16181D",
+    muted: "#5C636E",
+    accent: ORANGE,
+    accentSoft: "rgba(244,114,22,0.08)",
+    surface: "#FFFFFF",
+    panel: "#14171C",
+    panelInk: "#FFFFFF",
+    panelMuted: "rgba(255,255,255,0.72)",
+    line: "#ECECEA",
+  },
+  surface: { page: "white", grid: false },
+  title: { underlineRule: true, transform: "none" },
+  numeralStyle: "serif",
+};
+
+/** Coastal — Lowcountry sea-mist. Cool tinted surface, warm Lora serif,
+ *  deep tidewater panel. The brand orange reads coastal-coral here. */
+export const COASTAL_THEME: DeckTheme = {
+  key: "coastal",
+  label: "Coastal",
+  fonts: {
+    headline: "var(--font-lora), serif",
+    body: "var(--font-jost), sans-serif",
+    label: "var(--font-jost), sans-serif",
+    numeral: "var(--font-lora), serif",
+  },
+  color: {
+    ink: "#1C3239",
+    muted: "#51686B",
+    accent: ORANGE,
+    accentSoft: "rgba(244,114,22,0.10)",
+    surface: "#F4F8F7",
+    panel: "#1E3B41",
+    panelInk: "#F2F7F5",
+    panelMuted: "rgba(242,247,245,0.76)",
+    line: "#DCE6E3",
+  },
+  surface: { page: "white", grid: false },
+  title: { underlineRule: true, transform: "none" },
+  numeralStyle: "serif",
+};
+
+/** Palmetto — cream paper with a deep Lowcountry-green panel and engraved
+ *  DM Serif display headlines. The only non-navy-family panel in the set. */
+export const PALMETTO_THEME: DeckTheme = {
+  key: "palmetto",
+  label: "Palmetto",
+  fonts: {
+    headline: "var(--font-dm-serif), serif",
+    body: "var(--font-jost), sans-serif",
+    label: "var(--font-jost), sans-serif",
+    numeral: "var(--font-dm-serif), serif",
+  },
+  color: {
+    ink: "#1B2B25",
+    muted: "#4E5F58",
+    accent: ORANGE,
+    accentSoft: "rgba(244,114,22,0.10)",
+    surface: "#FBFAF5",
+    panel: "#1E3A30",
+    panelInk: "#F2EFE6",
+    panelMuted: "rgba(242,239,230,0.76)",
+    line: "#E5E1D4",
+  },
+  surface: { page: "linen", grid: false },
+  title: { underlineRule: true, transform: "none" },
+  numeralStyle: "serif",
+};
+
+export const DECK_THEMES: DeckTheme[] = [
+  BLUEPRINT_THEME,
+  EDITORIAL_THEME,
+  GALLERY_THEME,
+  COASTAL_THEME,
+  PALMETTO_THEME,
+];
 
 export const DEFAULT_DECK_THEME: DeckThemeKey = "blueprint";
 
 export function isDeckThemeKey(v: unknown): v is DeckThemeKey {
-  return v === "blueprint" || v === "editorial";
+  return DECK_THEMES.some((t) => t.key === v);
 }
 
 /** Resolve a (possibly null/unknown) theme key to a full DeckTheme. */
 export function resolveDeckTheme(key: unknown): DeckTheme {
-  return key === "editorial" ? EDITORIAL_THEME : BLUEPRINT_THEME;
+  return DECK_THEMES.find((t) => t.key === key) ?? BLUEPRINT_THEME;
 }
