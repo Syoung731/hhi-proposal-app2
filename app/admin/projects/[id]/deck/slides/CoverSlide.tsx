@@ -178,6 +178,11 @@ function SplitEditorialLayout({ slide, branding }: Props) {
               Prepared for {content.preparedFor}
             </p>
           )}
+          {(resolveAddress(content, branding) || content.date) && (
+            <p style={{ fontSize: "0.6em", opacity: 0.6, marginTop: "0.3em" }}>
+              {[resolveAddress(content, branding), content.date].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
       ) : (
         /* Default: centered content */
@@ -213,6 +218,11 @@ function SplitEditorialLayout({ slide, branding }: Props) {
               style={{ ...preparedForStyle(content), opacity: 0.7, marginTop: "0.5em" }}
             >
               Prepared for {content.preparedFor} by {branding.companyName}.
+            </p>
+          )}
+          {(resolveAddress(content, branding) || content.date) && (
+            <p className="text-white" style={{ fontSize: "0.6em", opacity: 0.6, marginTop: "0.3em" }}>
+              {[resolveAddress(content, branding), content.date].filter(Boolean).join(" · ")}
             </p>
           )}
         </div>
@@ -498,6 +508,11 @@ function SplitDarkEditorialLayout({ slide, branding }: Props) {
                 Prepared for {content.preparedFor}
               </p>
             )}
+            {resolveAddress(content, branding) && (
+              <p style={{ fontSize: "0.6em", color: "rgba(255,255,255,0.5)", marginTop: "0.1em" }}>
+                {resolveAddress(content, branding)}
+              </p>
+            )}
           </div>
 
           {/* Footer */}
@@ -673,6 +688,11 @@ function BottomCardOverlayLayout({ slide, branding }: Props) {
             <p style={{ ...preparedForStyle(content), color: "#374151", marginBottom: "0.2em" }}>
               Prepared for{" "}
               <strong style={{ color: branding.textColor }}>{content.preparedFor}</strong>
+            </p>
+          )}
+          {resolveAddress(content, branding) && (
+            <p style={{ fontSize: "0.6em", color: "#6B7280", marginTop: "0.1em" }}>
+              {resolveAddress(content, branding)}
             </p>
           )}
           {content.date && (

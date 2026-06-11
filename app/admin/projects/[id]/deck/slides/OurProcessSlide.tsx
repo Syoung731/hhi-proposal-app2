@@ -3,7 +3,8 @@
 import type { ProposalSlide, DeckBranding, OurProcessContent, ProcessStage } from "@/app/lib/deck/types";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
-import { SECTION_LABEL_SIZE, CARD_SHADOWS, SLIDE_FONTS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
+import { SECTION_LABEL_SIZE, CARD_SHADOWS, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
+import { useDeckTheme } from "@/app/lib/deck/theme-context";
 
 interface Props {
   slide: ProposalSlide;
@@ -51,6 +52,7 @@ const DEFAULT_BOTTOM =
 // ─── Three-stages layout ──────────────────────────────────────────────────────
 
 export function OurProcessSlide({ slide, branding, hasAiBackground }: Props) {
+  const theme = useDeckTheme();
   const c = (slide.content ?? {}) as OurProcessContent;
   const resolvedAccent = c.accentColor ?? branding.accentColor;
   const accent = resolvedAccent;
@@ -59,15 +61,15 @@ export function OurProcessSlide({ slide, branding, hasAiBackground }: Props) {
   const title = slide.headline ?? "Our Process: From Vision to Finished Home";
 
   // Per-field: Slide title
-  const slideTitleFont = c.slideTitleFont ?? c.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const slideTitleFont = c.slideTitleFont ?? c.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = c.slideTitleSize ?? 1.0;
-  const slideTitleColor = c.slideTitleColor ?? c.headlineColor ?? branding.textColor;
+  const slideTitleColor = c.slideTitleColor ?? c.headlineColor ?? theme.color.ink;
   const slideTitleShadow = makeOutlineShadow(c.slideTitleOutline);
 
   // Per-field: Footer
-  const footerFont = c.footerFont ?? c.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const footerFont = c.footerFont ?? c.bodyFont ?? theme.fonts.body;
   const footerSize = c.footerSize ?? 1.0;
-  const footerColor = c.footerColor ?? c.bodyColor ?? branding.textColor;
+  const footerColor = c.footerColor ?? c.bodyColor ?? theme.color.ink;
   const footerShadow = makeOutlineShadow(c.footerOutline);
 
   const hasBg = hasAiBackground || slide.backgroundId != null;
@@ -75,7 +77,7 @@ export function OurProcessSlide({ slide, branding, hasAiBackground }: Props) {
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : "#F5F4F0", overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
     >
       {/* Dot grid watermark */}
       <svg
@@ -116,7 +118,7 @@ export function OurProcessSlide({ slide, branding, hasAiBackground }: Props) {
               style={{
                 fontSize: SECTION_LABEL_SIZE,
                 fontWeight: 600,
-                fontFamily: SLIDE_FONTS.defaults.label,
+                fontFamily: theme.fonts.label,
                 letterSpacing: "0.13em",
                 color: accent,
                 marginBottom: "0.35em",
@@ -154,10 +156,9 @@ export function OurProcessSlide({ slide, branding, hasAiBackground }: Props) {
               index={i}
               stage={stage}
               isLast={i === stages.length - 1}
-              branding={branding}
               accent={accent}
-              fallbackHeadlineFont={c.headlineFont ?? SLIDE_FONTS.defaults.headline}
-              fallbackBodyFont={c.bodyFont ?? SLIDE_FONTS.defaults.body}
+              fallbackHeadlineFont={c.headlineFont ?? theme.fonts.headline}
+              fallbackBodyFont={c.bodyFont ?? theme.fonts.body}
             />
           ))}
         </div>
@@ -209,7 +210,6 @@ function StageCard({
   index,
   stage,
   isLast,
-  branding,
   accent,
   fallbackHeadlineFont,
   fallbackBodyFont,
@@ -217,23 +217,23 @@ function StageCard({
   index: number;
   stage: ProcessStage;
   isLast: boolean;
-  branding: DeckBranding;
   accent: string;
   fallbackHeadlineFont: string;
   fallbackBodyFont: string;
 }) {
+  const theme = useDeckTheme();
   const num = String(index + 1).padStart(2, "0");
 
   // Per-item: stage name
   const nameFont = stage.nameFont ?? fallbackHeadlineFont;
   const nameSize = stage.nameSize ?? 1.0;
-  const nameColor = stage.nameColor ?? branding.textColor;
+  const nameColor = stage.nameColor ?? theme.color.ink;
   const nameShadow = makeOutlineShadow(stage.nameOutline);
 
   // Per-item: bullets
   const bulletsFont = stage.bulletsFont ?? fallbackBodyFont;
   const bulletsSize = stage.bulletsSize ?? 1.0;
-  const bulletsColor = stage.bulletsColor ?? branding.textColor;
+  const bulletsColor = stage.bulletsColor ?? theme.color.ink;
   const bulletsShadow = makeOutlineShadow(stage.bulletsOutline);
 
   return (
@@ -259,7 +259,7 @@ function StageCard({
             lineHeight: 1,
             color: accent,
             marginBottom: "6%",
-            fontFamily: "serif",
+            fontFamily: theme.fonts.numeral,
             opacity: 0.9,
           }}
         >

@@ -27,8 +27,6 @@ export function NextStepsSettingsClient({ initialSettings, hhiDefaults }: Props)
   const [sectionLabel, setSectionLabel] = useState(initialSettings.defaultSectionLabel);
   const [headline, setHeadline] = useState(initialSettings.defaultHeadline);
   const [layout, setLayout] = useState(initialSettings.defaultLayout);
-  const [contactEmail, setContactEmail] = useState(initialSettings.defaultContactEmail);
-  const [contactPhone, setContactPhone] = useState(initialSettings.defaultContactPhone);
   const [steps, setSteps] = useState<NextStep[]>(initialSettings.defaultSteps);
 
   const updateStep = useCallback((idx: number, patch: Partial<NextStep>) => {
@@ -66,8 +64,6 @@ export function NextStepsSettingsClient({ initialSettings, hhiDefaults }: Props)
     setSectionLabel(hhiDefaults.defaultSectionLabel);
     setHeadline(hhiDefaults.defaultHeadline);
     setLayout(hhiDefaults.defaultLayout);
-    setContactEmail(hhiDefaults.defaultContactEmail);
-    setContactPhone(hhiDefaults.defaultContactPhone);
   }
 
   async function handleSave() {
@@ -78,8 +74,6 @@ export function NextStepsSettingsClient({ initialSettings, hhiDefaults }: Props)
       defaultLayout: layout,
       defaultSectionLabel: sectionLabel,
       defaultHeadline: headline,
-      defaultContactEmail: contactEmail,
-      defaultContactPhone: contactPhone,
     });
     if (result.error) {
       setStatus("error");
@@ -143,29 +137,7 @@ export function NextStepsSettingsClient({ initialSettings, hhiDefaults }: Props)
           </select>
         </div>
 
-        {/* Contact Info */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Default Contact Email</label>
-            <input
-              type="email"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              placeholder="email@example.com"
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Default Contact Phone</label>
-            <input
-              type="tel"
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              placeholder="(555) 123-4567"
-              className={inputClass}
-            />
-          </div>
-        </div>
+        {/* Contact defaults removed — contact info lives on the Closing slide. */}
 
         {/* Divider */}
         <div className="border-t border-zinc-200 dark:border-zinc-700" />

@@ -31,13 +31,13 @@ export const HHI_DEFAULT_NEXT_STEPS: NextStep[] = [
   },
 ];
 
+// Contact defaults removed — contact info lives on the Closing slide, which
+// pulls email/phone from Company Settings branding.
 export interface GlobalNextStepsSettings {
   defaultSteps: NextStep[];
   defaultLayout: NextStepsLayoutKey;
   defaultSectionLabel: string;
   defaultHeadline: string;
-  defaultContactEmail: string;
-  defaultContactPhone: string;
 }
 
 export const HHI_NEXT_STEPS_DEFAULTS: GlobalNextStepsSettings = {
@@ -45,6 +45,4 @@ export const HHI_NEXT_STEPS_DEFAULTS: GlobalNextStepsSettings = {
   defaultLayout: "numbered-photo",
   defaultSectionLabel: "WHAT HAPPENS NEXT",
   defaultHeadline: "Your Path Forward",
-  defaultContactEmail: "",
-  defaultContactPhone: "",
 };

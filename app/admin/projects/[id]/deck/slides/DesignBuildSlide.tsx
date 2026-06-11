@@ -16,6 +16,8 @@ import {
   DEFAULT_SUPPORT_COLUMNS,
 } from "@/app/lib/design-build-defaults";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { BlueprintUnderlay } from "./shared/BlueprintUnderlay";
+import { useDeckTheme } from "@/app/lib/deck/theme-context";
 import { PhotoOverlay } from "@/components/slides/shared/PhotoOverlay";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, ACCENT_RULE_WIDTH, SLIDE_FONTS, CARD_SHADOWS, CARD_PADDING, CARD_BORDER, LOGO_POSITION_DEFAULTS } from "@/app/lib/slide-constants";
@@ -35,7 +37,6 @@ function makeOutlineShadow(color: string | null | undefined): string | undefined
 
 // ─── Design tokens ───────────────────────────────────────────────────────────
 
-const LINEN = "#F5F0E8";
 const NAVY = "#1B2A4A";
 const GOLD = "#B8860B";
 const MUTED_NAVY = "#4A5568";
@@ -151,7 +152,8 @@ function IconCardsLayout({
   const hasBg = !!bgPhoto;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const theme = useDeckTheme();
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor);
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -176,8 +178,9 @@ function IconCardsLayout({
   return (
     <div className="relative w-full h-full" style={{ overflow: "hidden" }}>
       {hasBg && <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />}
-      {hasBg && <PhotoOverlay opacity={overlayOpacity ?? 0.55} />}
-      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
+      {hasBg && (content.showOverlay !== false) && <PhotoOverlay opacity={overlayOpacity ?? 0.55} />}
+      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: theme.color.surface }} />}
+      {theme.surface.grid && !hasBg && !hasAiBackground && <BlueprintUnderlay />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content, alignItems: "center" }}>
         <div style={{
@@ -297,7 +300,8 @@ function BoldGuaranteeLayout({
   const isDark = bgStyle === "dark" || hasBg;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const theme = useDeckTheme();
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (isDark ? "#FFFFFF" : branding.textColor);
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -315,19 +319,20 @@ function BoldGuaranteeLayout({
   const footerShadow = makeOutlineShadow(content.footerNoteOutline);
 
   // Fallbacks for per-item
-  const fallbackHeadlineFont = content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const fallbackHeadlineFont = content.headlineFont ?? theme.fonts.headline;
   const fallbackBodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
   const textColor = slideTitleColor;
   const mutedColor = content.bodyColor ?? (isDark ? "rgba(255,255,255,0.6)" : MUTED_NAVY);
 
-  const solidBg = bgStyle === "dark" ? NAVY : LINEN;
+  const solidBg = bgStyle === "dark" ? theme.color.panel : theme.color.surface;
   const overlayOpacity = content.overlayOpacity ?? undefined;
 
   return (
     <div className="relative w-full h-full" style={{ overflow: "hidden" }}>
       {hasBg && <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />}
-      {hasBg && <PhotoOverlay opacity={overlayOpacity ?? 0.6} />}
+      {hasBg && (content.showOverlay !== false) && <PhotoOverlay opacity={overlayOpacity ?? 0.6} />}
       {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: solidBg }} />}
+      {theme.surface.grid && !hasBg && !hasAiBackground && bgStyle !== "dark" && <BlueprintUnderlay />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.centered, alignItems: "center", justifyContent: "center" }}>
         <div style={{
@@ -445,7 +450,8 @@ function QuadGridLayout({
   const hasBg = !!bgPhoto;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const theme = useDeckTheme();
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor);
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -467,8 +473,9 @@ function QuadGridLayout({
   return (
     <div className="relative w-full h-full" style={{ overflow: "hidden" }}>
       {hasBg && <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />}
-      {hasBg && <PhotoOverlay opacity={overlayOpacity ?? 0.55} />}
-      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
+      {hasBg && (content.showOverlay !== false) && <PhotoOverlay opacity={overlayOpacity ?? 0.55} />}
+      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: theme.color.surface }} />}
+      {theme.surface.grid && !hasBg && !hasAiBackground && <BlueprintUnderlay />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         <div style={{ textAlign: "center", marginBottom: "0.6em" }}>
@@ -580,7 +587,8 @@ function CycleDiagramLayout({
   branding: DeckBranding; content: DesignBuildContent; accent: string;
 }) {
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const theme = useDeckTheme();
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -589,7 +597,8 @@ function CycleDiagramLayout({
   const fallbackBodyFont = content.bodyFont ?? SLIDE_FONTS.defaults.body;
 
   return (
-    <div className="relative w-full h-full" style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : LINEN }}>
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: hasAiBackground ? "transparent" : theme.color.surface }}>
+      {theme.surface.grid && !hasAiBackground && <BlueprintUnderlay />}
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content }}>
         {/* Header */}
         <div style={{ textAlign: "center", marginBottom: "0.4em" }}>

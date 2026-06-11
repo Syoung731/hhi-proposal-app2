@@ -576,6 +576,154 @@ function PillarLayout({ slide, branding, hasAiBackground }: Props) {
   );
 }
 
+// ─── Photo + Pillars layout (60 Leamington style) ─────────────────────────────
+// Hero photo on the left (~44%); headline + objective opener + pillar list on the
+// right. Pillars stack as a 2-column grid in the narrower text column.
+
+function PhotoPillarLayout({ slide, branding, hasAiBackground }: Props) {
+  const theme = useDeckTheme();
+  const content = (slide.content ?? {}) as ObjectiveContent;
+  const accent = content.accentColor ?? branding.accentColor;
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  const photo = (content.heroImageUrl ?? "").trim();
+
+  const objective = (content.objective ?? content.statementText ?? "").trim();
+  const pillars = (content.pillars ?? []).slice(0, 5);
+
+  const headlineColor = content.headlineColor ?? theme.color.ink;
+  const objectiveFont = content.objectiveFont ?? content.headlineFont ?? theme.fonts.headline;
+  const objectiveColor = content.objectiveColor ?? content.statementColor ?? theme.color.ink;
+  const objectiveEm = (content.objectiveSize ?? 1.0) * 1.0;
+  const pillarTitleFont = content.pillarTitleFont ?? content.headlineFont ?? theme.fonts.headline;
+  const pillarTitleColor = content.pillarTitleColor ?? content.headlineColor ?? theme.color.ink;
+  const pillarTitleEm = (content.pillarTitleSize ?? 1.0) * 1.0;
+  const pillarBodyFont = content.pillarBodyFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
+  const pillarBodyColor = content.pillarBodyColor ?? content.supportingColor ?? theme.color.muted;
+  const pillarBodyEm = (content.pillarBodySize ?? 1.0) * 0.72;
+
+  const photoPct = 44;
+
+  return (
+    <div
+      className="relative w-full h-full overflow-hidden"
+      style={{ background: hasBg ? "transparent" : theme.color.surface }}
+    >
+      {/* Left photo */}
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${photoPct}%`, overflow: "hidden" }}>
+        {photo ? (
+          <div
+            role="img"
+            style={{ width: "100%", height: "100%", backgroundImage: `url(${photo})`, backgroundSize: "cover", backgroundPosition: "center", backgroundColor: "#1A1A1A" }}
+          />
+        ) : (
+          <div style={{ width: "100%", height: "100%", background: "#E8E6E3", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <p style={{ fontSize: "0.7em", color: "#C4C0BB", letterSpacing: "0.06em" }}>Add a photo in the inspector</p>
+          </div>
+        )}
+      </div>
+
+      {/* Right text column */}
+      <div
+        style={{
+          position: "absolute", left: `${photoPct}%`, right: 0, top: 0, bottom: 0,
+          padding: "6% 5%", display: "flex", flexDirection: "column", justifyContent: "center",
+          zIndex: 2,
+        }}
+      >
+        <h1
+          style={{
+            fontSize: "2.1em",
+            fontWeight: (content.headlineBold ?? true) ? 700 : 400,
+            fontFamily: content.headlineFont ?? theme.fonts.headline,
+            color: headlineColor,
+            lineHeight: 1.1,
+            margin: 0,
+            textShadow: makeOutlineShadow(content.headlineOutline),
+            fontStyle: content.headlineItalic ? "italic" : undefined,
+          }}
+        >
+          {slide.headline || "Project Objective"}
+        </h1>
+
+        <TitleAccentRule accentColor={accent} marginTop="0.6em" marginBottom="1.1em" />
+
+        {objective && (
+          <p
+            style={{
+              fontSize: `${objectiveEm}em`,
+              color: objectiveColor,
+              lineHeight: 1.55,
+              marginBottom: "1.4em",
+              fontFamily: objectiveFont,
+              textShadow: makeOutlineShadow(content.objectiveOutline),
+              ...biuStyle(content.objectiveBold, content.objectiveItalic, content.objectiveUnderline),
+            }}
+          >
+            {renderEmphasis(objective)}
+          </p>
+        )}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${Math.min(Math.max(pillars.length, 1), 2)}, 1fr)`,
+            columnGap: "6%",
+            rowGap: "1.1em",
+          }}
+        >
+          {pillars.map((pillar, i) => (
+            <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+              {pillar.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={pillar.imageUrl} alt="" style={{ width: "100%", maxWidth: "7em", height: "3.6em", objectFit: "contain", objectPosition: "left", marginBottom: "0.4em" }} />
+              ) : pillar.icon ? (
+                <ScopeIcon name={pillar.icon} size={26} color={accent} strokeWidth={1.6} style={{ marginBottom: "0.4em" }} />
+              ) : null}
+              <h3
+                style={{
+                  fontSize: `${pillarTitleEm}em`,
+                  color: pillarTitleColor,
+                  lineHeight: 1.2,
+                  margin: "0 0 0.35em",
+                  fontFamily: pillarTitleFont,
+                  fontWeight: (content.pillarTitleBold ?? true) ? 700 : 400,
+                  fontStyle: content.pillarTitleItalic ? "italic" : undefined,
+                  textDecoration: content.pillarTitleUnderline ? "underline" : undefined,
+                  textShadow: makeOutlineShadow(content.pillarTitleOutline),
+                }}
+              >
+                {pillar.title}
+              </h3>
+              <p
+                style={{
+                  fontSize: `${pillarBodyEm}em`,
+                  color: pillarBodyColor,
+                  lineHeight: 1.5,
+                  margin: 0,
+                  fontFamily: pillarBodyFont,
+                  textShadow: makeOutlineShadow(content.pillarBodyOutline),
+                  ...biuStyle(content.pillarBodyBold, content.pillarBodyItalic, content.pillarBodyUnderline),
+                }}
+              >
+                {pillar.body}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <LogoOverlay
+        show={content.showLogo ?? false}
+        variant={content.logoVariant ?? "light"}
+        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
+        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
+        scale={content.logoSize ?? 1.0}
+        branding={branding}
+      />
+    </div>
+  );
+}
+
 // ─── Hub-and-Spoke layout (94 Coggins style) ──────────────────────────────────
 // Center subject icon with accent arrows radiating to three "zone" clusters
 // (left, right, bottom). Reuses the 3 pillars as the zones.
@@ -804,9 +952,10 @@ function HubSpokeLayout({ slide, branding, hasAiBackground }: Props) {
 
 export function resolveObjectiveLayoutMode(
   content: ObjectiveContent,
-): "pillars" | "statement" | "hub-spoke" {
+): "pillars" | "pillars-photo" | "statement" | "hub-spoke" {
   if (
     content.layout === "pillars" ||
+    content.layout === "pillars-photo" ||
     content.layout === "statement" ||
     content.layout === "hub-spoke"
   ) {
@@ -823,6 +972,9 @@ export function ObjectiveSlide({ slide, branding, hasAiBackground }: Props) {
 
   if (mode === "hub-spoke") {
     return <HubSpokeLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+  }
+  if (mode === "pillars-photo") {
+    return <PhotoPillarLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
   }
   if (mode === "pillars") {
     return <PillarLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;

@@ -23,9 +23,22 @@ interface LayoutProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeOutlineShadow(color: string | null | undefined): string | undefined {
-  if (!color) return undefined;
-  return `-1px -1px 0 ${color}, 1px -1px 0 ${color}, -1px 1px 0 ${color}, 1px 1px 0 ${color}, 0 -1px 0 ${color}, 0 1px 0 ${color}`;
+/**
+ * Returns `color` as an rgba() string at the given alpha. Handles #rgb / #rrggbb
+ * hex; any other format (rgb/rgba/named) is returned unchanged (best effort).
+ * Used to derive muted text + hairline dividers from a user-chosen panel text
+ * color so they stay legible on any panel background.
+ */
+function withAlpha(color: string, alpha: number): string {
+  if (color.startsWith("#")) {
+    let h = color.slice(1);
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    if (h.length === 6) {
+      const n = parseInt(h, 16);
+      return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+    }
+  }
+  return color;
 }
 
 // ─── Empty-state placeholder for image slots ─────────────────────────────────
@@ -163,12 +176,12 @@ function ScopeGlyph({ item, color, scale = 1 }: { item: ScopeItem; color: string
 /** Resolve which content source a layout should render. */
 function effectiveScopeMode(
   content: ScopeOverviewContent,
-  layoutKey: string,
+  _layoutKey: string,
 ): "items" | "description" {
   if (content.contentMode === "items" || content.contentMode === "description") {
     return content.contentMode;
   }
-  return layoutKey === "split-panel" || layoutKey === "image-row" ? "description" : "items";
+  return "items";
 }
 
 /** Compact bulleted scope-item list for the legacy (paragraph) layouts. */
@@ -218,291 +231,6 @@ function Eyebrow({ accent, color }: { accent: string; color?: string }) {
   );
 }
 
-// ─── Layout 1: split-panel ───────────────────────────────────────────────────
-// Left 42 %: label + large serif title + accent rule + description
-// Right 58 %: 1 or 2 images stacked with a 2 px gap
-
-function SplitPanelLayout({ slide, branding, theme, hasAiBackground }: LayoutProps) {
-  const content = (slide.content ?? {}) as ScopeOverviewContent;
-  const resolvedAccent = content.accentColor ?? branding.accentColor;
-  const accent = resolvedAccent;
-  const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 2);
-  const title = slide.headline ?? "Scope Overview";
-  const description = content.description ?? "";
-  const items = deriveScopeItems(content, 6);
-  const itemScale = content.scopeItemsSize ?? 1;
-  const mode = effectiveScopeMode(content, slide.layoutKey);
-  const hasBg = !!slide.backgroundId || !!hasAiBackground;
-  const photoPanelPct = content.panelSplitRatio ?? 50;
-  const textPanelPct = 100 - photoPanelPct;
-
-  // Per-field: Title
-  const titleFontFamily = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
-  const titleSize  = content.titleSize  ?? 2.0;
-  const titleColor = content.titleColor ?? branding.textColor;
-  const titleShadow = makeOutlineShadow(content.titleOutline);
-  const titleX     = content.titleX     ?? 0.06;
-  const titleY     = content.titleY     ?? 0.35;
-
-  // Per-field: Description (with deprecated copySize/copyColor fallbacks)
-  const descFontFamily = content.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
-  const descSize   = content.descriptionSize ?? content.copySize ?? 1.0;
-  const descColor  = content.descriptionColor ?? content.copyColor ?? "#4B5563";
-  const descShadow = makeOutlineShadow(content.descriptionOutline);
-  const copyX      = content.copyX      ?? 0.06;
-  const copyY      = content.copyY      ?? 0.66;
-
-  const titleStyle: React.CSSProperties = {
-    fontSize: `${2.4 * titleSize}em`,
-    fontFamily: titleFontFamily,
-    fontWeight: (content.titleBold ?? true) ? 800 : 400,
-    fontStyle: content.titleItalic ? "italic" : undefined,
-    textDecoration: content.titleUnderline ? "underline" : undefined,
-    color: titleColor,
-    lineHeight: 1.15,
-    marginBottom: "0.5em",
-    textShadow: titleShadow,
-  };
-
-  const descStyle: React.CSSProperties = {
-    fontSize: `${0.73 * descSize}em`,
-    fontFamily: descFontFamily,
-    fontWeight: content.descriptionBold ? 700 : 400,
-    fontStyle: content.descriptionItalic ? "italic" : undefined,
-    textDecoration: content.descriptionUnderline ? "underline" : undefined,
-    color: descColor,
-    lineHeight: 1.85,
-    textShadow: descShadow,
-  };
-
-  return (
-    <div
-      className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
-    >
-      {/* Left panel border */}
-      <div style={{ position: "absolute", left: 0, top: 0, width: `${textPanelPct}%`, height: "100%", borderRight: "1px solid #E5E3DF", pointerEvents: "none" }} />
-
-      {/* ── Right: image(s) ──────────────────────────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${textPanelPct}%`, top: 0, right: 0, bottom: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
-          overflow: "hidden",
-        }}
-      >
-        {photos.length === 0 ? (
-          <ImagePlaceholder label="Add images in the inspector" />
-        ) : (
-          photos.map((photo, i) => (
-            <div key={i} style={{ flex: 1, overflow: "hidden" }}>
-              <PositionedPhoto photo={photo} />
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* ── Title cluster (absolutely positioned) ─────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${titleX * 100}%`,
-          top: `${titleY * 100}%`,
-          transform: "translateY(-50%)",
-          maxWidth: `${Math.max(textPanelPct - 8, 20)}%`,
-          zIndex: 2,
-        }}
-      >
-        {(content.showSectionLabel ?? true) && (
-          <p style={{ fontSize: SECTION_LABEL_SIZE, fontFamily: SLIDE_FONTS.defaults.label, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: accent, marginBottom: "0.8em" }}>
-            Project Scope
-          </p>
-        )}
-        <h2 style={titleStyle}>
-          {title}
-        </h2>
-        <TitleAccentRule accentColor={accent} marginTop="0" />
-      </div>
-
-      {/* ── Body: description paragraph OR bullet items ───────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${copyX * 100}%`,
-          top: `${copyY * 100}%`,
-          transform: "translateY(-50%)",
-          maxWidth: `${Math.max(textPanelPct - 8, 20)}%`,
-          zIndex: 2,
-        }}
-      >
-        {mode === "items" && items.length > 0 ? (
-          <LegacyBulletList items={items} accent={accent} ink={titleColor} itemScale={itemScale} />
-        ) : description ? (
-          <p style={descStyle}>
-            {description}
-          </p>
-        ) : (
-          <p style={{ fontSize: "0.68em", color: "#C4C0BB", fontStyle: "italic" }}>
-            Add a description in the inspector.
-          </p>
-        )}
-      </div>
-
-      <LogoOverlay
-        show={content.showLogo ?? false}
-        variant={content.logoVariant ?? "light"}
-        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
-        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
-        scale={content.logoSize ?? 1.0}
-        branding={branding}
-      />
-    </div>
-  );
-}
-
-// ─── Layout 2: image-row ─────────────────────────────────────────────────────
-// Top 38 %: eyebrow + title + accent rule + description (left-aligned)
-// Bottom 62 %: 3–4 images in a full-bleed horizontal row
-
-function ImageRowLayout({ slide, branding, theme, hasAiBackground }: LayoutProps) {
-  const content = (slide.content ?? {}) as ScopeOverviewContent;
-  const resolvedAccent = content.accentColor ?? branding.accentColor;
-  const accent = resolvedAccent;
-  const photos = (content.selectedPhotos ?? []).filter((p) => p.url).slice(0, 4);
-  const title = slide.headline ?? "Scope Overview";
-  const description = content.description ?? "";
-  const items = deriveScopeItems(content, 6);
-  const itemScale = content.scopeItemsSize ?? 1;
-  const mode = effectiveScopeMode(content, slide.layoutKey);
-  const hasBg = !!slide.backgroundId || !!hasAiBackground;
-
-  // Per-field: Title
-  const titleFontFamily = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
-  const titleSize  = content.titleSize  ?? 2.0;
-  const titleColor = content.titleColor ?? branding.textColor;
-  const titleShadow = makeOutlineShadow(content.titleOutline);
-  const titleX     = content.titleX     ?? 0.06;
-  const titleY     = content.titleY     ?? 0.16;
-
-  // Per-field: Description (with deprecated copySize/copyColor fallbacks)
-  const descFontFamily = content.descriptionFont ?? content.bodyFont ?? SLIDE_FONTS.defaults.body;
-  const descSize   = content.descriptionSize ?? content.copySize ?? 1.0;
-  const descColor  = content.descriptionColor ?? content.copyColor ?? "#4B5563";
-  const descShadow = makeOutlineShadow(content.descriptionOutline);
-  const copyX      = content.copyX      ?? 0.06;
-  const copyY      = content.copyY      ?? 0.33;
-
-  const titleStyle: React.CSSProperties = {
-    fontSize: `${2.2 * titleSize}em`,
-    fontFamily: titleFontFamily,
-    fontWeight: (content.titleBold ?? true) ? 800 : 400,
-    fontStyle: content.titleItalic ? "italic" : undefined,
-    textDecoration: content.titleUnderline ? "underline" : undefined,
-    color: titleColor,
-    lineHeight: 1.15,
-    marginBottom: "0.5em",
-    textShadow: titleShadow,
-  };
-
-  const descStyle: React.CSSProperties = {
-    fontSize: `${0.72 * descSize}em`,
-    fontFamily: descFontFamily,
-    fontWeight: content.descriptionBold ? 700 : 400,
-    fontStyle: content.descriptionItalic ? "italic" : undefined,
-    textDecoration: content.descriptionUnderline ? "underline" : undefined,
-    color: descColor,
-    lineHeight: 1.8,
-    textShadow: descShadow,
-  };
-
-  return (
-    <div
-      className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
-    >
-      {/* ── Bottom: image row (occupies lower 60%) ─────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          left: 0, right: 0,
-          top: "40%", bottom: 0,
-          display: "flex",
-          gap: 2,
-          overflow: "hidden",
-        }}
-      >
-        {photos.length === 0 ? (
-          <ImagePlaceholder label="Add images in the inspector" />
-        ) : (
-          photos.map((photo, i) => (
-            <div key={i} style={{ flex: 1, overflow: "hidden" }}>
-              <PositionedPhoto photo={photo} />
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* ── Title cluster (absolutely positioned) ─────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${titleX * 100}%`,
-          top: `${titleY * 100}%`,
-          transform: "translateY(-50%)",
-          maxWidth: "70%",
-          zIndex: 2,
-        }}
-      >
-        {(content.showSectionLabel ?? true) && (
-          <p style={{ fontSize: SECTION_LABEL_SIZE, fontFamily: SLIDE_FONTS.defaults.label, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: accent, marginBottom: "0.8em" }}>
-            Project Scope
-          </p>
-        )}
-        <h2 style={titleStyle}>
-          {title}
-        </h2>
-        <TitleAccentRule accentColor={accent} marginTop="0" />
-      </div>
-
-      {/* ── Body: description paragraph OR bullet items ───────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${copyX * 100}%`,
-          top: `${copyY * 100}%`,
-          transform: "translateY(-50%)",
-          maxWidth: "70%",
-          zIndex: 2,
-        }}
-      >
-        {mode === "items" && items.length > 0 ? (
-          <LegacyBulletList items={items} accent={accent} ink={titleColor} itemScale={itemScale} />
-        ) : description ? (
-          <p style={descStyle}>
-            {description}
-          </p>
-        ) : (
-          <p style={{ fontSize: "0.65em", color: "#C4C0BB", fontStyle: "italic" }}>
-            Add a description in the inspector.
-          </p>
-        )}
-      </div>
-
-      <LogoOverlay
-        show={content.showLogo ?? false}
-        variant={content.logoVariant ?? "light"}
-        xPercent={content.logoX ?? LOGO_POSITION_DEFAULTS.content.x}
-        yPercent={content.logoY ?? LOGO_POSITION_DEFAULTS.content.y}
-        scale={content.logoSize ?? 1.0}
-        branding={branding}
-      />
-    </div>
-  );
-}
-
 // ─── Layout 3: editorial-split ───────────────────────────────────────────────
 // Dark slate left column (eyebrow + large serif title + hairline-divided item
 // list) and a framed full-bleed photo on the right, with an optional floating
@@ -523,25 +251,33 @@ function EditorialSplitLayout({ slide, branding, theme }: LayoutProps) {
   const titleFont = content.titleFont ?? content.headlineFont ?? theme.fonts.headline;
   const panelPct = 40;
 
+  // Editable left-column colors (fall back to the deck theme's panel palette).
+  const panelBg = content.panelColor ?? theme.color.panel;
+  const panelInk = content.panelTextColor ?? theme.color.panelInk;
+  const panelMuted = content.panelTextColor ? withAlpha(panelInk, 0.78) : theme.color.panelMuted;
+  const panelHair = content.panelTextColor ? withAlpha(panelInk, 0.16) : "rgba(255,255,255,0.13)";
+
   return (
     <div className="relative w-full h-full" style={{ overflow: "hidden", background: theme.color.surface }}>
       {/* Left dark column */}
       <div
         style={{
           position: "absolute", left: 0, top: 0, bottom: 0, width: `${panelPct}%`,
-          background: theme.color.panel,
+          background: panelBg,
           padding: "7% 6%",
           display: "flex", flexDirection: "column", justifyContent: "center",
           zIndex: 2,
         }}
       >
-        <Eyebrow accent={accent} color={accent} />
+        {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} color={accent} />}
         <h2
           style={{
             fontSize: `${3.0 * (content.titleSize ?? 1)}em`,
             fontFamily: titleFont,
-            fontWeight: 300,
-            color: "#FFFFFF",
+            fontWeight: content.titleBold ? 700 : 300,
+            fontStyle: content.titleItalic ? "italic" : undefined,
+            textDecoration: content.titleUnderline ? "underline" : undefined,
+            color: panelInk,
             lineHeight: 1.05,
             margin: 0,
           }}
@@ -550,7 +286,7 @@ function EditorialSplitLayout({ slide, branding, theme }: LayoutProps) {
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, marginTop: "0.9em", marginBottom: "1.4em" }} />
         {mode === "description" && description ? (
-          <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.82)", lineHeight: 1.7, margin: 0 }}>
+          <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: panelMuted, lineHeight: 1.7, margin: 0 }}>
             {description}
           </p>
         ) : (
@@ -563,22 +299,22 @@ function EditorialSplitLayout({ slide, branding, theme }: LayoutProps) {
                 gap: "0.85em",
                 alignItems: "flex-start",
                 padding: "0.7em 0",
-                borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.13)",
+                borderTop: i === 0 ? "none" : `1px solid ${panelHair}`,
               }}
             >
               {showIcons && (
                 <div style={{ flex: "0 0 auto", width: `${1.7 * iconScale}em`, height: `${1.7 * iconScale}em`, display: "flex", justifyContent: "center", alignItems: "center", marginTop: "0.1em" }}>
-                  <ScopeGlyph item={it} color="#FFFFFF" scale={iconScale} />
+                  <ScopeGlyph item={it} color={panelInk} scale={iconScale} />
                 </div>
               )}
               <div style={{ flex: 1 }}>
                 {it.title && (
-                  <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: "#FFFFFF", margin: 0, lineHeight: 1.3 }}>
+                  <p style={{ fontSize: `${0.8 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, fontWeight: 600, color: panelInk, margin: 0, lineHeight: 1.3 }}>
                     {it.title}
                   </p>
                 )}
                 {it.detail && (
-                  <p style={{ fontSize: `${0.72 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "rgba(255,255,255,0.74)", margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
+                  <p style={{ fontSize: `${0.72 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: panelMuted, margin: it.title ? "0.15em 0 0" : 0, lineHeight: 1.4 }}>
                     {it.detail}
                   </p>
                 )}
@@ -657,7 +393,7 @@ function PhotoNumberedLayout({ slide, branding, theme }: LayoutProps) {
         }}
       >
         {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
-        <h2 style={{ fontSize: `${2.0 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: content.titleColor ?? branding.textColor, lineHeight: 1.12, margin: 0 }}>
+        <h2 style={{ fontSize: `${2.0 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontStyle: content.titleItalic ? "italic" : undefined, textDecoration: content.titleUnderline ? "underline" : undefined, color: content.titleColor ?? branding.textColor, lineHeight: 1.12, margin: 0 }}>
           {title}
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, margin: "0.8em 0 1.3em" }} />
@@ -729,7 +465,7 @@ function PhotoChecklistLayout({ slide, branding, theme }: LayoutProps) {
         }}
       >
         {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
-        <h2 style={{ fontSize: `${2.1 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: content.titleColor ?? branding.textColor, lineHeight: 1.1, margin: 0 }}>
+        <h2 style={{ fontSize: `${2.1 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontStyle: content.titleItalic ? "italic" : undefined, textDecoration: content.titleUnderline ? "underline" : undefined, color: content.titleColor ?? branding.textColor, lineHeight: 1.1, margin: 0 }}>
           {title}
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, margin: "0.8em 0 1.3em" }} />
@@ -790,7 +526,7 @@ function GalleryGridLayout({ slide, branding, theme }: LayoutProps) {
       {/* Title bar */}
       <div style={{ flex: "0 0 auto", marginBottom: "0.9em" }}>
         {(content.showSectionLabel ?? true) && <Eyebrow accent={accent} />}
-        <h2 style={{ fontSize: `${1.9 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: content.titleColor ?? branding.textColor, lineHeight: 1.05, margin: 0 }}>
+        <h2 style={{ fontSize: `${1.9 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontStyle: content.titleItalic ? "italic" : undefined, textDecoration: content.titleUnderline ? "underline" : undefined, color: content.titleColor ?? branding.textColor, lineHeight: 1.05, margin: 0 }}>
           {title}
         </h2>
         <div style={{ width: "2.6em", height: 2, background: accent, marginTop: "0.6em" }} />
@@ -854,6 +590,11 @@ function BlueprintIconsLayout({ slide, branding, theme }: LayoutProps) {
   const content = (slide.content ?? {}) as ScopeOverviewContent;
   const accent = content.accentColor ?? branding.accentColor;
   const ink = content.titleColor ?? branding.textColor ?? "#1A2332";
+  // Independent colors (each falls back to the title color so existing decks
+  // are unchanged until the user overrides them).
+  const iconColor = content.iconColor ?? ink;
+  const itemTitleColor = content.itemTitleColor ?? ink;
+  const marker = content.itemMarker ?? "icon";
   const items = deriveScopeItems(content, 5);
   const photo = (content.selectedPhotos ?? []).find((p) => p.url);
   const title = slide.headline ?? "Scope of Work";
@@ -903,7 +644,7 @@ function BlueprintIconsLayout({ slide, branding, theme }: LayoutProps) {
         {/* Content */}
         <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", padding: "7% 7%" }}>
           {(content.showSectionLabel ?? false) && <Eyebrow accent={accent} />}
-          <h2 style={{ fontSize: `${1.95 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: 700, color: ink, lineHeight: 1.08, margin: 0 }}>
+          <h2 style={{ fontSize: `${1.95 * (content.titleSize ?? 1)}em`, fontFamily: titleFont, fontWeight: (content.titleBold ?? true) ? 700 : 400, fontStyle: content.titleItalic ? "italic" : undefined, textDecoration: content.titleUnderline ? "underline" : undefined, color: ink, lineHeight: 1.08, margin: 0 }}>
             {title}
           </h2>
           {stat && (
@@ -923,16 +664,22 @@ function BlueprintIconsLayout({ slide, branding, theme }: LayoutProps) {
               <div key={i} style={{ display: "flex", gap: "1.1em", alignItems: "flex-start", position: "relative" }}>
                 {/* tick on the guide */}
                 <span style={{ position: "absolute", left: "calc(-1.4em - 1px)", top: "0.9em", width: "0.7em", height: 1, background: markColor }} />
-                <div style={{ flex: "0 0 auto", width: `${2.2 * iconScale}em`, height: `${2.2 * iconScale}em`, display: "flex", justifyContent: "center", alignItems: "center" }}>
-                  {it.iconImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={it.iconImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                  ) : (
-                    <ScopeIcon name={it.icon} size={Math.round(32 * iconScale)} color={ink} strokeWidth={1.5} />
-                  )}
-                </div>
+                {marker !== "none" && (
+                  <div style={{ flex: "0 0 auto", width: `${2.2 * iconScale}em`, height: `${2.2 * iconScale}em`, display: "flex", justifyContent: "center", alignItems: "center" }}>
+                    {marker === "check" ? (
+                      <svg width={Math.round(28 * iconScale)} height={Math.round(28 * iconScale)} viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : it.iconImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={it.iconImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                    ) : (
+                      <ScopeIcon name={it.icon} size={Math.round(32 * iconScale)} color={iconColor} strokeWidth={1.5} />
+                    )}
+                  </div>
+                )}
                 <p style={{ fontSize: `${0.82 * itemScale}em`, fontFamily: SLIDE_FONTS.defaults.body, color: "#374151", margin: 0, lineHeight: 1.4, paddingTop: "0.15em" }}>
-                  {it.title && <span style={{ fontWeight: 700, color: ink }}>{it.title}{it.detail ? ": " : ""}</span>}
+                  {it.title && <span style={{ fontWeight: 700, color: itemTitleColor }}>{it.title}{it.detail ? ": " : ""}</span>}
                   {it.detail}
                 </p>
               </div>
@@ -970,10 +717,6 @@ export function ScopeOverviewSlide({ slide, branding, hasAiBackground }: Omit<La
       return <PhotoChecklistLayout {...props} />;
     case "gallery-grid":
       return <GalleryGridLayout {...props} />;
-    case "image-row":
-      return <ImageRowLayout {...props} />;
-    case "split-panel":
-      return <SplitPanelLayout {...props} />;
     default:
       return <EditorialSplitLayout {...props} />;
   }

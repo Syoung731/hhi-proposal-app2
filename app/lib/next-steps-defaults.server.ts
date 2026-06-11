@@ -32,7 +32,6 @@ export async function getNextStepsDefaults(): Promise<GlobalNextStepsSettings> {
     defaultLayout: (typeof json.defaultLayout === "string" ? json.defaultLayout : HHI_NEXT_STEPS_DEFAULTS.defaultLayout) as NextStepsLayoutKey,
     defaultSectionLabel: typeof json.defaultSectionLabel === "string" ? json.defaultSectionLabel : HHI_NEXT_STEPS_DEFAULTS.defaultSectionLabel,
     defaultHeadline: typeof json.defaultHeadline === "string" ? json.defaultHeadline : HHI_NEXT_STEPS_DEFAULTS.defaultHeadline,
-    defaultContactEmail: typeof json.defaultContactEmail === "string" ? json.defaultContactEmail : HHI_NEXT_STEPS_DEFAULTS.defaultContactEmail,
-    defaultContactPhone: typeof json.defaultContactPhone === "string" ? json.defaultContactPhone : HHI_NEXT_STEPS_DEFAULTS.defaultContactPhone,
+    // Contact defaults removed — contact info lives on the Closing slide.
   };
 }

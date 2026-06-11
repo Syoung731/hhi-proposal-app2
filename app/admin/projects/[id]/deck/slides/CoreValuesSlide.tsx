@@ -3,6 +3,8 @@
 import type { ProposalSlide, DeckBranding, CoreValuesContent, CoreValue } from "@/app/lib/deck/types";
 import { HHI_DEFAULT_CORE_VALUES } from "@/app/lib/core-values-defaults";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { BlueprintUnderlay } from "./shared/BlueprintUnderlay";
+import { useDeckTheme } from "@/app/lib/deck/theme-context";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, SECTION_LABEL_SIZE, CARD_SHADOWS, CARD_PADDING, CARD_BORDER, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
 
@@ -82,7 +84,6 @@ function renderIcon(name: string, color: string, size?: string) {
 
 // ─── Design tokens ───────────────────────────────────────────────────────────
 
-const LINEN = "#F5F0E8";
 const NAVY = "#1B2A4A";
 const GOLD = "#B8860B";
 const MUTED_NAVY = "#4A5568";
@@ -165,10 +166,11 @@ function QuadGridLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
+  const theme = useDeckTheme();
   const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? "#F5F0E8";
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -345,10 +347,11 @@ function CardsRowLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
+  const theme = useDeckTheme();
   const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -359,8 +362,9 @@ function CardsRowLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
     >
+      {theme.surface.grid && !hasBg && <BlueprintUnderlay />}
 
       <div
         style={{
@@ -545,10 +549,11 @@ function LabeledListLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
+  const theme = useDeckTheme();
   const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -559,8 +564,9 @@ function LabeledListLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
     >
+      {theme.surface.grid && !hasBg && <BlueprintUnderlay />}
 
       <div
         style={{
@@ -704,10 +710,11 @@ function IconCardsLayout({
   content: CoreValuesContent;
   branding: DeckBranding;
 }) {
+  const theme = useDeckTheme();
   const resolvedAccent = content.accentColor ?? branding.accentColor;
 
   // Per-field: Slide title
-  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? SLIDE_FONTS.defaults.headline;
+  const slideTitleFont = content.slideTitleFont ?? content.headlineFont ?? theme.fonts.headline;
   const slideTitleSize = content.slideTitleSize ?? 1.0;
   const slideTitleColor = content.slideTitleColor ?? content.headlineColor ?? branding.textColor;
   const slideTitleShadow = makeOutlineShadow(content.slideTitleOutline);
@@ -718,8 +725,9 @@ function IconCardsLayout({
   return (
     <div
       className="relative w-full h-full"
-      style={{ background: hasBg ? "transparent" : LINEN, overflow: "hidden" }}
+      style={{ background: hasBg ? "transparent" : theme.color.surface, overflow: "hidden" }}
     >
+      {theme.surface.grid && !hasBg && <BlueprintUnderlay />}
 
       <div
         style={{

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import type {
   ProposalSlide,
   DeckBranding,
@@ -158,6 +159,7 @@ function SideBySideLayout({ slide, branding, hasAiBackground }: LayoutProps) {
             marginBottom: "0.3em",
           }}
         />
+        <StatChip text={(content.transformationStat ?? "").trim() || null} accent={accent} />
       </div>
 
       {/* Image columns */}
@@ -380,6 +382,11 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
             {roomName}
           </h2>
           <TitleAccentRule accentColor={accent} marginBottom={caption || (content.bullets?.length ?? 0) > 0 ? "0.8em" : "0"} />
+          {(content.transformationStat ?? "").trim() && (
+            <div style={{ marginBottom: "0.8em" }}>
+              <StatChip text={(content.transformationStat ?? "").trim()} accent={accent} />
+            </div>
+          )}
           {/* Phase 8C: vertical bullet strip replaces the caption in the left
               panel when bullets exist. Falls back to the italic caption when
               absent. */}
@@ -582,10 +589,392 @@ function AfterEmphasisLayout({ slide, branding, hasAiBackground }: LayoutProps) 
   );
 }
 
+// ─── Shared bits for the new layouts ──────────────────────────────────────────
+
+/** Resolve the fields the newer layouts share. */
+function baCommon(content: BeforeAfterContent, branding: DeckBranding) {
+  return {
+    accent: content.accentColor ?? branding.accentColor,
+    roomName: content.roomName ?? "Room Overview",
+    caption: (content.caption ?? "").trim() || null,
+    stat: (content.transformationStat ?? "").trim() || null,
+    headlineFont: content.headlineFont ?? SLIDE_FONTS.defaults.headline,
+    bodyFont: content.bodyFont ?? SLIDE_FONTS.defaults.body,
+    titleColor: content.headlineColor ?? content.headingColor ?? branding.textColor,
+    navy: branding.textColor ?? "#1A2332",
+  };
+}
+
+/** Accent pill showing the transformation metric. */
+function StatChip({ text, accent }: { text: string | null; accent: string }) {
+  if (!text) return null;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        background: accent,
+        color: "#FFFFFF",
+        fontFamily: "'Jost', sans-serif",
+        fontWeight: 700,
+        fontSize: "0.62em",
+        letterSpacing: "0.04em",
+        padding: "0.35em 0.85em",
+        borderRadius: 999,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+/**
+ * Compact change-list shown beneath the photos. Prefers the auto-generated
+ * `bullets` (a tight, wrapped row of short changes) so the imagery dominates;
+ * falls back to a 2-line-clamped caption when there are no bullets.
+ */
+function ChangeList({
+  content,
+  accent,
+  bodyFont,
+  color,
+  align = "left",
+}: {
+  content: BeforeAfterContent;
+  accent: string;
+  bodyFont: string;
+  color: string;
+  align?: "left" | "center";
+}) {
+  // Scale by the "Caption text size" slider so it controls the bullets too.
+  // Normalised to the 2.0 default so the compact base size is preserved at 1×.
+  const sizeFactor = (content.captionSize ?? content.captionFontSize ?? 2.0) / 2.0;
+  const bullets = (content.bullets ?? []).filter((b) => (b?.text ?? "").trim());
+  if (bullets.length > 0) {
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35em 1.6em", justifyContent: align === "center" ? "center" : "flex-start" }}>
+        {bullets.map((b, i) => (
+          <span key={i} style={{ fontFamily: bodyFont, fontSize: `${0.62 * sizeFactor}em`, color, display: "inline-flex", alignItems: "center", gap: "0.4em", lineHeight: 1.4 }}>
+            <span style={{ color: accent, fontSize: "1.1em", lineHeight: 1 }}>•</span>
+            {b.text}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  const caption = (content.caption ?? "").trim();
+  if (!caption) return null;
+  return (
+    <p
+      style={{
+        fontFamily: content.captionFont ?? bodyFont,
+        fontSize: `${0.66 * sizeFactor}em`,
+        fontStyle: content.captionItalic !== false ? "italic" : "normal",
+        color: content.captionColor ?? color,
+        margin: 0,
+        textAlign: align,
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+        lineHeight: 1.5,
+      }}
+    >
+      {caption}
+    </p>
+  );
+}
+
+/** A standard title row (room name + accent rule + optional stat chip). */
+function TitleRow({
+  roomName,
+  font,
+  color,
+  accent,
+  stat,
+}: {
+  roomName: string;
+  font: string;
+  color: string;
+  accent: string;
+  stat: string | null;
+}) {
+  return (
+    <div style={{ flexShrink: 0, padding: "5% 5% 0", display: "flex", alignItems: "center", gap: "1em" }}>
+      <h2 style={{ fontFamily: font, fontSize: "2.3em", fontWeight: 700, color, lineHeight: 1.15, margin: 0 }}>
+        {roomName}
+      </h2>
+      <div style={{ height: 2, flex: 1, background: `${accent}40` }} />
+      <StatChip text={stat} accent={accent} />
+    </div>
+  );
+}
+
+// ─── Interactive reveal slider ────────────────────────────────────────────────
+// Before is the base; After is clipped from the left and revealed by dragging the
+// handle right. On-screen it's interactive; in a static export it renders at the
+// stored sliderPosition. touchAction:none keeps drags from scrolling the page.
+
+function RevealSlider({
+  before,
+  after,
+  initial,
+  accent,
+  beforeLabel,
+  afterLabel,
+  radius = 0,
+}: {
+  before?: string | null;
+  after?: string | null;
+  initial: number;
+  accent: string;
+  beforeLabel: React.ReactNode;
+  afterLabel: React.ReactNode;
+  radius?: number;
+}) {
+  const [pos, setPos] = useState(Math.max(0, Math.min(100, initial)));
+  const ref = useRef<HTMLDivElement | null>(null);
+  const dragging = useRef(false);
+
+  function update(clientX: number) {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0) return;
+    setPos(Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)));
+  }
+
+  return (
+    <div
+      ref={ref}
+      onPointerDown={(e) => {
+        dragging.current = true;
+        try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+        update(e.clientX);
+      }}
+      onPointerMove={(e) => { if (dragging.current) update(e.clientX); }}
+      onPointerUp={() => { dragging.current = false; }}
+      onPointerCancel={() => { dragging.current = false; }}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", cursor: "ew-resize", userSelect: "none", touchAction: "none", borderRadius: radius, background: "#E8E6E2" }}
+    >
+      {before ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={before} alt="Before" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        <ImagePlaceholder label="No before photo" />
+      )}
+      {after && (
+        /* Before is the base (left of the handle); After is revealed to the RIGHT
+           of the handle by clipping off everything left of `pos`. */
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={after} alt="After" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", clipPath: `inset(0 0 0 ${pos}%)` }} />
+      )}
+      {/* Each label fades out as its side is wiped away (Before at the far-left
+          edge, After at the far-right edge). */}
+      <div style={{ position: "absolute", top: "4%", left: "4%", zIndex: 3, opacity: Math.min(1, pos / 10), transition: "opacity 0.15s ease" }}>{beforeLabel}</div>
+      <div style={{ position: "absolute", top: "4%", right: "4%", zIndex: 3, opacity: Math.min(1, (100 - pos) / 10), transition: "opacity 0.15s ease" }}>{afterLabel}</div>
+      {/* Handle */}
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pos}%`, width: 2, background: "#FFFFFF", boxShadow: "0 0 6px rgba(0,0,0,0.45)", transform: "translateX(-1px)", zIndex: 4 }}>
+        <div
+          style={{
+            position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+            width: "2.4em", height: "2.4em", borderRadius: "50%", background: "#FFFFFF",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center",
+            color: accent, fontSize: "0.8em", fontWeight: 700,
+          }}
+        >
+          ⟺
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Layout 3: reveal-slider ──────────────────────────────────────────────────
+
+function RevealSliderLayout({ slide, branding, hasAiBackground }: LayoutProps) {
+  const content = (slide.content ?? {}) as BeforeAfterContent;
+  const c = baCommon(content, branding);
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+
+  return (
+    <div className="relative w-full h-full flex flex-col" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+      <TitleRow roomName={content.roomName ?? slide.headline ?? "Room Overview"} font={c.headlineFont} color={c.titleColor} accent={c.accent} stat={c.stat} />
+      <div style={{ flex: 1, minHeight: 0, padding: "2.5% 5% 2%" }}>
+        <div style={{ width: "100%", height: "100%", borderRadius: 8, overflow: "hidden", boxShadow: "0 10px 32px rgba(0,0,0,0.18)" }}>
+          <RevealSlider
+            before={content.beforeImageUrl}
+            after={content.afterImageUrl}
+            initial={content.sliderPosition ?? 50}
+            accent={c.accent}
+            radius={8}
+            beforeLabel={<Label text={content.beforeLabel ?? "Before"} accent={c.accent} dark size={content.beforeLabelSize ?? 2.5} font={content.beforeLabelFont} bold={content.beforeLabelBold} italic={content.beforeLabelItalic} color={content.beforeLabelColor} outline={content.beforeLabelOutline} />}
+            afterLabel={<Label text={content.afterLabel ?? "After"} accent={c.accent} dark size={content.afterLabelSize ?? 2.5} font={content.afterLabelFont} bold={content.afterLabelBold} italic={content.afterLabelItalic} color={content.afterLabelColor} outline={content.afterLabelOutline} />}
+          />
+        </div>
+      </div>
+      <div style={{ flexShrink: 0, padding: "0 5% 3.5%" }}>
+        <ChangeList content={content} accent={c.accent} bodyFont={c.bodyFont} color="#4B5563" />
+      </div>
+      <LogoOverlay show={content.showLogo ?? !!(branding.logoLightUrl || branding.logoDarkUrl)} variant={(content.logoVariant ?? "light") === "dark" ? "dark" : "light"} xPercent={content.logoX != null ? (content.logoX <= 1 ? content.logoX * 100 : content.logoX) : 85} yPercent={content.logoY != null ? (content.logoY <= 1 ? content.logoY * 100 : content.logoY) : 88} scale={content.logoSize != null ? Math.min(content.logoSize, 4.0) : 1.0} branding={branding} />
+    </div>
+  );
+}
+
+// ─── Layout 4: cards ──────────────────────────────────────────────────────────
+// Two large rounded photo cards filling the slide, with BEFORE / AFTER pills
+// overlaid on each image and a compact change-list beneath.
+
+function CardImage({ url, placeholder, label, labelColor }: { url?: string | null; placeholder: string; label: React.ReactNode; labelColor: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, position: "relative", borderRadius: 12, overflow: "hidden", boxShadow: "0 14px 34px rgba(0,0,0,0.16)", border: "3px solid #fff", background: "#fff" }}>
+      {url ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        <ImagePlaceholder label={placeholder} />
+      )}
+      {/* Pill overlaid top-left */}
+      <span
+        className="uppercase tracking-widest"
+        style={{
+          position: "absolute", top: "5%", left: "5%", zIndex: 2,
+          fontFamily: "'Jost', sans-serif", fontSize: "0.58em", fontWeight: 700, letterSpacing: "0.16em",
+          color: "#fff", background: labelColor, padding: "0.4em 1.1em", borderRadius: 999,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function CardsLayout({ slide, branding, hasAiBackground }: LayoutProps) {
+  const content = (slide.content ?? {}) as BeforeAfterContent;
+  const c = baCommon(content, branding);
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  return (
+    <div className="relative w-full h-full flex flex-col" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+      <TitleRow roomName={content.roomName ?? slide.headline ?? "Room Overview"} font={c.headlineFont} color={c.titleColor} accent={c.accent} stat={c.stat} />
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: "3%", padding: "2.5% 5% 2%" }}>
+        <CardImage url={content.beforeImageUrl} placeholder="No before photo" label={content.beforeLabel ?? "Before"} labelColor={c.navy} />
+        <CardImage url={content.afterImageUrl} placeholder="No render / after photo" label={content.afterLabel ?? "After"} labelColor={c.accent} />
+      </div>
+      <div style={{ flexShrink: 0, padding: "0 5% 3.5%" }}>
+        <ChangeList content={content} accent={c.accent} bodyFont={c.bodyFont} color="#4B5563" />
+      </div>
+      <LogoOverlay show={content.showLogo ?? !!(branding.logoLightUrl || branding.logoDarkUrl)} variant={(content.logoVariant ?? "light") === "dark" ? "dark" : "light"} xPercent={content.logoX != null ? (content.logoX <= 1 ? content.logoX * 100 : content.logoX) : 85} yPercent={content.logoY != null ? (content.logoY <= 1 ? content.logoY * 100 : content.logoY) : 88} scale={content.logoSize != null ? Math.min(content.logoSize, 4.0) : 1.0} branding={branding} />
+    </div>
+  );
+}
+
+// ─── Layout 5: offset ─────────────────────────────────────────────────────────
+// Before card sits behind/lower-left; After card overlaps in front, raised-right.
+
+function OffsetLayout({ slide, branding, hasAiBackground }: LayoutProps) {
+  const content = (slide.content ?? {}) as BeforeAfterContent;
+  const c = baCommon(content, branding);
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  return (
+    <div className="relative w-full h-full flex flex-col" style={{ background: hasBg ? "transparent" : "#FAFAF8", overflow: "hidden" }}>
+      <TitleRow roomName={content.roomName ?? slide.headline ?? "Room Overview"} font={c.headlineFont} color={c.titleColor} accent={c.accent} stat={c.stat} />
+      <div style={{ flex: 1, minHeight: 0, position: "relative", margin: "2% 5% 1.5%" }}>
+        {/* Before — back card, lower-left */}
+        <div style={{ position: "absolute", left: 0, bottom: 0, width: "60%", height: "84%", borderRadius: 8, overflow: "hidden", boxShadow: "0 8px 22px rgba(0,0,0,0.14)", border: "1px solid #E5E3DF" }}>
+          {content.beforeImageUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={content.beforeImageUrl} alt="Before" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : <ImagePlaceholder label="No before photo" />}
+          <div style={{ position: "absolute", bottom: "5%", left: "5%" }}>
+            <Label text={content.beforeLabel ?? "Before"} accent={c.accent} dark size={content.beforeLabelSize ?? 2.5} font={content.beforeLabelFont} color={content.beforeLabelColor} />
+          </div>
+        </div>
+        {/* After — front card, upper-right, overlapping */}
+        <div style={{ position: "absolute", right: 0, top: 0, width: "66%", height: "90%", borderRadius: 8, overflow: "hidden", boxShadow: "0 18px 40px rgba(0,0,0,0.3)", border: "4px solid #fff" }}>
+          {content.afterImageUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={content.afterImageUrl} alt="After" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : <ImagePlaceholder label="No render / after photo" />}
+          <div style={{ position: "absolute", top: "5%", right: "5%" }}>
+            <Label text={content.afterLabel ?? "After"} accent={c.accent} dark size={content.afterLabelSize ?? 2.5} font={content.afterLabelFont} color={content.afterLabelColor} />
+          </div>
+        </div>
+      </div>
+      <div style={{ flexShrink: 0, padding: "0 5% 3.5%" }}>
+        <ChangeList content={content} accent={c.accent} bodyFont={c.bodyFont} color="#4B5563" />
+      </div>
+      <LogoOverlay show={content.showLogo ?? !!(branding.logoLightUrl || branding.logoDarkUrl)} variant={(content.logoVariant ?? "light") === "dark" ? "dark" : "light"} xPercent={content.logoX != null ? (content.logoX <= 1 ? content.logoX * 100 : content.logoX) : 85} yPercent={content.logoY != null ? (content.logoY <= 1 ? content.logoY * 100 : content.logoY) : 88} scale={content.logoSize != null ? Math.min(content.logoSize, 4.0) : 1.0} branding={branding} />
+    </div>
+  );
+}
+
+// ─── Layout 6: diagonal ───────────────────────────────────────────────────────
+// Two angled panels (accent ╱ navy), each holding an angled photo card + ribbon
+// label. Brand-styled, softer than the stock template.
+
+function DiagonalLayout({ slide, branding, hasAiBackground }: LayoutProps) {
+  const content = (slide.content ?? {}) as BeforeAfterContent;
+  const c = baCommon(content, branding);
+  const hasBg = !!slide.backgroundId || !!hasAiBackground;
+  const ribbon = (text: string, color: string): React.CSSProperties => ({
+    position: "absolute", fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: "0.7em", letterSpacing: "0.16em",
+    color: "#fff", background: color, padding: "0.4em 1.4em", borderRadius: 3, textTransform: "uppercase",
+  });
+  return (
+    <div className="relative w-full h-full" style={{ overflow: "hidden", background: hasBg ? "transparent" : "#FAFAF8" }}>
+      {/* Angled background panels */}
+      <div style={{ position: "absolute", inset: 0, background: `${c.accent}1A`, clipPath: "polygon(0 0, 56% 0, 44% 100%, 0 100%)" }} />
+      <div style={{ position: "absolute", inset: 0, background: `${c.navy}12`, clipPath: "polygon(56% 0, 100% 0, 100% 100%, 44% 100%)" }} />
+
+      {/* Title */}
+      <div style={{ position: "absolute", top: "5%", left: 0, right: 0, textAlign: "center", zIndex: 5, display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5em" }}>
+        <h2 style={{ fontFamily: c.headlineFont, fontSize: "2.0em", fontWeight: 700, color: c.titleColor, margin: 0 }}>
+          {content.roomName ?? slide.headline ?? "Room Overview"}
+        </h2>
+        <StatChip text={c.stat} accent={c.accent} />
+      </div>
+
+      {/* Before card — left, tilted */}
+      <div style={{ position: "absolute", left: "6%", top: "22%", width: "40%", height: "50%", transform: "rotate(-4deg)", borderRadius: 8, overflow: "hidden", boxShadow: "0 12px 30px rgba(0,0,0,0.22)", border: "3px solid #fff" }}>
+        {content.beforeImageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={content.beforeImageUrl} alt="Before" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : <ImagePlaceholder label="No before photo" />}
+      </div>
+      <span style={{ ...ribbon(content.beforeLabel ?? "Before", c.accent), left: "10%", top: "20%", zIndex: 6 }}>{content.beforeLabel ?? "Before"}</span>
+
+      {/* After card — right, tilted opposite */}
+      <div style={{ position: "absolute", right: "6%", top: "25%", width: "42%", height: "52%", transform: "rotate(4deg)", borderRadius: 8, overflow: "hidden", boxShadow: "0 16px 38px rgba(0,0,0,0.3)", border: "3px solid #fff" }}>
+        {content.afterImageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={content.afterImageUrl} alt="After" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : <ImagePlaceholder label="No render / after photo" />}
+      </div>
+      <span style={{ ...ribbon(content.afterLabel ?? "After", c.navy), right: "10%", top: "23%", zIndex: 6 }}>{content.afterLabel ?? "After"}</span>
+
+      {/* Change-list across the bottom (the "describing words") */}
+      <div style={{ position: "absolute", left: "8%", right: "8%", bottom: "5%", zIndex: 6 }}>
+        <ChangeList content={content} accent={c.accent} bodyFont={c.bodyFont} color="#4B5563" align="center" />
+      </div>
+
+      <LogoOverlay show={content.showLogo ?? !!(branding.logoLightUrl || branding.logoDarkUrl)} variant={(content.logoVariant ?? "light") === "dark" ? "dark" : "light"} xPercent={content.logoX != null ? (content.logoX <= 1 ? content.logoX * 100 : content.logoX) : 85} yPercent={content.logoY != null ? (content.logoY <= 1 ? content.logoY * 100 : content.logoY) : 88} scale={content.logoSize != null ? Math.min(content.logoSize, 4.0) : 1.0} branding={branding} />
+    </div>
+  );
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export function BeforeAfterSlide({ slide, branding, hasAiBackground }: LayoutProps) {
   switch (slide.layoutKey) {
+    case "reveal-slider":
+      return <RevealSliderLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    case "cards":
+      return <CardsLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    case "offset":
+      return <OffsetLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
+    case "diagonal":
+      return <DiagonalLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "after-emphasis":
       return <AfterEmphasisLayout slide={slide} branding={branding} hasAiBackground={hasAiBackground} />;
     case "side-by-side":

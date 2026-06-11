@@ -4,6 +4,8 @@ import type { ProposalSlide, DeckBranding, TestimonialsContent, SlideTestimonial
 import { DEFAULT_TESTIMONIALS, TESTIMONIALS_SLIDE_DEFAULTS } from "@/app/lib/testimonial-defaults";
 import { StarRating } from "./shared/StarRating";
 import { TitleAccentRule } from "./shared/TitleAccentRule";
+import { BlueprintUnderlay } from "./shared/BlueprintUnderlay";
+import { useDeckTheme } from "@/app/lib/deck/theme-context";
 import { PhotoOverlay } from "@/components/slides/shared/PhotoOverlay";
 import { LogoOverlay } from "@/components/slides/shared/LogoOverlay";
 import { SLIDE_PADDING, ACCENT_RULE_WIDTH, CARD_SHADOWS, CARD_PADDING, CARD_BORDER, HEADLINE_SCALE, BODY_SCALE, LOGO_POSITION_DEFAULTS, SLIDE_FONTS } from "@/app/lib/slide-constants";
@@ -15,7 +17,6 @@ interface Props {
   hasAiBackground?: boolean;
 }
 
-const LINEN = "#F5F0E8";
 const NAVY = "#1B2A4A";
 const GOLD = "#B8860B";
 const MUTED_NAVY = "#4A5568";
@@ -266,6 +267,7 @@ function QuoteCardsLayout({
   content: TestimonialsContent;
   accent: string;
 }) {
+  const theme = useDeckTheme();
   const hasBg = !!bgPhoto;
 
   return (
@@ -273,11 +275,12 @@ function QuoteCardsLayout({
       {hasBg && (
         <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />
       )}
-      {hasBg && <PhotoOverlay opacity={content.overlayOpacity ?? OVERLAY_PRESETS.medium} />}
-      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
+      {hasBg && (content.showOverlay !== false) && <PhotoOverlay opacity={content.overlayOpacity ?? OVERLAY_PRESETS.medium} />}
+      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: theme.color.surface }} />}
+      {theme.surface.grid && !hasBg && !hasAiBackground && <BlueprintUnderlay />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content, alignItems: "center" }}>
-        <div style={{ fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor), textShadow: makeOutlineShadow(content.headlineOutline), textAlign: "center", lineHeight: 1.2 }}>
+        <div style={{ fontFamily: content.headlineFont ?? theme.fonts.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? (hasBg ? "#FFFFFF" : branding.textColor), textShadow: makeOutlineShadow(content.headlineOutline), textAlign: "center", lineHeight: 1.2 }}>
           {headline}
         </div>
         <div style={{ display: "flex", justifyContent: "center" }}>
@@ -326,6 +329,7 @@ function SingleFeatureLayout({
   content: TestimonialsContent;
   accent: string;
 }) {
+  const theme = useDeckTheme();
   const t = testimonials[0] ?? DEFAULT_TESTIMONIALS[0];
   const hasBg = !!bgPhoto;
   const textColor = hasBg ? "#FFFFFF" : branding.textColor;
@@ -336,11 +340,12 @@ function SingleFeatureLayout({
       {hasBg && (
         <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${bgPhoto})`, backgroundSize: "cover", backgroundPosition: "center" }} />
       )}
-      {hasBg && <PhotoOverlay opacity={content.overlayOpacity ?? OVERLAY_PRESETS.medium} />}
-      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: LINEN }} />}
+      {hasBg && (content.showOverlay !== false) && <PhotoOverlay opacity={content.overlayOpacity ?? OVERLAY_PRESETS.medium} />}
+      {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: theme.color.surface }} />}
+      {theme.surface.grid && !hasBg && !hasAiBackground && <BlueprintUnderlay />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: SLIDE_PADDING.centered, textAlign: "center" }}>
-        <div style={{ fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? textColor, textShadow: makeOutlineShadow(content.headlineOutline), marginBottom: "0.3em" }}>
+        <div style={{ fontFamily: content.headlineFont ?? theme.fonts.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? textColor, textShadow: makeOutlineShadow(content.headlineOutline), marginBottom: "0.3em" }}>
           {headline}
         </div>
         <div style={{ display: "flex", justifyContent: "center" }}>
@@ -400,6 +405,7 @@ function PhotoOverlayLayout({
   content: TestimonialsContent;
   accent: string;
 }) {
+  const theme = useDeckTheme();
   const hasBg = !!bgPhoto;
 
   return (
@@ -410,11 +416,11 @@ function PhotoOverlayLayout({
 
       {/* Overlay — conditional by background type */}
       {hasBg && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.5), rgba(0,0,0,0.7))" }} />}
-      {!hasBg && hasAiBackground && <PhotoOverlay opacity={content.overlayOpacity ?? OVERLAY_PRESETS.light} />}
+      {!hasBg && hasAiBackground && (content.showOverlay !== false) && <PhotoOverlay opacity={content.overlayOpacity ?? OVERLAY_PRESETS.light} />}
       {!hasBg && !hasAiBackground && <div style={{ position: "absolute", inset: 0, background: NAVY }} />}
 
       <div style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: SLIDE_PADDING.content, alignItems: "center" }}>
-        <div style={{ fontFamily: content.headlineFont ?? SLIDE_FONTS.defaults.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? "#FFFFFF", textShadow: makeOutlineShadow(content.headlineOutline), textAlign: "center", lineHeight: 1.2 }}>
+        <div style={{ fontFamily: content.headlineFont ?? theme.fonts.headline, fontSize: `${(content.headlineSize ?? 2.0) * 0.6}em`, fontWeight: (content.headlineBold !== false) ? 600 : 400, fontStyle: content.headlineItalic ? "italic" : "normal", textDecoration: content.headlineUnderline ? "underline" : "none", color: content.headlineColor ?? "#FFFFFF", textShadow: makeOutlineShadow(content.headlineOutline), textAlign: "center", lineHeight: 1.2 }}>
           {headline}
         </div>
         <div style={{ display: "flex", justifyContent: "center" }}>

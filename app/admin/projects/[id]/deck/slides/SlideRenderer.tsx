@@ -1,7 +1,7 @@
 "use client";
 
 import type { ProposalSlide, DeckBranding } from "@/app/lib/deck/types";
-import { resolveDeckTheme } from "@/app/lib/deck/themes";
+import { resolveDeckTheme, type DeckTheme } from "@/app/lib/deck/themes";
 import { DeckThemeProvider } from "@/app/lib/deck/theme-context";
 import { CoverSlide } from "./CoverSlide";
 import { ObjectiveSlide } from "./ObjectiveSlide";
@@ -10,7 +10,6 @@ import { WhyUsSlide } from "./WhyUsSlide";
 import { ScopeOverviewSlide } from "./ScopeOverviewSlide";
 import { BeforeAfterSlide } from "./BeforeAfterSlide";
 import { ScopeBreakdownSlide } from "./ScopeBreakdownSlide";
-import { RiskBriefSlide } from "./RiskBriefSlide";
 import { OurProcessSlide } from "./OurProcessSlide";
 import { CoreValuesSlide } from "./CoreValuesSlide";
 import { TimelineSlide } from "./TimelineSlide";
@@ -18,10 +17,12 @@ import { CopeSlide } from "./CopeSlide";
 import { OverallInvestmentSlide } from "./OverallInvestmentSlide";
 import { NextStepsSlide } from "./NextStepsSlide";
 import { ClosingSlide } from "./ClosingSlide";
-import { InspirationSlide } from "./InspirationSlide";
 import { TestimonialsSlide } from "./TestimonialsSlide";
 import { DesignBuildSlide } from "./DesignBuildSlide";
 import { AdditionOverviewSlide } from "./AdditionOverviewSlide";
+import { DesignExperienceSlide } from "./DesignExperienceSlide";
+import { FloorPlanSlide } from "./FloorPlanSlide";
+import { CraftsmanshipSlide } from "./CraftsmanshipSlide";
 
 interface Props {
   slide: ProposalSlide;
@@ -29,10 +30,9 @@ interface Props {
   /** When true, a dark brand background is active — flip branding.textColor to light. */
   hasBrandDarkBackground?: boolean;
   /**
-   * When true, slide components render editor-only affordances (e.g. the
-   * inspiration slide's "No hero photo selected" / "Photo 1" / "Photo 2"
-   * placeholders). Passed `true` from the admin deck builder; omitted /
-   * false from client-facing render paths.
+   * When true, slide components render editor-only affordances (e.g.
+   * empty-photo placeholders). Passed `true` from the admin deck builder;
+   * omitted / false from client-facing render paths.
    */
   isEditing?: boolean;
 }
@@ -63,7 +63,24 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false,
     : branding;
 
   // Resolve the deck theme once and provide it via context to every slide.
-  const theme = resolveDeckTheme(effectiveBranding.deckTheme);
+  // When a dark brand background is active, derive a dark-aware variant so every
+  // theme-consuming slide flips its ink/muted/line to light and lets the dark
+  // background show through (surface → transparent) — the theme-layer equivalent
+  // of the branding.textColor override above, applied centrally for all slides.
+  const baseTheme = resolveDeckTheme(effectiveBranding.deckTheme);
+  const theme: DeckTheme = hasBrandDarkBackground
+    ? {
+        ...baseTheme,
+        color: {
+          ...baseTheme.color,
+          ink: DARK_BG_TEXT_COLOR,
+          muted: "rgba(248,244,238,0.72)",
+          surface: "transparent",
+          line: "rgba(255,255,255,0.18)",
+        },
+        surface: { ...baseTheme.surface, grid: false },
+      }
+    : baseTheme;
 
   const content = (() => {
     switch (slide.type) {
@@ -81,8 +98,6 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false,
       return <BeforeAfterSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "scope-breakdown":
       return <ScopeBreakdownSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "risk-brief":
-      return <RiskBriefSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "our-process":
       return <OurProcessSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "core-values":
@@ -97,14 +112,18 @@ export function SlideRenderer({ slide, branding, hasBrandDarkBackground = false,
       return <NextStepsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "closing":
       return <ClosingSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
-    case "inspiration":
-      return <InspirationSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} isEditing={isEditing} />;
     case "testimonials":
       return <TestimonialsSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "design-build":
       return <DesignBuildSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
     case "addition-overview":
       return <AdditionOverviewSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "design-experience":
+      return <DesignExperienceSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "floor-plan":
+      return <FloorPlanSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
+    case "craftsmanship":
+      return <CraftsmanshipSlide slide={slide} branding={effectiveBranding} hasAiBackground={hasAiBackground} />;
       default:
         return (
           <div className="w-full h-full flex items-center justify-center bg-white">
