@@ -25,6 +25,10 @@ export const metadata: Metadata = {
   title: "Deck Editor — HHI Builders",
 };
 
+// The deck editor's server actions include multi-step AI builds (Gemini
+// renders + Claude curation) that run 20-45s — past Vercel's 60s default.
+export const maxDuration = 300;
+
 interface PageProps {
   params: Promise<{ id: string }>;
 }
