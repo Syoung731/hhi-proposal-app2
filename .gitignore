@@ -68,3 +68,7 @@ scripts/migration-backfill.sql
 
 # Generated extension .zip artifacts (re-run scripts/package-zillow-extension.ts)
 dist/
+
+# Icon-lab scratch output (raw Gemini candidates; the chosen, processed icons
+# live in public/deck-icons/ which IS committed). Re-run scripts/icon-lab.ts.
+scripts/icon-lab-out/
