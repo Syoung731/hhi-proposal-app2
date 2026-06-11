@@ -45,6 +45,26 @@ section):
 
 ---
 
+## 2.5 Fine-tune with AI Edit
+
+At the top of the Objective inspector is the **✦ AI Edit** smart box — type a
+change in plain English and it figures out what to do. On this slide it can:
+
+- rewrite the **headline** or **opener**,
+- edit, add, or reorder the **zones**,
+- **redraw the center (hub) illustration** — e.g. *"Make the center a low coastal
+  cottage with a metal roof"* (be descriptive so it changes meaningfully),
+- **redraw the zone illustrations**, change **colors**, switch **layout**, or
+  generate a **background**.
+
+> **Tip:** "Replace center icon" alone just redraws the same house — tell it *what*
+> you want the center to be.
+
+> **Undo:** the **↶ Undo** button reverts the last AI change (click again for
+> earlier ones); history clears on reload.
+
+---
+
 ## 3. Choosing the layout
 
 **In the app:** Inspector → **Layout**.
@@ -52,8 +72,12 @@ section):
 - **Hub & Spoke** (default) — the home in the center with arrows radiating out to
   each zone (the 94 Coggins style). Distinctive and project-specific.
 - **Pillars** — the same zones as a clean multi-column grid.
+- **Photo + Pillars** — a hero photo on the left, with the opener + zones on the
+  right (the 60 Leamington style). When you pick this layout, a **Photo** control
+  appears in the inspector — click **Choose Photo** to pick from the project
+  library (or tell **AI Edit** to "use the kitchen after-photo").
 
-Both use the same zones, so you can switch freely.
+All three use the same zones, so you can switch freely.
 
 > **Heads-up:** Until zones are added, the slide just shows the headline + hub
 > (never a blank sheet). Run *Draft slide copy* or add zones in the inspector.

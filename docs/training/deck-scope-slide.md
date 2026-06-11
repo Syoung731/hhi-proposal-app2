@@ -74,8 +74,6 @@ The Scope slide has several **layouts** — the same content, arranged different
 | **Numbered + Photo** | Photo left, numbered orange chips on the right | Step-by-step / sequenced scope |
 | **Checklist + Photo** | Orange checkmarks on the left, photo on the right | "Here's everything included" feel |
 | **Gallery + Grid** | A row of up to 3 photos across the top, a 2×2 grid of titled items below | When you have several good photos |
-| **Split Panel** | Title on one side, photo(s) on the other (classic) | Simple, photo-forward |
-| **Image Row** | Title up top, a row of photos below | Photo-forward, wide |
 
 > **Tip:** Switching layouts never loses your text or photos — try a few and keep
 > the one that looks best.
@@ -89,12 +87,10 @@ Every layout can show your scope as either **bullet items** or a **paragraph**.
 **In the app:** Inspector → **Content** → choose **Bullet items** or **Paragraph**.
 
 - **Bullet items** — the structured list (each line has a short title + detail).
-  This is what the modern layouts use by default.
-- **Paragraph** — one flowing block of text (the classic style). The Split Panel
-  and Image Row layouts use this by default.
+  This is the default for every layout.
+- **Paragraph** — one flowing block of text. Any layout can switch to this.
 
-You can mix and match — e.g. keep the Split Panel look but feed it bullet items,
-or put a paragraph on the Blueprint layout.
+You can mix and match — e.g. keep the Blueprint look but feed it a paragraph.
 
 ---
 
@@ -115,15 +111,33 @@ Controls:
 - **↑ / ↓** — reorder an item.
 - **Remove** — delete an item.
 
-There are also two optional fields:
+There are also two optional fields that only appear on the layout that uses them
+(so the Inspector stays uncluttered):
 
-- **Intro** — a short framing sentence. On Editorial Split it appears in the
-  floating "Vision" card.
-- **Stat subtitle** — a bold orange headline number (e.g. *"300 square feet of
-  new composite deck"*). Mainly used on the Blueprint layout.
+- **"Vision" card text** — *Editorial Split only.* A short framing sentence shown
+  in the floating card over the photo.
+- **Stat subtitle** — *Blueprint only.* A bold orange headline number (e.g.
+  *"300 square feet of new composite deck"*).
 
 > **Tip:** Keep titles to 2–4 words and details to one line. Short reads as
 > confident and is easier for the client to scan.
+
+> **Heads-up:** The **Description** controls (the paragraph + its font/size/color)
+> only appear when **Content** is set to **Paragraph**. In Bullet-items mode they
+> stay hidden, since they're not used.
+
+### Editorial Split — panel colors
+
+The Editorial Split layout's dark left column is fully recolorable.
+
+**In the app (Inspector, Editorial Split only):**
+
+- **Panel Background** — the color of the left column (defaults to the theme's
+  panel color).
+- **Panel Text** — the color of the title + item text inside it (defaults to
+  white). Secondary lines are derived automatically so they stay legible.
+
+Both have a **Reset** to return to the theme default.
 
 ---
 
@@ -167,40 +181,54 @@ a minute.)
 > **Heads-up:** If you change an item's icon manually in the dropdown, that
 > overrides the AI-picked one for that item.
 
+### Blueprint markers & colors
+
+The **Blueprint + Icons** layout has extra controls (Inspector, Blueprint only):
+
+- **Item marker** — choose **Icons**, **Check marks**, or **Off** for the marker
+  before each scope line.
+- **Icon / Check mark color** — color the markers on their own.
+- **Item title color** — color the bold lead of each bullet on its own.
+
+These are **independent of the slide title color**, so you can, for example, keep
+a navy title, orange check marks, and charcoal item titles. The Title's own
+**Color** (under the Title section) now only affects the big title.
+
 ---
 
 ## 7. AI Edit (the main tool)
 
-The **✦ AI Edit** box (top of the Inspector) lets you redesign the slide by
-typing instructions — like editing a photo by describing the change.
+The **✦ AI Edit** box (top of the Inspector) lets you change the slide by typing
+instructions in plain English — like editing a photo by describing the change.
+It's a **smart box**: you don't pick categories, you just say what you want and
+the AI figures out whether you mean copy, colors, layout, icons, a new
+background, or swapping the photo.
 
-**In the app:** type your instruction → choose what it's allowed to change →
-**Apply AI Edit**.
-
-### The two checkboxes
-
-- **Change copy & items** — lets the AI rewrite the headline, intro, stat, and
-  the scope items (text **and** their icons).
-- **Change layout & style** — lets the AI switch the layout and toggle the
-  blueprint background.
-
-Check **one or both**, depending on what you want it to touch. Leaving a box
-unchecked protects that part from changes.
+**In the app:** type your instruction → **Apply AI Edit**.
 
 ### Example prompts
 
-| You want… | Check | Type something like |
-|-----------|-------|---------------------|
-| A full redesign to the blueprint look | both | "Make this blueprint style with icons and pull the square footage into an orange subtitle" |
-| Tighter wording only | Copy | "Tighten every line to under 12 words and pick better icons" |
-| Just a different layout | Layout | "Switch to the numbered layout" |
-| Better icons only | Copy | "Refresh the icons to better match each item" |
+| You want… | Type something like |
+|-----------|---------------------|
+| A full redesign to the blueprint look | "Make this blueprint style with icons and pull the square footage into an orange subtitle" |
+| Tighter wording | "Tighten every line to under 12 words" |
+| A different layout | "Switch to the numbered layout" |
+| Better icons | "Refresh the icons to better match each item" |
+| Recolor the panel | "Make the left panel navy with cream text" |
+| A new background | "Generate a soft coastal-twilight background" |
+| Swap the photo | "Use the kitchen after-photo" |
 
-After it runs, a small note tells you what it changed. If it says *"icons were
-already present,"* that's normal — it confirmed they're correct.
+After it runs, a small note tells you what it changed. Generating a background
+image takes ~30s; everything else is quick.
 
-> **Heads-up:** AI Edit applies to the **Scope slide** today. Other slide types
-> will get it over time.
+### Undo
+
+Next to "AI Edit" is an **↶ Undo** button. If the AI's change isn't what you
+wanted, click it to step back to how the slide was before — and click again to
+undo earlier AI edits in this session. (Undo history clears if you reload.)
+
+> **Heads-up:** The AI Edit box is on the **Cover, Objective, and Scope** slides
+> today; the other slide types get it as we build each one out.
 
 ---
 
@@ -219,9 +247,10 @@ versa.
 
 ## 9. Photos
 
-**In the app:** Inspector → **Photos** → **Choose Photos**.
+**In the app:** Inspector → **Photo(s)** → **Choose Photo(s)**.
 
-- Each layout has a photo limit (the Inspector tells you how many).
+- Each layout has a photo limit (the Inspector tells you how many). Single-photo
+  layouts label the section **Photo**; multi-photo layouts label it **Photos**.
 - Click a chosen photo's **Position & Zoom** to pan/zoom it inside its frame.
 - *Draft slide copy* and AI Edit will auto-pull a project hero photo when one is
   available, but you can always swap it here.
