@@ -80,6 +80,7 @@ import { SLIDE_FONTS } from "@/app/lib/slide-constants";
 import { getBrandBackgroundStyles } from "@/app/lib/brand-background-utils";
 import { fetchProjectScopeOverviewAction, generateAdditionBulletsAction, fetchFloorPlanRoomDataAction, saveFloorPlanImageAction, composeZoneDescriptionsAction, cleanFloorPlanImageAction, autoCropFloorPlanAction, generateCraftsmanshipPhotoAction, generateCraftsmanshipCollageAction } from "./actions";
 import { HHI_DEFAULT_CRAFTSMANSHIP_ITEMS, CRAFTSMANSHIP_DEFAULTS } from "@/app/lib/craftsmanship-defaults";
+import type { LinkedSpace } from "@/app/lib/rendr/linkedSpaces";
 import { SCOPE_ICON_OPTIONS } from "@/app/lib/deck/scope-icon-keys";
 import { objectiveDefaultZonePos } from "./slides/ObjectiveSlide";
 import { COPE_BUILTIN_ICONS, renderCopeIcon } from "./slides/CopeSlide";
@@ -7291,15 +7292,19 @@ function FloorPlanInspector({
   const [cleaning, setCleaning] = useState(false);
   const [autoCropping, setAutoCropping] = useState(false);
   const [importPage, setImportPage] = useState(1);
+  // Multi-space Rendr: which linked space (floor) to import the plan from.
+  const [linkedSpaces, setLinkedSpaces] = useState<LinkedSpace[]>([]);
+  const [importSpaceId, setImportSpaceId] = useState<number | null>(null);
   // Rooms from the Sections area — powers the per-zone Room dropdown so the
   // label/SF/description fill from the same data that drives pricing.
   const [roomOptions, setRoomOptions] = useState<{ id: string; name: string; sqft: number | null; description: string | null }[]>([]);
   useEffect(() => {
     let alive = true;
     fetchFloorPlanRoomDataAction(projectId)
-      .then(async ({ rooms }) => {
+      .then(async ({ rooms, spaces }) => {
         if (!alive) return;
         setRoomOptions(rooms);
+        setLinkedSpaces(spaces);
         // Swap in the AI-tightened blurbs so dropdown picks always fill a
         // description that FITS the callout card.
         let blurbs = floorPlanBlurbCache.get(projectId);
@@ -7375,12 +7380,17 @@ function FloorPlanInspector({
     setImporting(true);
     setImportError(null);
     try {
-      const { rendrSpaceId } = await fetchFloorPlanRoomDataAction(projectId);
-      if (rendrSpaceId == null) {
+      const { spaces } = await fetchFloorPlanRoomDataAction(projectId);
+      setLinkedSpaces(spaces);
+      const spaceId =
+        importSpaceId != null && spaces.some((s) => s.spaceId === importSpaceId)
+          ? importSpaceId
+          : spaces[0]?.spaceId;
+      if (spaceId == null) {
         setImportError("This project isn't linked to a Rendr space yet — link it on the Rendr tab first.");
         return;
       }
-      const res = await fetch(`/api/rendr/spaces/${rendrSpaceId}/floorplan`);
+      const res = await fetch(`/api/rendr/spaces/${spaceId}/floorplan`);
       if (!res.ok) {
         setImportError(`Rendr floor plan request failed (${res.status}).`);
         return;
@@ -7423,10 +7433,11 @@ function FloorPlanInspector({
     try {
       // Rooms+SF and the AI-tightened blurbs in parallel; blurbs OVERWRITE
       // existing descriptions so they always fit the callout card.
-      const [{ rooms }, blurbRes] = await Promise.all([
+      const [{ rooms, spaces }, blurbRes] = await Promise.all([
         fetchFloorPlanRoomDataAction(projectId),
         composeZoneDescriptionsAction(projectId),
       ]);
+      setLinkedSpaces(spaces);
       const blurbs: Record<string, string> = "blurbs" in blurbRes ? blurbRes.blurbs : {};
       floorPlanBlurbCache.set(projectId, blurbs);
       setRoomOptions(rooms.map((r) => ({ ...r, description: blurbs[r.id] ?? r.description })));
@@ -7516,6 +7527,18 @@ function FloorPlanInspector({
           >
             {importing ? "Importing from Rendr…" : "Import plan from Rendr"}
           </button>
+          {linkedSpaces.length > 1 && (
+            <select
+              value={importSpaceId ?? linkedSpaces[0].spaceId}
+              onChange={(e) => setImportSpaceId(parseInt(e.target.value, 10))}
+              title="Which linked Rendr space (floor) to import"
+              style={{ fontSize: 11, padding: "4px 4px", border: "1px solid #D1D5DB", borderRadius: 4, background: "#fff", color: "#374151", maxWidth: 100 }}
+            >
+              {linkedSpaces.map((s) => (
+                <option key={s.spaceId} value={s.spaceId}>{s.label}</option>
+              ))}
+            </select>
+          )}
           <select
             value={importPage}
             onChange={(e) => setImportPage(parseInt(e.target.value, 10) || 1)}

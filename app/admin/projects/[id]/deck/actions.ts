@@ -7,6 +7,7 @@ import { adaptBrandingForDeck } from "@/app/lib/deck/branding-adapter";
 import { getOrCreateCompanySettings } from "@/app/admin/settings/actions";
 import type { ProposalSlide, WhyUsPillarItem, WhyUsContent, AdditionBullet } from "@/app/lib/deck/types";
 import { isDeckThemeKey, type DeckThemeKey } from "@/app/lib/deck/themes";
+import { parseLinkedSpaces, type LinkedSpace } from "@/app/lib/rendr/linkedSpaces";
 import { callClaude } from "@/app/lib/ai/model";
 import { aiEditSlide, type AiEditResult } from "@/app/lib/deck/ai-edit";
 import { resolveDuotoneIconImages, scopeIconSlug } from "@/app/lib/deck/scope-icon-resolver";
@@ -48,7 +49,7 @@ function zoneDescriptionFor(room: { scopeOverviewShort: string | null; scopeNarr
 
 export async function fetchFloorPlanRoomDataAction(
   projectId: string
-): Promise<{ rooms: { id: string; name: string; sqft: number | null; description: string | null }[]; rendrSpaceId: number | null }> {
+): Promise<{ rooms: { id: string; name: string; sqft: number | null; description: string | null }[]; spaces: LinkedSpace[] }> {
   await requireAdmin();
   const [rooms, project] = await Promise.all([
     prisma.room.findMany({
@@ -56,7 +57,7 @@ export async function fetchFloorPlanRoomDataAction(
       orderBy: { sortOrder: "asc" },
       select: { id: true, name: true, lengthFt: true, widthFt: true, scopeOverviewShort: true, scopeNarrative: true },
     }),
-    prisma.project.findUnique({ where: { id: projectId }, select: { rendrSpaceId: true } }),
+    prisma.project.findUnique({ where: { id: projectId }, select: { rendrSpaces: true } }),
   ]);
   return {
     rooms: rooms.map((r) => ({
@@ -65,7 +66,7 @@ export async function fetchFloorPlanRoomDataAction(
       sqft: r.lengthFt != null && r.widthFt != null ? Math.round(r.lengthFt * r.widthFt) : null,
       description: zoneDescriptionFor(r),
     })),
-    rendrSpaceId: project?.rendrSpaceId ?? null,
+    spaces: parseLinkedSpaces(project?.rendrSpaces),
   };
 }
 
