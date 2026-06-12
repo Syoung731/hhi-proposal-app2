@@ -1,10 +1,29 @@
 import "server-only";
 import { prisma } from "@/app/lib/prisma";
 import { normalizeIconKey } from "@/app/lib/brand-icons";
+import { mapWithConcurrency, sleep } from "@/app/lib/async-pool";
 import {
   generateBrandIconPngAction,
   createBrandIcon,
 } from "@/app/admin/settings/actions";
+
+/** One icon generation with a single retry — cold-cache bursts hit rate limits. */
+async function genIconWithRetry(
+  params: Parameters<typeof generateBrandIconPngAction>[0],
+): Promise<{ imageUrl: string; imageKey: string } | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await sleep(1500);
+    try {
+      const gen = await generateBrandIconPngAction(params);
+      if (!gen.error && gen.imageUrl && gen.imageKey) {
+        return { imageUrl: gen.imageUrl, imageKey: gen.imageKey };
+      }
+    } catch {
+      /* retry once, then give up */
+    }
+  }
+  return null;
+}
 
 /**
  * Self-growing scope-icon resolver.
@@ -73,43 +92,42 @@ export async function resolveScopeIconImages(
 
   if (!generateMissing || missing.length === 0) return result;
 
-  // 2) Generate + persist the misses in parallel (one-time cost per concept).
-  await Promise.all(
-    missing.map(async (slug) => {
-      const label = labelBySlug.get(slug) ?? slug.replace(/-/g, " ");
-      try {
-        const gen = await generateBrandIconPngAction({
-          name: label,
-          visual: `Simple monochrome line-art icon of a ${label}, single dark color, even stroke weight, minimal, centered`,
-          description: `Scope icon for a remodeling proposal representing "${label}".`,
-          monochrome: true,
-        });
-        if (gen.error || !gen.imageUrl || !gen.imageKey) return;
+  // 2) Generate + persist the misses (one-time cost per concept). Throttled —
+  //    an unbounded burst on a cold cache trips Gemini rate limits.
+  await mapWithConcurrency(missing, 2, async (slug) => {
+    const label = labelBySlug.get(slug) ?? slug.replace(/-/g, " ");
+    try {
+      const gen = await genIconWithRetry({
+        name: label,
+        visual: `Simple monochrome line-art icon of a ${label}, single dark color, even stroke weight, minimal, centered`,
+        description: `Scope icon for a remodeling proposal representing "${label}".`,
+        monochrome: true,
+      });
+      if (!gen) return;
 
-        const created = await createBrandIcon({
-          slug,
-          name: label,
-          imageUrl: gen.imageUrl,
-          imageKey: gen.imageKey,
-          tags: Array.from(new Set([slug, "scope", ...label.toLowerCase().split(/\s+/)])).filter(Boolean),
-          category: SCOPE_ICON_CATEGORY,
-        });
+      const created = await createBrandIcon({
+        slug,
+        name: label,
+        imageUrl: gen.imageUrl,
+        imageKey: gen.imageKey,
+        tags: Array.from(new Set([slug, "scope", ...label.toLowerCase().split(/\s+/)])).filter(Boolean),
+        category: SCOPE_ICON_CATEGORY,
+      });
 
-        if (created.error) {
-          // Likely a slug race (another worker created it) — re-fetch and reuse.
-          const row = await prisma.brandIcon.findUnique({
-            where: { slug },
-            select: { imageUrl: true },
-          });
-          if (row?.imageUrl) result.set(slug, row.imageUrl);
-          return;
-        }
-        result.set(slug, gen.imageUrl);
-      } catch {
-        // Swallow — caller falls back to the built-in vector icon.
+      if (created.error) {
+        // Likely a slug race (another worker created it) — re-fetch and reuse.
+        const row = await prisma.brandIcon.findUnique({
+          where: { slug },
+          select: { imageUrl: true },
+        });
+        if (row?.imageUrl) result.set(slug, row.imageUrl);
+        return;
       }
-    }),
-  );
+      result.set(slug, gen.imageUrl);
+    } catch {
+      // Swallow — caller falls back to the built-in vector icon.
+    }
+  });
 
   return result;
 }
@@ -168,39 +186,37 @@ export async function resolveDuotoneIconImages(
   const missing = Array.from(bareBySlug.entries()).filter(([, bare]) => !result.has(bare));
   if (!generateMissing || missing.length === 0) return result;
 
-  await Promise.all(
-    missing.map(async ([duoSlug, bare]) => {
-      const label = labelBySlug.get(bare) ?? bare.replace(/-/g, " ");
-      try {
-        const gen = await generateBrandIconPngAction({
-          name: label,
-          visual: `a few clear objects or tools that represent "${label}" in a residential design-build / remodeling context`,
-          description: `On-brand isometric process icon for a luxury design-build remodeling proposal representing "${label}".`,
-          isometric: true,
-          isometricDark: dark,
-        });
-        if (gen.error || !gen.imageUrl || !gen.imageKey) return;
+  await mapWithConcurrency(missing, 2, async ([duoSlug, bare]) => {
+    const label = labelBySlug.get(bare) ?? bare.replace(/-/g, " ");
+    try {
+      const gen = await genIconWithRetry({
+        name: label,
+        visual: `a few clear objects or tools that represent "${label}" in a residential design-build / remodeling context`,
+        description: `On-brand isometric process icon for a luxury design-build remodeling proposal representing "${label}".`,
+        isometric: true,
+        isometricDark: dark,
+      });
+      if (!gen) return;
 
-        const created = await createBrandIcon({
-          slug: duoSlug,
-          name: label,
-          imageUrl: gen.imageUrl,
-          imageKey: gen.imageKey,
-          tags: Array.from(new Set([duoSlug, dark ? "duotone-dark" : "duotone", ...label.toLowerCase().split(/\s+/)])).filter(Boolean),
-          category: dark ? "duotone-dark" : DUOTONE_CATEGORY,
-        });
+      const created = await createBrandIcon({
+        slug: duoSlug,
+        name: label,
+        imageUrl: gen.imageUrl,
+        imageKey: gen.imageKey,
+        tags: Array.from(new Set([duoSlug, dark ? "duotone-dark" : "duotone", ...label.toLowerCase().split(/\s+/)])).filter(Boolean),
+        category: dark ? "duotone-dark" : DUOTONE_CATEGORY,
+      });
 
-        if (created.error) {
-          const row = await prisma.brandIcon.findUnique({ where: { slug: duoSlug }, select: { imageUrl: true } });
-          if (row?.imageUrl) result.set(bare, row.imageUrl);
-          return;
-        }
-        result.set(bare, gen.imageUrl);
-      } catch {
-        /* fall back to the built-in vector icon */
+      if (created.error) {
+        const row = await prisma.brandIcon.findUnique({ where: { slug: duoSlug }, select: { imageUrl: true } });
+        if (row?.imageUrl) result.set(bare, row.imageUrl);
+        return;
       }
-    }),
-  );
+      result.set(bare, gen.imageUrl);
+    } catch {
+      /* fall back to the built-in vector icon */
+    }
+  });
 
   return result;
 }

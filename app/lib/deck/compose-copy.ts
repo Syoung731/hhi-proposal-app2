@@ -9,6 +9,7 @@ import { SCOPE_ICON_KEY_LIST, isScopeIconKey } from "@/app/lib/deck/scope-icon-k
 import type { ScopeItem } from "@/app/lib/deck/types";
 import { resolveScopeIconImages, scopeIconSlug } from "@/app/lib/deck/scope-icon-resolver";
 import { generateBrandIconPngAction } from "@/app/admin/settings/actions";
+import { mapWithConcurrency, sleep } from "@/app/lib/async-pool";
 
 /**
  * Generates one bespoke monochrome line-art SCENE illustration (project-specific)
@@ -18,18 +19,25 @@ import { generateBrandIconPngAction } from "@/app/admin/settings/actions";
 async function genObjectiveIllustration(scene: string, label: string): Promise<string | null> {
   const visual = (scene || label).trim();
   if (!visual) return null;
-  try {
-    const gen = await generateBrandIconPngAction({
-      name: label,
-      visual: `A detailed architectural line-art illustration of ${visual}. Confident, even-weight ink strokes; clean and uncluttered; depicts the full scene filling the frame`,
-      description: `Objective slide illustration for a luxury remodeling proposal: ${visual}`,
-      monochrome: true,
-      mode: "illustration",
-    });
-    return gen.error || !gen.imageUrl ? null : gen.imageUrl;
-  } catch {
-    return null;
+  const params = {
+    name: label,
+    visual: `A detailed architectural line-art illustration of ${visual}. Confident, even-weight ink strokes; clean and uncluttered; depicts the full scene filling the frame`,
+    description: `Objective slide illustration for a luxury remodeling proposal: ${visual}`,
+    monochrome: true,
+    mode: "illustration",
+  } as const;
+  // One retry — visuals runs draw several images back-to-back and a single
+  // rate-limit blip used to silently cost the slide its illustration.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await sleep(1500);
+    try {
+      const gen = await generateBrandIconPngAction(params);
+      if (!gen.error && gen.imageUrl) return gen.imageUrl;
+    } catch {
+      /* retry once, then fall back */
+    }
   }
+  return null;
 }
 
 /**
@@ -565,15 +573,15 @@ export async function generateDeckVisuals(projectId: string): Promise<GenerateVi
         if (pillars.length === 0) continue;
         const hubScene = typeof content.hubScene === "string" ? content.hubScene : "";
         const hasHub = typeof content.hubImageUrl === "string" && !!content.hubImageUrl;
-        const [hubImg, ...zoneImgs] = await Promise.all([
-          !hasHub && hubScene ? genObjectiveIllustration(hubScene, "the home") : Promise.resolve(null),
-          ...pillars.map((p) => {
-            const scene = typeof p.scene === "string" ? p.scene : "";
-            const has = typeof p.imageUrl === "string" && !!p.imageUrl;
-            const title = typeof p.title === "string" ? p.title : "zone";
-            return !has && scene ? genObjectiveIllustration(scene, title) : Promise.resolve(null);
-          }),
-        ]);
+        // Hub first, then zones throttled — the old all-at-once burst tripped
+        // rate limits on a cold cache (hub drew, every zone silently failed).
+        const hubImg = !hasHub && hubScene ? await genObjectiveIllustration(hubScene, "the home") : null;
+        const zoneImgs = await mapWithConcurrency(pillars, 2, (p) => {
+          const scene = typeof p.scene === "string" ? p.scene : "";
+          const has = typeof p.imageUrl === "string" && !!p.imageUrl;
+          const title = typeof p.title === "string" ? p.title : "zone";
+          return !has && scene ? genObjectiveIllustration(scene, title) : Promise.resolve(null);
+        });
         const newPillars = pillars.map((p, i) => (zoneImgs[i] ? { ...p, imageUrl: zoneImgs[i] } : p));
         const got = (hubImg ? 1 : 0) + zoneImgs.filter(Boolean).length;
         if (got > 0) {

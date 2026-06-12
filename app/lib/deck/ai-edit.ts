@@ -7,6 +7,7 @@ import { uploadBuffer } from "@/app/lib/s3";
 import { resolveScopeIconImages, resolveDuotoneIconImages, scopeIconSlug } from "@/app/lib/deck/scope-icon-resolver";
 import { SCOPE_ICON_KEY_LIST, isScopeIconKey } from "@/app/lib/deck/scope-icon-keys";
 import { generateBrandIconPngAction } from "@/app/admin/settings/actions";
+import { mapWithConcurrency, sleep } from "@/app/lib/async-pool";
 import {
   SCOPE_OVERVIEW_LAYOUTS,
   COVER_LAYOUTS,
@@ -538,18 +539,25 @@ async function genIllustration(scene: string, label: string, style: Illustration
     style === "isometric"
       ? `A very SIMPLE, minimalist isometric line illustration of ${visual}, drawn with only a few clean thin white strokes. Iconographic and highly uncluttered with generous empty space; a single centered subject. No people, no text, no color, no shading, no fill, no ground texture, no background. Must be instantly legible at small size.`
       : `A detailed architectural line-art illustration of ${visual}. Confident, even-weight ink strokes; clean and uncluttered; depicts the full scene filling the frame`;
-  try {
-    const gen = await generateBrandIconPngAction({
-      name: label,
-      visual: prompt,
-      description: `Line-art illustration for a luxury remodeling proposal: ${visual}`,
-      monochrome: true,
-      mode: "illustration",
-    });
-    return gen.error || !gen.imageUrl ? null : gen.imageUrl;
-  } catch {
-    return null;
+  const params = {
+    name: label,
+    visual: prompt,
+    description: `Line-art illustration for a luxury remodeling proposal: ${visual}`,
+    monochrome: true,
+    mode: "illustration",
+  } as const;
+  // One retry — multi-image edits draw several illustrations back-to-back and
+  // a single rate-limit blip used to silently drop the image.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await sleep(1500);
+    try {
+      const gen = await generateBrandIconPngAction(params);
+      if (!gen.error && gen.imageUrl) return gen.imageUrl;
+    } catch {
+      /* retry once, then fall back */
+    }
   }
+  return null;
 }
 
 // ─── Result type ──────────────────────────────────────────────────────────────
@@ -681,6 +689,27 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
       ? `\n\nAvailable project photos (id — label):\n${photoList.map((p) => `${p.id} — ${p.label}`).join("\n")}`
       : "";
 
+  // The JSON plan shape must only advertise the regenerate keys this slide type
+  // actually supports — a hard-coded regenerateIcons here made the model express
+  // every icon request through it, and unsupported slides (e.g. Objective, whose
+  // zone art is illustrations) silently dropped the change as "not applicable".
+  const planShape = [
+    '"headline":string|null',
+    '"subheadline":string|null',
+    '"content":{<field>:<value>}|null',
+    '"items":[...]|null',
+    '"layout":string|null',
+    '"background":string|null',
+    '"photoId":string|null',
+    ...(d.supportsIcons && d.items?.supportsIconPng ? ['"regenerateIcons":boolean'] : []),
+    ...(d.illustrations
+      ? ['"regenerateIllustrations":"hub"|"zones"|"both"|"none"']
+      : d.items?.illustrationField
+        ? ['"regenerateIllustrations":boolean']
+        : []),
+    '"note":string',
+  ].join(",");
+
   // ── Plan: one Claude call infers intent + returns a structured plan. ──────────
   const response = await callClaude({
     max_tokens: 1500,
@@ -694,7 +723,7 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
       "Only return the \"items\" array (or text in \"content\") when the user clearly asked to edit the words. " +
       "When you DO rewrite, keep titles to 2-4 words and detail/body lines to one tight sentence. " +
       "Return ONLY minified JSON of this shape: " +
-      '{"headline":string|null,"subheadline":string|null,"content":{<field>:<value>}|null,"items":[...]|null,"layout":string|null,"background":string|null,"photoId":string|null,"regenerateIcons":boolean,"note":string}. ' +
+      `{${planShape}}. ` +
       "The note is <=14 words describing what you changed. No markdown, no code fences, JSON only.\n\n" +
       `EDITABLE SURFACE for this "${slide.type}" slide:\n${describeSurface(d)}`,
     messages: [
@@ -738,6 +767,18 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
         for (const f of d.copyFields) delete pc[f.key];
       }
     }
+  }
+
+  // Users say "icons" for the zone art on illustration-driven slides (Objective).
+  // When per-item PNG icons aren't supported but bespoke illustrations are,
+  // honor a regenerateIcons request as a zones redraw instead of dropping it.
+  if (
+    d.illustrations &&
+    !d.items?.supportsIconPng &&
+    plan.regenerateIcons === true &&
+    typeof plan.regenerateIllustrations !== "string"
+  ) {
+    plan.regenerateIllustrations = "zones";
   }
 
   const contentPatch: Record<string, unknown> = {};
@@ -840,6 +881,10 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
     }
   }
 
+  // When an illustration redraw was requested but every image failed to draw,
+  // say so instead of falling through to "no applicable change".
+  let illustrationFailed = false;
+
   // Per-item line-art illustrations — draw a bespoke illustration per item into
   // the configured field (e.g. scope-breakdown rooms → blueprint layout).
   if (
@@ -853,19 +898,18 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
     const illF = d.items.illustrationField;
     const style = d.items.illustrationStyle ?? "scene";
     const items = (contentPatch[d.items.key] ?? content[d.items.key]) as Record<string, unknown>[];
-    const drawn = await Promise.all(
-      items.map(async (it) => {
-        const name = String(it[tf] ?? "");
-        if (!name) return it;
-        // Isometric icons read best from a SHORT subject; the full description
-        // makes them cluttered. Scene-style keeps a little context.
-        const desc = String(it.description ?? it.body ?? "");
-        const subject = style === "isometric" ? name : (desc ? `${name}: ${desc}` : name);
-        const url = await genIllustration(subject, name, style);
-        return url ? { ...it, [illF]: url } : it;
-      }),
-    );
-    contentPatch[d.items.key] = drawn;
+    const drawn = await mapWithConcurrency(items, 2, async (it) => {
+      const name = String(it[tf] ?? "");
+      if (!name) return it;
+      // Isometric icons read best from a SHORT subject; the full description
+      // makes them cluttered. Scene-style keeps a little context.
+      const desc = String(it.description ?? it.body ?? "");
+      const subject = style === "isometric" ? name : (desc ? `${name}: ${desc}` : name);
+      const url = await genIllustration(subject, name, style);
+      return url ? { ...it, [illF]: url } : it;
+    });
+    if (drawn.some((it, i) => it !== items[i])) contentPatch[d.items.key] = drawn;
+    else if (items.some((it) => String(it[tf] ?? "").trim())) illustrationFailed = true;
   }
 
   // Illustrations — (re)draw the bespoke hub + zone line-art (Objective).
@@ -879,21 +923,21 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
       const scene = String(contentPatch[ill.hubSceneKey] ?? content[ill.hubSceneKey] ?? "").trim() || "the existing home, architectural exterior";
       const url = await genIllustration(scene, "the home");
       if (url) contentPatch[ill.hubImageKey] = url;
+      else illustrationFailed = true;
     }
 
     if (doZones && d.items) {
       const items = (contentPatch[d.items.key] ?? content[d.items.key]) as Record<string, unknown>[] | undefined;
       if (Array.isArray(items)) {
-        const drawn = await Promise.all(
-          items.map(async (it) => {
-            const scene = String(it[ill.itemSceneField] ?? "").trim();
-            const title = String(it.title ?? "zone");
-            if (!scene) return it;
-            const url = await genIllustration(scene, title);
-            return url ? { ...it, [ill.itemImageField]: url } : it;
-          }),
-        );
-        contentPatch[d.items.key] = drawn;
+        const drawn = await mapWithConcurrency(items, 2, async (it) => {
+          const scene = String(it[ill.itemSceneField] ?? "").trim();
+          const title = String(it.title ?? "zone");
+          if (!scene) return it;
+          const url = await genIllustration(scene, title);
+          return url ? { ...it, [ill.itemImageField]: url } : it;
+        });
+        if (drawn.some((it, i) => it !== items[i])) contentPatch[d.items.key] = drawn;
+        else if (items.some((it) => String(it[ill.itemSceneField] ?? "").trim())) illustrationFailed = true;
       }
     }
   }
@@ -921,7 +965,12 @@ export async function aiEditSlide(params: { slideId: string; prompt: string }): 
   }
 
   if (headline === null && subheadline === null && layoutKey === null && Object.keys(contentPatch).length === 0) {
-    return { ok: false, error: "The AI didn't return an applicable change. Try being more specific." };
+    return {
+      ok: false,
+      error: illustrationFailed
+        ? "Image generation failed — please try again in a moment."
+        : "The AI didn't return an applicable change. Try being more specific.",
+    };
   }
 
   return {
