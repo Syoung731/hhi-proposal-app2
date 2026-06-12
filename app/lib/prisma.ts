@@ -113,6 +113,8 @@ function getPrisma(): PrismaClient {
     cached.jobItem !== undefined &&
     "photoUploadToken" in cached &&
     cached.photoUploadToken !== undefined &&
+    "discoveryAnswer" in cached &&
+    cached.discoveryAnswer !== undefined &&
     hasAllExpectedFields(cached, REQUIRED_RECENT_FIELDS)
   ) {
     return cached;
