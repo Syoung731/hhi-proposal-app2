@@ -4,7 +4,48 @@
 
 ## ⏱️ SESSION HANDOFF / CURRENT STATE (read this first after a compaction)
 
-### ▶▶▶ LATEST SESSION (2026‑06‑11 — most authoritative; read first)
+### ▶▶▶ LATEST SESSION (2026‑06‑12 — SHIPPED TO PRODUCTION; most authoritative, read first)
+
+**EVERYTHING IS COMMITTED, PUSHED, AND LIVE on app.hhi-builders.com.** Branch `presentation-studio` = `main` = production. Local `main` is stale (harmless). `tsc` clean. Test project `cmoj1xg4t00t9747kq2py2iug`. Steve reviews on localhost (NEVER spin up preview servers). Working loop unchanged: refs → build → he screenshots → iterate.
+
+#### DONE since the 06‑11 block (all approved + deployed):
+
+**1. Floor Plan Map — full Rendr pipeline.**
+- **Import plan from Rendr**: inspector button fetches the linked space's PDF via existing authed proxy `/api/rendr/spaces/{id}/floorplan`, rasterizes IN BROWSER with `pdfjs-dist` v6 (worker via `new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url)` — works on prod), saves PNG via `saveFloorPlanImageAction` → R2 `deck/floor-plans/`. **PDF page picker (p.1‑4)** + **floor picker** when multiple Rendr spaces linked.
+- **✦ Auto‑crop to plan (AI)**: `autoCropFloorPlanAction` — Gemini VISION (gemini‑2.5‑flash) returns the drawing-area bbox as %, **sharp extracts exact pixels** (no generative redraw). Refuses implausible boxes.
+- **✦ Remove dimensions & labels (AI)**: `cleanFloorPlanImageAction` — gemini‑2.5‑flash‑image edit pass (erase chips/logo/address/legend, keep linework). Generative → user inspects; re-import = undo (new R2 object each time).
+- **Manual Trim** sliders (Top/Bottom/Left/Right) — crop window stored as planCropX/Y/W/H; PlanArt renders with UNIFORM scale `s=min(100/cw,100/ch)` + centering (first version distorted/panned — fixed).
+- **Zone Room dropdown**: per-zone select of Sections rooms; pick → fills label/SF (lengthFt×widthFt)/description. `fetchFloorPlanRoomDataAction` returns rooms+descriptions+`spaces` (LinkedSpace[]).
+- **AI zone blurbs**: `composeZoneDescriptionsAction` — ONE Claude call → ≤110‑char one-sentence blurbs per room; loaded on inspector mount (module-level `floorPlanBlurbCache` per project), merged into dropdown data; "Pull rooms & SF" refreshes + OVERWRITES zone descriptions. Deterministic fallback = first sentence ≤120 chars word-boundary. Cards line-clamp 3.
+
+**2. Craftsmanship — AI builds from PROJECT MATERIALS.**
+- Shared `gatherProjectMaterials()` in deck/actions.ts: latest AIEstimate per non‑COPE room → `/material/i` line items priciest-first + style preset names/prompt snippet.
+- **Annotated Photo**: `generateCraftsmanshipPhotoAction(projectId, style)` — Claude curates 4‑6 materials + writes imagePrompt + matching callout items; Gemini renders ONE hero. **Build Style select** (persisted `content.heroPhotoStyle`): `vignette` (photoreal close-up) / `technical` (exploded isometric, navy #1A2332 + orange linework — Anatomy-of-a-Remodel look) / `collage` (3‑4 overlapping panels over ghosted plan). NO text baked in — live callout cards do labels. Items replaced on build; Reset → HHI defaults.
+- **Standards Grid**: `generateCraftsmanshipCollageAction` — Claude picks 6 materials w/ column assignment (a=Structural/b=Finish) + per-material photoPrompt; Gemini renders 6 SQUARE macros IN PARALLEL → collagePhotos + items together (~30‑45s). Grid polish: serif column titles 0.95em + orange rule, items 0.72/0.6em, no-photos width 78%.
+
+**3. PRODUCTION DEPLOY (the cutover) — and the Vercel facts learned:**
+- 7 commits shipped (5-scope batch + maxDuration fix + cutover empty-commit). `export const maxDuration = 300` added to deck/page.tsx (AI builds 20‑45s vs 60s default).
+- **Vercel Production Branch WAS `proposal-v2`** → Steve changed to `main` via dashboard Settings → **Environments → Production → Branch Tracking**. Deploy trigger = push to main (`git push origin presentation-studio:main` fast-forward trick — avoids local checkout entirely).
+- **Preview env is EMPTY of app secrets** (only 3 Google NEXT_PUBLIC vars) → every branch-push Preview fails in 10s at `prisma generate` (prisma.config.ts hard-throws on missing DIRECT_URL). PRE-EXISTING for 6+ days; NOT a code problem. Fix later: add envs to Preview (previews would share live DB) or harden prisma.config.ts.
+- **`NEXT_PUBLIC_STUDIO_ENABLED=true` added to Production env** (was the designed Phase 5 cutover) → Build Presentation tab + /studio live. Flag now permanent-on; REMOVE the gate from ProjectTabNav.tsx + studio/page.tsx as cleanup.
+- Vercel CLI is authed (`syoung731`) — use `npx vercel ls / inspect <url> --logs / inspect --wait` to watch deploys.
+- **Windows git lessons**: STOP `npm run dev` before any checkout (file locks caused y/n loops + a half-checkout that deleted 28 files — recovered via `git restore .`); `core.editor` now set to notepad.
+
+**4. Multi-space Rendr RESTORED (was never lost — never merged).**
+- Feature `5e3d01b feat(rendr): support linking multiple spaces (floors) per project` was built Jun 5 in a PARALLEL session on worktree branch `claude/agitated-cartwright-6e9dd7` and never merged; production never had it. Merged cleanly (merge commit fbd145b + ugly-but-harmless message).
+- Schema: `Project.rendrSpaceId Int?` → `rendrSpaces Json?` ([{spaceId,label}]); helpers in `app/lib/rendr/linkedSpaces.ts` (parseLinkedSpaces etc.). **Migration `20260605120000_rendr_multi_space` was AMENDED before first apply to CONVERT existing links** (`jsonb_build_array(jsonb_build_object('spaceId', rendrSpaceId, 'label', 'Main'))`) instead of dropping them. Applied to live Neon (123 migrations, status clean).
+- Floor-plan import adapted: action returns `spaces`, inspector floor picker, `importSpaceId` state.
+
+#### ▶ NEXT UP (Steve directs; do NOT start unbidden):
+1. **Master training program (Steve's current focus)**: Steve is recording a Loom walkthrough (create project end-to-end); he'll provide the transcript. Combine transcript + ALL `docs/training/*.md` modules into a complete training (format TBD — possibly ordered curriculum doc; pptx/docx skills available if he wants a deliverable file).
+2. **Training Mode overlay — RESEARCH DONE 2026-06-12; BUILD DECISION PARKED until after the Loom session** (Steve: "Decide after Loom session" — the master-training outline will drive which tours get built, then he picks the engine). Findings (full report delivered in chat 06-12): **recommendation = custom engine** (~600 lines, zero deps; 4-div spotlight w/ pointer-events hole, brand tooltip cards; KEY: advance-on-real-click is OUR code in EVERY library, and custom enables state-gated steps — e.g. don't advance until a room actually exists). Alternatives: **NextStep (nextstepjs v2.2, MIT, active)** = fastest v1 (<1 day; built-in App Router multi-page via router.push + MutationObserver; real target clickable by default; needs `motion` dep; no React 19/Next 16 certification); **react-joyride v3** (Mar 2026 rewrite fixed React 19; multi-page = documented DIY controlled mode); AVOID onborda (dormant), intro.js/shepherd (AGPL+commercial). Integration map: provider mounts in `AdminLayoutChrome.tsx` (copy `EstimateJobProvider` localStorage pattern, keys `hhi:training:*`); toggle = admin-header "Training" button + tour dropdown (per-browser, NOT CompanySettings); add `data-tour` attrs to key controls (none exist today); tour content converts ~1:1 from the "In the app:" click-paths in docs/training/*.md (master "create your first proposal" tour spanning Projects→New→Sections→Investment→Deck + per-slide-type mini-tours); LANDMINE: portal modals at z-9999 — tour overlay must auto-pause when an unrelated modal opens. Build phases when greenlit: T1 engine (~1d) → T2 data-tour attrs + master multi-page tour (~1d) → T3 header menu + mini-tours (~0.5d) → T4 polish (~0.5d).
+3. Housekeeping queue: Preview envs OR prisma.config.ts hardening; delete `proposal-v2` + `claude/agitated-cartwright-6e9dd7` branches (merged); remove studio flag gates; verified gap backlog MED/LOW (per-room scope deep-dive, SF fields on scope items, target-figure anchoring = cheapest win, leader-line on more slides, footer band, funnel layout, Blueprint-vs-Reality); our-process/design-build retirement decision.
+
+#### Standing conventions: unchanged from below (tsc after every change; commit-on-demand, NEVER push; no `git add -A`; JobTread read-only; never `prisma db pull`; pre-launch = delete legacy outright; training docs same commit; AI never touches dollars; sync write-scope registry; one writer per slide type).
+
+---
+
+### ▶▶ PREVIOUS SESSION (2026‑06‑11 — superseded where it conflicts with above)
 
 **Branch `presentation-studio`. EVERYTHING uncommitted on disk (Steve batches commits — batch is now VERY large; commit pass overdue).**
 **`tsc --noEmit` CLEAN as of this writing. Test project `cmoj1xg4t00t9747kq2py2iug`; Steve reviews on localhost (never spin up preview servers). Working loop: Steve pastes NotebookLM reference screenshots → build → he screenshots our render → iterate until "looks good".**
