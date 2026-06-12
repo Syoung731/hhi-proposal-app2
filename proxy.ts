@@ -40,6 +40,7 @@ const isPublicRoute = createRouteMatcher([
   // Webhook workers — verify their own signatures.
   "/api/jobs/cope-generate",
   "/api/jobs/estimate-room",
+  "/api/jobs/studio-render",
   "/api/qstash/test",
   // Chrome extension callbacks — nonce / pair-code authenticated.
   "/api/extension/(.*)",
