@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { fuzzyMatchRooms, type RoomMatch } from "@/app/lib/rendr/roomMatcher";
-import type { ImperialTakeoffData } from "@/app/lib/rendr/types";
+import type { ImperialTakeoffData, ImperialRoomTakeoff } from "@/app/lib/rendr/types";
+import type { LinkedSpace } from "@/app/lib/rendr/linkedSpaces";
 
 type AppRoom = { id: string; name: string };
 type SectionTypeOption = { id: string; name: string; category: string };
 
 /** Extended mapping: maps a Rendr room to either an existing section OR a section type (creates new).
- *  When two or more mappings share the same `pendingKey`, the server folds them into a single new section. */
+ *  When two or more mappings share the same `pendingKey`, the server folds them into a single new section.
+ *  `spaceId` + `rendrRoomIndex` together identify a room within its source space (floor). */
 export type ExtendedMapping = {
+  spaceId: number;
   rendrRoomIndex: number;
   floorSF: number;
 } & (
@@ -18,12 +21,26 @@ export type ExtendedMapping = {
 );
 
 type Props = {
-  takeoffData: ImperialTakeoffData;
+  /** Linked spaces (floors) in display order. */
+  spaces: LinkedSpace[];
+  /** Imperial takeoff per linked space, keyed by spaceId. */
+  takeoffBySpace: Record<number, ImperialTakeoffData>;
   appRooms: AppRoom[];
   sectionTypes: SectionTypeOption[];
   projectId: string;
   onConfirm: (mappings: ExtendedMapping[]) => void;
   onCancel: () => void;
+};
+
+/** A Rendr room flattened across all linked spaces. `combinedIndex` is the row
+ *  identity used internally; (spaceId, indexInSpace) is what the server needs. */
+type CombinedRoom = {
+  combinedIndex: number;
+  spaceId: number;
+  spaceLabel: string;
+  indexInSpace: number;
+  label: string;
+  takeoff: ImperialRoomTakeoff;
 };
 
 /** Internal match state — extends RoomMatch with optional section type target. */
@@ -45,15 +62,39 @@ function freshPendingKey(): string {
   return `pk-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projectId, onConfirm, onCancel }: Props) {
+export function RendrMatchingTable({ spaces, takeoffBySpace, appRooms, sectionTypes, projectId, onConfirm, onCancel }: Props) {
   const [matches, setMatches] = useState<ExtendedMatch[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [skipUnmatched, setSkipUnmatched] = useState(true);
   const [importing, setImporting] = useState(false);
 
+  const multiSpace = spaces.length > 1;
+
+  // Flatten every linked space's rooms into one list. `combinedIndex` becomes the
+  // row identity (and the fuzzy matcher's rendrRoomIndex); (spaceId, indexInSpace)
+  // is resolved back at confirm time.
+  const combinedRooms = useMemo<CombinedRoom[]>(() => {
+    const out: CombinedRoom[] = [];
+    for (const s of spaces) {
+      const td = takeoffBySpace[s.spaceId];
+      if (!td) continue;
+      td.rooms.forEach((r, i) => {
+        out.push({
+          combinedIndex: out.length,
+          spaceId: s.spaceId,
+          spaceLabel: s.label,
+          indexInSpace: i,
+          label: r.label,
+          takeoff: r.takeoff,
+        });
+      });
+    }
+    return out;
+  }, [spaces, takeoffBySpace]);
+
   // Build initial fuzzy matches
   useEffect(() => {
-    const rendrRooms = takeoffData.rooms.map((r) => ({
+    const rendrRooms = combinedRooms.map((r) => ({
       label: r.label,
       roomTakeoff: {} as never, // fuzzyMatchRooms only uses .label
     }));
@@ -191,9 +232,11 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
       .filter((m) => m.appRoomId || m.sectionTypeId)
       .filter((m) => !skipUnmatched || m.confidence !== "unmatched" || m.appRoomId || m.sectionTypeId)
       .map((m) => {
+        const cr = combinedRooms[m.rendrRoomIndex];
         const base = {
-          rendrRoomIndex: m.rendrRoomIndex,
-          floorSF: takeoffData.rooms[m.rendrRoomIndex]?.takeoff?.floorSF ?? 0,
+          spaceId: cr?.spaceId ?? spaces[0]?.spaceId ?? 0,
+          rendrRoomIndex: cr?.indexInSpace ?? 0,
+          floorSF: cr?.takeoff?.floorSF ?? 0,
         };
         if (m.sectionTypeId) {
           // Should always be set when sectionTypeId is set, but defensively
@@ -308,6 +351,9 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
           <thead>
             <tr className="border-b border-zinc-200 dark:border-zinc-700">
               <th className="pb-2 text-left font-medium text-zinc-500 dark:text-zinc-400">Rendr Room</th>
+              {multiSpace && (
+                <th className="pb-2 text-left font-medium text-zinc-500 dark:text-zinc-400">Floor</th>
+              )}
               <th className="pb-2 text-left font-medium text-zinc-500 dark:text-zinc-400">Measurements</th>
               <th className="pb-2 text-left font-medium text-zinc-500 dark:text-zinc-400">Match</th>
               <th className="pb-2 text-left font-medium text-zinc-500 dark:text-zinc-400">Map To</th>
@@ -315,7 +361,7 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
           </thead>
           <tbody>
             {matches.map((m) => {
-              const room = takeoffData.rooms[m.rendrRoomIndex];
+              const room = combinedRooms[m.rendrRoomIndex];
               const otherLabels = getOtherMappedLabels(m.rendrRoomIndex, m);
               const isCombined = otherLabels.length > 0;
 
@@ -324,6 +370,13 @@ export function RendrMatchingTable({ takeoffData, appRooms, sectionTypes, projec
                   <td className="py-3 pr-4">
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">{m.rendrLabel}</span>
                   </td>
+                  {multiSpace && (
+                    <td className="py-3 pr-4">
+                      <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                        {room?.spaceLabel ?? "—"}
+                      </span>
+                    </td>
+                  )}
                   <td className="py-3 pr-4 text-zinc-500 dark:text-zinc-400">
                     {room?.takeoff?.floorSF ?? 0} SF &middot; {room?.takeoff?.wallsSF ?? 0} SF walls &middot; {room?.takeoff?.perimeterLF ?? 0} LF
                   </td>

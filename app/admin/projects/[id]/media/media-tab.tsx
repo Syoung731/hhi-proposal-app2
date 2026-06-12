@@ -89,8 +89,8 @@ type Props = {
   initialRoomId?: string;
   /** Project property address (Overview) for opening Zillow after direct handshake. */
   projectAddress?: string | null;
-  /** Linked Rendr space id (Project.rendrSpaceId); when set, Rendr Photos section is available. */
-  rendrSpaceId?: number | null;
+  /** Linked Rendr space ids (Project.rendrSpaces); when non-empty, Rendr Photos section is available. */
+  rendrSpaceIds?: number[];
 };
 
 export type UploadBatchResult = {
@@ -759,7 +759,7 @@ export function MediaTab({
   coverHeroImageId = null,
   initialRoomId,
   projectAddress = null,
-  rendrSpaceId = null,
+  rendrSpaceIds = [],
 }: Props) {
   const router = useRouter();
   const roomIds = new Set(rooms.map((r) => r.id));
@@ -824,7 +824,7 @@ export function MediaTab({
   const [zillowAssigning, setZillowAssigning] = useState(false);
   /** Rendr Photos page: list of photos for the project's linked Rendr space, selection, and assignment. */
   const [rendrPhotos, setRendrPhotos] = useState<
-    { id: string; created?: string; space_photo_thumbnail_url?: string }[]
+    { id: string; spaceId: number; created?: string; space_photo_thumbnail_url?: string }[]
   >([]);
   const [rendrPhotosLoading, setRendrPhotosLoading] = useState(false);
   const [rendrPhotosError, setRendrPhotosError] = useState<string | null>(null);
@@ -948,29 +948,37 @@ export function MediaTab({
     }
   }
 
-  /** Lazy-load the Rendr photo list the first time the user opens the Rendr Photos page. */
+  /** Lazy-load the Rendr photo list (merged across all linked spaces/floors) the
+   *  first time the user opens the Rendr Photos page. */
+  const rendrSpaceKey = rendrSpaceIds.join(",");
   useEffect(() => {
     if (activeRoomId !== RENDR_PHOTOS_ID) return;
-    if (!rendrSpaceId) return;
+    if (rendrSpaceIds.length === 0) return;
     if (rendrPhotosLoaded || rendrPhotosLoading) return;
     setRendrPhotosLoading(true);
     setRendrPhotosError(null);
-    fetch(`/api/rendr/spaces/${rendrSpaceId}/detail`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) {
-          setRendrPhotosError(d.error);
-          setRendrPhotos([]);
-        } else {
-          setRendrPhotos(Array.isArray(d.photos) ? d.photos : []);
+    Promise.all(
+      rendrSpaceIds.map(async (spaceId) => {
+        try {
+          const r = await fetch(`/api/rendr/spaces/${spaceId}/detail`);
+          const d = await r.json();
+          if (d.error || !Array.isArray(d.photos)) return [];
+          return (d.photos as { id: string; created?: string; space_photo_thumbnail_url?: string }[])
+            .map((p) => ({ ...p, spaceId }));
+        } catch {
+          return [];
         }
+      }),
+    )
+      .then((perSpace) => {
+        const merged = perSpace.flat();
+        setRendrPhotos(merged);
+        if (merged.length === 0) setRendrPhotosError("Failed to load Rendr photos");
         setRendrPhotosLoaded(true);
       })
-      .catch((e) => {
-        setRendrPhotosError(e instanceof Error ? e.message : "Failed to load Rendr photos");
-      })
       .finally(() => setRendrPhotosLoading(false));
-  }, [activeRoomId, rendrSpaceId, rendrPhotosLoaded, rendrPhotosLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId, rendrSpaceKey, rendrPhotosLoaded, rendrPhotosLoading]);
 
   /** Renderings (room or cover) must never appear in Unassigned Media. */
   const isRendering = (m: MediaItem) =>
@@ -1660,7 +1668,7 @@ export function MediaTab({
                 </span>
               )}
             </button>
-            {rendrSpaceId != null && (
+            {rendrSpaceIds.length > 0 && (
               <button
                 type="button"
                 onClick={() => setActiveRoomId(RENDR_PHOTOS_ID)}
@@ -2220,7 +2228,7 @@ export function MediaTab({
                           }`}
                         >
                           <img
-                            src={`/api/rendr/spaces/${rendrSpaceId}/photos/${photo.id}`}
+                            src={`/api/rendr/spaces/${photo.spaceId}/photos/${photo.id}`}
                             alt="Rendr photo"
                             className="h-full w-full object-cover"
                             loading="lazy"

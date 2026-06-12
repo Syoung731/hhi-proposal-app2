@@ -81,8 +81,11 @@ model Project {
   defaultCeilingHeightFt   Float?                    @default(9)
   projectQA                Json?
   proposalDeck             ProposalDeck?
-  // Rendr LiDAR integration (optional)
-  rendrSpaceId             Int?
+  // Rendr LiDAR integration (optional) — supports multiple linked spaces
+  // (e.g. a multi-floor scan). rendrSpaces is [{ spaceId: number, label: string }],
+  // where label is a short per-space name (e.g. "2nd Floor") used to disambiguate
+  // same-named rooms across spaces. See app/lib/rendr/linkedSpaces.ts.
+  rendrSpaces              Json?
   rendrProjectId           Int?
   rendrLinkedAt            DateTime?
   rendrImportedAt          DateTime?

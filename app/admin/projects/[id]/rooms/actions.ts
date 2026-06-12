@@ -23,8 +23,9 @@ import { generateScopeOverviewNarrative } from "@/app/lib/ai/objective-content";
 import { generateRecommendedDetail } from "@/app/lib/ai/generate-recommended-detail";
 import { classifyRoomForDetail, type KitchenDetail, type BathroomDetail } from "@/app/lib/room-classification";
 import { buildRendrContextString } from "@/app/lib/rendr/buildRendrContext";
-import { getRendrTakeoffData, getRendrSpaceGeometry } from "@/app/lib/rendr/rendrClient";
-import { convertTakeoffData } from "@/app/lib/rendr/convertTakeoff";
+import { getRendrSpaceGeometry } from "@/app/lib/rendr/rendrClient";
+import { linkedSpaceIds, primaryLinkedSpaceId } from "@/app/lib/rendr/linkedSpaces";
+import { fetchMergedTakeoff, type MergedTakeoffData } from "@/app/lib/rendr/mergeTakeoffs";
 import type { ImperialTakeoffData, ImperialRoomTakeoff } from "@/app/lib/rendr/types";
 import { fuzzyMatchRooms } from "@/app/lib/rendr/roomMatcher";
 import { extractCeilingHeightForMappedRooms, type GeometryData } from "@/app/lib/rendr/extractCeilingHeight";
@@ -693,15 +694,15 @@ export async function checkRendrAvailable(projectId: string): Promise<{
   await requireAdmin();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { rendrSpaceId: true, rendrImportedAt: true },
+    select: { rendrSpaces: true, rendrImportedAt: true },
   });
-  if (!project?.rendrSpaceId) {
+  const spaceIds = linkedSpaceIds(project?.rendrSpaces);
+  if (spaceIds.length === 0) {
     return { hasRendr: false, roomCount: 0 };
   }
   try {
-    const raw = await getRendrTakeoffData(project.rendrSpaceId);
-    const imperial = convertTakeoffData(raw);
-    return { hasRendr: true, roomCount: imperial.rooms.length };
+    const merged = await fetchMergedTakeoff(spaceIds);
+    return { hasRendr: true, roomCount: merged?.rooms.length ?? 0 };
   } catch {
     // Rendr API may be down — still flag as linked but no room count
     return { hasRendr: true, roomCount: 0 };
@@ -806,7 +807,7 @@ export async function generateRoomsFromTranscriptAction(
   await requireAdmin();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, transcriptText: true, rendrSpaceId: true },
+    select: { id: true, transcriptText: true, rendrSpaces: true },
   });
   if (!project) {
     return { created: 0, updated: 0, skipped: 0, error: "Project not found." };
@@ -818,19 +819,26 @@ export async function generateRoomsFromTranscriptAction(
 
   // Fetch Rendr data when requested (best-effort — failures fall back to transcript-only)
   let rendrContext: string | null = null;
-  let imperialTakeoff: ImperialTakeoffData | null = null;
+  let imperialTakeoff: MergedTakeoffData | null = null;
   let geometryData: GeometryData | null = null;
 
-  if (includeRendr && project.rendrSpaceId) {
+  const rendrSpaceIdsForContext = linkedSpaceIds(project.rendrSpaces);
+  if (includeRendr && rendrSpaceIdsForContext.length > 0) {
     try {
-      const raw = await getRendrTakeoffData(project.rendrSpaceId);
-      imperialTakeoff = convertTakeoffData(raw);
-      try {
-        geometryData = await getRendrSpaceGeometry(project.rendrSpaceId) as GeometryData | null;
-      } catch {
-        // Geometry is optional — ceiling heights won't be available
+      // Merge rooms across all linked spaces (floors) so the AI sees every room.
+      imperialTakeoff = await fetchMergedTakeoff(rendrSpaceIdsForContext);
+      // Geometry (ceiling heights) is best-effort; use the primary space's blob.
+      const primaryId = primaryLinkedSpaceId(project.rendrSpaces);
+      if (primaryId != null) {
+        try {
+          geometryData = await getRendrSpaceGeometry(primaryId) as GeometryData | null;
+        } catch {
+          // Geometry is optional — ceiling heights won't be available
+        }
       }
-      rendrContext = buildRendrContextForTranscript(imperialTakeoff, geometryData);
+      if (imperialTakeoff) {
+        rendrContext = buildRendrContextForTranscript(imperialTakeoff, geometryData);
+      }
     } catch (e) {
       if (process.env.NODE_ENV === "development") {
         console.log("[generateRooms] Rendr fetch failed, continuing without:", e);
@@ -1198,7 +1206,7 @@ export async function generateRoomsFromTranscriptAction(
 async function autoLinkRendrToSections(
   projectId: string,
   createdRooms: { id: string; name: string; sectionTypeId: string | null }[],
-  imperialTakeoff: ImperialTakeoffData,
+  imperialTakeoff: MergedTakeoffData,
   geometryData: GeometryData | null,
 ) {
   const rendrRooms = imperialTakeoff.rooms
@@ -1214,9 +1222,12 @@ async function autoLinkRendrToSections(
   );
   if (autoMatches.length === 0) return;
 
-  // Build a lookup from label to imperial room
+  // Build a lookup from label to imperial room (carrying its source space + the
+  // per-space index that re-sync resolves against). Duplicate labels across
+  // floors collapse to last-wins — the explicit matching-table import handles
+  // those precisely; this fuzzy auto-link is best-effort.
   const imperialByLabel = new Map(
-    imperialTakeoff.rooms.map((r, i) => [r.label, { takeoff: r.takeoff, index: i }]),
+    imperialTakeoff.rooms.map((r) => [r.label, { takeoff: r.takeoff, spaceId: r.spaceId, indexInSpace: r.indexInSpace }]),
   );
 
   // Fetch section type names for room classification
@@ -1236,7 +1247,7 @@ async function autoLinkRendrToSections(
     if (!imperial) continue;
     const t = imperial.takeoff;
 
-    const rendrRoomMappings = [{ index: match.rendrRoomIndex, label: match.rendrLabel }];
+    const rendrRoomMappings = [{ spaceId: imperial.spaceId, index: imperial.indexInSpace, label: match.rendrLabel }];
 
     // Extract ceiling height from geometry
     const rendrCeilingFt = extractCeilingHeightForMappedRooms(geometryData, [match.rendrLabel]);
@@ -1390,15 +1401,19 @@ export async function updateRoomScopesFromTranscriptAction(
   let rendrContext: string | null = null;
   const projectForRendr = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { rendrSpaceId: true },
+    select: { rendrSpaces: true },
   });
-  if (projectForRendr?.rendrSpaceId) {
+  const rendrSpaceIdsForCtx = linkedSpaceIds(projectForRendr?.rendrSpaces);
+  if (rendrSpaceIdsForCtx.length > 0) {
     try {
-      const raw = await getRendrTakeoffData(projectForRendr.rendrSpaceId);
-      const imperial = convertTakeoffData(raw);
+      // Merge rooms across all linked spaces (floors) for the AI context.
+      const imperial = await fetchMergedTakeoff(rendrSpaceIdsForCtx);
+      const primaryId = primaryLinkedSpaceId(projectForRendr?.rendrSpaces);
       let geo: GeometryData | null = null;
-      try { geo = await getRendrSpaceGeometry(projectForRendr.rendrSpaceId) as GeometryData | null; } catch {}
-      rendrContext = buildRendrContextForTranscript(imperial, geo);
+      if (primaryId != null) {
+        try { geo = await getRendrSpaceGeometry(primaryId) as GeometryData | null; } catch {}
+      }
+      if (imperial) rendrContext = buildRendrContextForTranscript(imperial, geo);
     } catch {
       // Rendr context is best-effort
     }

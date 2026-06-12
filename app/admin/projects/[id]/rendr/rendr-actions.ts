@@ -13,17 +13,21 @@ import { extractCeilingHeightForMappedRooms } from "@/app/lib/rendr/extractCeili
 import { computeUnitQuantity } from "@/app/lib/section-unit-quantity";
 import { computeSectionTotals } from "@/app/lib/section-totals";
 import { dissolveSingleMemberGroups } from "@/app/lib/investment/assign-display-group";
+import { parseLinkedSpaces, labelForSpace, type LinkedSpace } from "@/app/lib/rendr/linkedSpaces";
+import type { ImperialTakeoffData } from "@/app/lib/rendr/types";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type RendrRoomMapping = {
-  index: number; // Index in the Rendr TakeOff rooms array
+  spaceId: number; // Rendr space (floor) this room belongs to
+  index: number; // Index in that space's Rendr TakeOff rooms array
   label: string; // Rendr's label (e.g. "Primary Bathroom", "Toilet Room")
 };
 
 type ImportMapping = {
+  spaceId: number; // Rendr space (floor) the room was scanned in
   rendrRoomIndex: number;
   floorSF: number;
 } & (
@@ -38,14 +42,26 @@ type ImportMapping = {
 export async function linkRendrProject(
   appProjectId: string,
   rendrProjectId: number | null,
-  rendrSpaceId: number,
+  spaces: LinkedSpace[],
 ) {
   await requireAdmin();
+
+  // Normalize: drop blanks/dupes, trim labels, fall back to a sensible default.
+  const seen = new Set<number>();
+  const normalized: LinkedSpace[] = [];
+  for (const s of spaces) {
+    if (!Number.isFinite(s.spaceId) || seen.has(s.spaceId)) continue;
+    seen.add(s.spaceId);
+    const label = s.label?.trim() || `Space #${s.spaceId}`;
+    normalized.push({ spaceId: s.spaceId, label });
+  }
+  if (normalized.length === 0) throw new Error("Select at least one space to link.");
+
   await prisma.project.update({
     where: { id: appProjectId },
     data: {
       rendrProjectId,
-      rendrSpaceId,
+      rendrSpaces: normalized as unknown as Prisma.InputJsonValue,
       rendrLinkedAt: new Date(),
       rendrImportedAt: null,
     },
@@ -59,7 +75,7 @@ export async function unlinkRendrProject(appProjectId: string) {
     where: { id: appProjectId },
     data: {
       rendrProjectId: null,
-      rendrSpaceId: null,
+      rendrSpaces: Prisma.DbNull,
       rendrLinkedAt: null,
       rendrImportedAt: null,
     },
@@ -88,22 +104,28 @@ export async function importRendrMeasurements(
 ) {
   await requireAdmin();
 
-  // Fetch full takeoff data server-side
+  // Fetch full takeoff data server-side, per linked space (one scan per floor).
   const project = await prisma.project.findUnique({
     where: { id: appProjectId },
-    select: { rendrSpaceId: true },
+    select: { rendrSpaces: true },
   });
-  if (!project?.rendrSpaceId) throw new Error("No Rendr scan linked.");
+  const linkedSpaces = parseLinkedSpaces(project?.rendrSpaces);
+  if (linkedSpaces.length === 0) throw new Error("No Rendr scan linked.");
 
-  // Get imperial takeoff data
-  const raw = await getRendrTakeoffData(project.rendrSpaceId);
-  const takeoff = convertTakeoffData(raw);
-
-  // Fetch geometry blob for wall dimensions / ceiling height (best-effort)
-  let geometryData: Record<string, unknown> | null = null;
-  try {
-    geometryData = (await getRendrSpaceGeometry(project.rendrSpaceId)) as Record<string, unknown> | null;
-  } catch { /* best-effort */ }
+  // Only fetch the spaces actually referenced by the incoming mappings.
+  const usedSpaceIds = [...new Set(mappings.map((m) => m.spaceId))];
+  const takeoffBySpace = new Map<number, ImperialTakeoffData>();
+  const geometryBySpace = new Map<number, Record<string, unknown> | null>();
+  for (const spaceId of usedSpaceIds) {
+    const raw = await getRendrTakeoffData(spaceId);
+    takeoffBySpace.set(spaceId, convertTakeoffData(raw));
+    // Geometry blob for wall dimensions / ceiling height (best-effort)
+    try {
+      geometryBySpace.set(spaceId, (await getRendrSpaceGeometry(spaceId)) as Record<string, unknown> | null);
+    } catch {
+      geometryBySpace.set(spaceId, null);
+    }
+  }
 
   // Resolve mappings — existing-section mappings pass through; section-type
   // mappings are grouped by pendingKey so multiple Rendr rooms targeted at the
@@ -146,20 +168,39 @@ export async function importRendrMeasurements(
     }
   }
 
-  // Number buckets per section type so two "+ Bathroom" picks land as
-  // "Bathroom 1" and "Bathroom 2" instead of two same-named rooms.
-  const totalBySectionType = new Map<string, number>();
-  for (const bucket of pendingBucketsMap.values()) {
-    totalBySectionType.set(
-      bucket.sectionTypeId,
-      (totalBySectionType.get(bucket.sectionTypeId) ?? 0) + 1,
-    );
+  // Name pending buckets, disambiguating same-typed rooms across floors. When the
+  // same section-type name appears in more than one space and multiple spaces are
+  // linked, suffix the floor label (e.g. "Bedroom (2nd Floor)"); same-typed rooms
+  // that still collide get a trailing number.
+  const bucketList = [...pendingBucketsMap.values()];
+  const multiSpace = linkedSpaces.length > 1;
+  const baseNameCount = new Map<string, number>();
+  for (const b of bucketList) {
+    baseNameCount.set(b.sectionTypeName, (baseNameCount.get(b.sectionTypeName) ?? 0) + 1);
   }
-  const seenIndexBySectionType = new Map<string, number>();
+  const candidates = bucketList.map((b) => {
+    if ((baseNameCount.get(b.sectionTypeName) ?? 0) <= 1) return b.sectionTypeName;
+    const label = labelForSpace(linkedSpaces, b.members[0].spaceId);
+    return multiSpace ? `${b.sectionTypeName} (${label})` : b.sectionTypeName;
+  });
+  const candidateTotal = new Map<string, number>();
+  for (const c of candidates) candidateTotal.set(c, (candidateTotal.get(c) ?? 0) + 1);
+  const candidateSeen = new Map<string, number>();
+  const bucketNames = new Map<PendingBucket, string>();
+  bucketList.forEach((b, i) => {
+    const c = candidates[i];
+    if ((candidateTotal.get(c) ?? 0) <= 1) {
+      bucketNames.set(b, c);
+      return;
+    }
+    const n = (candidateSeen.get(c) ?? 0) + 1;
+    candidateSeen.set(c, n);
+    bucketNames.set(b, `${c} ${n}`);
+  });
 
   // Pass 2: create one Room per pending bucket, using aggregated floor SF for
   // pricing (totals are not recomputed by the later groupedBySection update).
-  for (const bucket of pendingBucketsMap.values()) {
+  for (const bucket of bucketList) {
     const sectionType = await prisma.sectionType.findUnique({
       where: { id: bucket.sectionTypeId },
       select: {
@@ -172,11 +213,7 @@ export async function importRendrMeasurements(
       },
     });
 
-    // Compute the room's display name: append "1", "2", ... only when 2+ buckets share a section type
-    const totalForType = totalBySectionType.get(bucket.sectionTypeId) ?? 1;
-    const idxForType = (seenIndexBySectionType.get(bucket.sectionTypeId) ?? 0) + 1;
-    seenIndexBySectionType.set(bucket.sectionTypeId, idxForType);
-    const roomName = totalForType > 1 ? `${bucket.sectionTypeName} ${idxForType}` : bucket.sectionTypeName;
+    const roomName = bucketNames.get(bucket) ?? bucket.sectionTypeName;
 
     const aggregateFloorSF = bucket.members.reduce((sum, m) => sum + (m.floorSF || 0), 0);
     const unitQuantity = computeUnitQuantity(
@@ -240,6 +277,7 @@ export async function importRendrMeasurements(
 
     for (const m of bucket.members) {
       resolvedMappings.push({
+        spaceId: m.spaceId,
         rendrRoomIndex: m.rendrRoomIndex,
         floorSF: m.floorSF,
         appRoomId: newRoom.id,
@@ -273,12 +311,13 @@ export async function importRendrMeasurements(
   }
 
   for (const [appRoomId, sectionMappings] of groupedBySection) {
-    // Collect all Rendr rooms for this section
-    const rendrRooms: { index: number; label: string; takeoff: ImperialRoomTakeoff }[] = [];
+    // Collect all Rendr rooms for this section (may span spaces/floors)
+    const rendrRooms: { spaceId: number; index: number; label: string; takeoff: ImperialRoomTakeoff }[] = [];
     for (const m of sectionMappings) {
-      const room = takeoff.rooms[m.rendrRoomIndex];
+      const room = takeoffBySpace.get(m.spaceId)?.rooms[m.rendrRoomIndex];
       if (!room) continue;
       rendrRooms.push({
+        spaceId: m.spaceId,
         index: m.rendrRoomIndex,
         label: room.label,
         takeoff: room.takeoff,
@@ -290,8 +329,9 @@ export async function importRendrMeasurements(
     // rounded to 0.1 precision (Rendr's API can return drifted floats too).
     const t = aggregateRendrTakeoffs(rendrRooms.map((r) => r.takeoff));
 
-    // Build the mapping array for persistence
+    // Build the mapping array for persistence (carries the source space per room)
     const rendrRoomMappings: RendrRoomMapping[] = rendrRooms.map((r) => ({
+      spaceId: r.spaceId,
       index: r.index,
       label: r.label,
     }));
@@ -362,12 +402,23 @@ export async function importRendrMeasurements(
       };
     }
 
-    // Extract ceiling height from geometry blob
+    // Extract ceiling height from geometry blob — each room resolves against its
+    // own space's geometry; take the first space that yields a height.
     const rendrLabels = rendrRooms.map((r) => r.label);
-    const rendrCeilingFt = extractCeilingHeightForMappedRooms(
-      geometryData,
-      rendrLabels,
-    );
+    const labelsBySpace = new Map<number, string[]>();
+    for (const r of rendrRooms) {
+      const arr = labelsBySpace.get(r.spaceId) ?? [];
+      arr.push(r.label);
+      labelsBySpace.set(r.spaceId, arr);
+    }
+    let rendrCeilingFt: number | null = null;
+    for (const [sid, labels] of labelsBySpace) {
+      const ft = extractCeilingHeightForMappedRooms(geometryBySpace.get(sid) ?? null, labels);
+      if (ft) {
+        rendrCeilingFt = ft;
+        break;
+      }
+    }
     if (process.env.NODE_ENV === "development") {
       console.log("[Rendr Import] Ceiling extraction for labels:", rendrLabels, "→", rendrCeilingFt, "ft");
     }
@@ -438,12 +489,20 @@ export async function previewRendrResync(appProjectId: string): Promise<ResyncDi
 
   const project = await prisma.project.findUnique({
     where: { id: appProjectId },
-    select: { rendrSpaceId: true },
+    select: { rendrSpaces: true },
   });
-  if (!project?.rendrSpaceId) throw new Error("No Rendr scan linked.");
+  const linkedSpaces = parseLinkedSpaces(project?.rendrSpaces);
+  if (linkedSpaces.length === 0) throw new Error("No Rendr scan linked.");
 
-  const raw = await getRendrTakeoffData(project.rendrSpaceId);
-  const takeoff = convertTakeoffData(raw);
+  // Fresh takeoff per linked space (one scan per floor).
+  const takeoffBySpace = new Map<number, ImperialTakeoffData>();
+  for (const s of linkedSpaces) {
+    try {
+      takeoffBySpace.set(s.spaceId, convertTakeoffData(await getRendrTakeoffData(s.spaceId)));
+    } catch {
+      // Best-effort: a space that fails to fetch simply yields no diffs.
+    }
+  }
 
   // Find all sections with Rendr mappings
   const sections = await prisma.room.findMany({
@@ -474,10 +533,10 @@ export async function previewRendrResync(appProjectId: string): Promise<ResyncDi
     const mappings = section.rendrRoomMappings as RendrRoomMapping[];
     if (!mappings || mappings.length === 0) continue;
 
-    // Aggregate fresh takeoff data
+    // Aggregate fresh takeoff data (each mapping resolves against its own space)
     const takeoffs: ImperialRoomTakeoff[] = [];
     for (const m of mappings) {
-      const room = takeoff.rooms[m.index];
+      const room = takeoffBySpace.get(m.spaceId)?.rooms[m.index];
       if (room) takeoffs.push(room.takeoff);
     }
     if (takeoffs.length === 0) continue;
@@ -525,18 +584,26 @@ export async function executeRendrResync(
 
   const project = await prisma.project.findUnique({
     where: { id: appProjectId },
-    select: { rendrSpaceId: true },
+    select: { rendrSpaces: true },
   });
-  if (!project?.rendrSpaceId) throw new Error("No Rendr scan linked.");
+  const linkedSpaces = parseLinkedSpaces(project?.rendrSpaces);
+  if (linkedSpaces.length === 0) throw new Error("No Rendr scan linked.");
 
-  const raw = await getRendrTakeoffData(project.rendrSpaceId);
-  const takeoff = convertTakeoffData(raw);
-
-  // Fetch geometry blob for ceiling heights (best-effort)
-  let geometryDataResync: Record<string, unknown> | null = null;
-  try {
-    geometryDataResync = (await getRendrSpaceGeometry(project.rendrSpaceId)) as Record<string, unknown> | null;
-  } catch { /* best-effort */ }
+  // Fresh takeoff + geometry per linked space (one scan per floor).
+  const takeoffBySpace = new Map<number, ImperialTakeoffData>();
+  const geometryBySpace = new Map<number, Record<string, unknown> | null>();
+  for (const s of linkedSpaces) {
+    try {
+      takeoffBySpace.set(s.spaceId, convertTakeoffData(await getRendrTakeoffData(s.spaceId)));
+    } catch {
+      continue;
+    }
+    try {
+      geometryBySpace.set(s.spaceId, (await getRendrSpaceGeometry(s.spaceId)) as Record<string, unknown> | null);
+    } catch {
+      geometryBySpace.set(s.spaceId, null);
+    }
+  }
 
   const sections = await prisma.room.findMany({
     where: {
@@ -555,7 +622,7 @@ export async function executeRendrResync(
 
     const takeoffs: ImperialRoomTakeoff[] = [];
     for (const m of mappings) {
-      const room = takeoff.rooms[m.index];
+      const room = takeoffBySpace.get(m.spaceId)?.rooms[m.index];
       if (room) takeoffs.push(room.takeoff);
     }
     if (takeoffs.length === 0) continue;
@@ -565,11 +632,22 @@ export async function executeRendrResync(
         ? takeoffs[0]
         : aggregateRendrTakeoffs(takeoffs);
 
-    // Extract ceiling height from geometry
-    const rendrCeilingFt = extractCeilingHeightForMappedRooms(
-      geometryDataResync,
-      mappings.map((m) => m.label),
-    );
+    // Extract ceiling height from geometry — each mapping resolves against its
+    // own space's geometry; take the first space that yields a height.
+    const labelsBySpace = new Map<number, string[]>();
+    for (const m of mappings) {
+      const arr = labelsBySpace.get(m.spaceId) ?? [];
+      arr.push(m.label);
+      labelsBySpace.set(m.spaceId, arr);
+    }
+    let rendrCeilingFt: number | null = null;
+    for (const [sid, labels] of labelsBySpace) {
+      const ft = extractCeilingHeightForMappedRooms(geometryBySpace.get(sid) ?? null, labels);
+      if (ft) {
+        rendrCeilingFt = ft;
+        break;
+      }
+    }
 
     await prisma.room.update({
       where: { id: section.id },
