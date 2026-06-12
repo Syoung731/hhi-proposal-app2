@@ -44,11 +44,6 @@ const isPublicRoute = createRouteMatcher([
   "/api/qstash/test",
   // Chrome extension callbacks — nonce / pair-code authenticated.
   "/api/extension/(.*)",
-  // Website discovery questionnaire — marketing team has no Clerk logins.
-  // Page + API check a shared access key (DISCOVERY_ACCESS_KEY) themselves;
-  // see app/lib/discovery/auth.ts.
-  "/discovery",
-  "/api/discovery/(.*)",
 ]);
 
 // Match the proposal page itself but NOT `/proposals/{id}/pdf` — the PDF
