@@ -169,6 +169,19 @@ FRAMING AND STRUCTURAL ITEMS:
   - If scope mentions joist repair: include "Joist sistering/replacement" as a lump-sum or per-joist item
   - Note in the description: "Sister or replace as needed per field conditions — quantity is an estimate"
 
+  VETTED ENGINEERING ASSEMBLIES (when present):
+  - If the prompt includes a "## Vetted Engineering Assemblies" section, those are
+    ENGINEER-APPROVED methods + per-unit quantity rules from HHI's drawing library.
+  - For the structural / framing / foundation work they cover, you MUST follow that
+    method and emit line items for its members and connectors using the engineer's
+    per-unit rules (e.g. studs at the given o.c., one hurricane strap per rafter,
+    anchor bolts per LF, rebar continuous + lap). Compute the totals by scaling
+    those per-unit rules to this room's dimensions — do NOT invent a different
+    method or different quantities for work the assembly covers.
+  - Reference the assembly name in the line-item notes.
+  - This changes WHAT and HOW MANY only — PRICING is unchanged: still price every
+    line through the catalog/allowance rules above (the assemblies carry no prices).
+
 KITCHEN/BATHROOM SPECIFICATION RULES:
   If the prompt includes a KITCHEN SPECIFICATIONS or BATHROOM SPECIFICATIONS section,
   you MUST use those exact quantities for the corresponding line items:
@@ -331,6 +344,7 @@ export function buildUserPromptParts(
   scopeQA?: ScopeQAData | null,
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
+  vettedAssemblies?: string | null,
 ): UserPromptParts {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
@@ -407,7 +421,7 @@ PRE-CALCULATED VALUES — USE THESE EXACT NUMBERS:
   - Doors: ${roomMetrics.doorCount ?? "N/A"} count${roomMetrics.doorsSF ? `, ${roomMetrics.doorsSF} SF opening area` : ""}` : ""}
 ${buildKitchenBathSpecsSection(roomDetail, roomDetailType)}
 ${buildClarificationsSection(scopeQA)}
-## Scope of Work
+${vettedAssemblies ? `${vettedAssemblies}\n\n` : ""}## Scope of Work
 ${scopeNarrative}${correctionHistory ? `\n\n${correctionHistory}` : ""}`;
 
   const staticBlock = `## Room Template Structure
@@ -477,6 +491,7 @@ export function buildUserPrompt(
   scopeQA?: ScopeQAData | null,
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
+  vettedAssemblies?: string | null,
 ): string {
   const { dynamicBlock, staticBlock } = buildUserPromptParts(
     roomTemplate,
@@ -490,6 +505,7 @@ export function buildUserPrompt(
     scopeQA,
     roomDetail,
     roomDetailType,
+    vettedAssemblies,
   );
   return `${dynamicBlock}\n\n${staticBlock}`;
 }

@@ -10,6 +10,7 @@ import {
   type ScopeQAData,
 } from "@/app/lib/ai-estimate-prompt";
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
+import { getEngineeringAssemblies } from "@/app/lib/ai/engineering-assemblies";
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
@@ -164,6 +165,11 @@ export async function generateRoomEstimate(
     ? await getCorrectionHistory(roomTemplateId)
     : null;
 
+  // Engineer-vetted assemblies that match this scope (addition framing, hurricane
+  // straps, footings, CMU, etc.). Returns null for cosmetic rooms (fails closed),
+  // so it costs nothing on the ~90% of scopes with no structural match.
+  const vettedAssemblies = await getEngineeringAssemblies(scopeNarrative);
+
   const scopeQA = room?.scopeQA as ScopeQAData | null;
   const roomDetail = room?.roomDetail as Record<string, unknown> | null;
   const roomDetailType = room
@@ -184,6 +190,7 @@ export async function generateRoomEstimate(
     scopeQA,
     roomDetail,
     roomDetailType,
+    vettedAssemblies,
   );
 
   // ---------- Call Claude with prompt caching ----------
