@@ -1416,3 +1416,101 @@ model ShareLinkCopyLog {
   @@index([snapshotId])
   @@index([employeeId])
 }
+
+// ─── Engineering Assembly Knowledge Base ────────────────────────────────────────
+// Engineer-vetted structural assemblies the AI estimate retrieves from when a room
+// scope includes work that doesn't exist yet (addition framing, hurricane straps,
+// footings). The KB supplies METHOD + per-unit QUANTITY RULES only — NEVER price;
+// pricing still flows through the catalog/AI machinery. See docs/engineering-*.md.
+//
+// Model: one canonical EngineeringAssembly per detail "family" (the single
+// engineer-vetted spec Steve pins during review), with child Component rows and
+// EngineeringAssemblySource provenance rows (one per source project the detail was
+// observed in — history/traceability, does NOT drive estimating). Title is NOT the
+// key (collisions across sets) — `slug` is the concept+discriminator key.
+
+enum AssemblyReviewStatus {
+  DRAFT
+  APPROVED
+  ARCHIVED
+}
+
+model EngineeringAssembly {
+  id            String               @id @default(cuid())
+  slug          String               @unique // concept + discriminator key, e.g. "wall-footing-cmu"
+  name          String // canonical title, e.g. "Wall Footing (CMU stem on spread footing)"
+  category      String // Foundation | Wall Framing | Roof Framing | Connectors & Strapping | Openings | Structural Steel | Masonry | Deck/Porch | Stairs | Other
+  discriminator String? // disambiguator when titles collide (e.g. "steel-column-base")
+  reviewStatus  AssemblyReviewStatus @default(DRAFT)
+  isActive      Boolean              @default(true)
+
+  // The vetted spec (canonical) — method + per-unit rules, never price.
+  whenToUse      String? // trigger condition prose
+  methodSummary  String? // markdown: how it's built
+  codeBasis      String?
+  quantityBasis  String? // "per LF / per rafter / field-determined"
+  caveats        String?
+  unitOfAssembly String? // optional unit label for the assembly as a whole
+
+  // Retrieval
+  triggerKeywords String[] // controlled-vocabulary tags (the matchers)
+  tags            String[] // extra/free tags
+
+  // Provenance of the pinned canonical (engineer authority + source drawing)
+  sourceFirm       String?
+  engineerName     String?
+  engineerLicense  String?
+  sourceRef        String? // sheet / detail, e.g. "S201 / Detail 1"
+  sourceDrawingUrl String? // R2 public URL of the source-sheet image (optional)
+  sourceDrawingKey String? // R2 object key (for cleanup)
+
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  components EngineeringAssemblyComponent[]
+  sources    EngineeringAssemblySource[]
+
+  @@index([reviewStatus])
+  @@index([category])
+  @@index([isActive])
+}
+
+model EngineeringAssemblyComponent {
+  id            String  @id @default(cuid())
+  assemblyId    String
+  kind          String  @default("MEMBER") // MEMBER | CONNECTOR
+  name          String // "Wall stud" / "Hurricane strap"
+  spec          String? // "2x6 SPF #2" / size+grade
+  model         String? // connector model number, e.g. "Simpson H2.5A"
+  qtyRule       String? // "16\" o.c. / per LF" / "1 per rafter"
+  unit          String?
+  isConditional Boolean @default(false) // e.g. "only where no existing footing found"
+  notes         String?
+  sortOrder     Int     @default(0)
+
+  assembly EngineeringAssembly @relation(fields: [assemblyId], references: [id], onDelete: Cascade)
+
+  @@index([assemblyId])
+}
+
+model EngineeringAssemblySource {
+  id              String  @id @default(cuid())
+  assemblyId      String
+  projectName     String // "20 Chaplin"
+  sourceFirm      String?
+  engineerName    String?
+  engineerLicense String?
+  certNumber      String?
+  drawingDate     String?
+  status          String? // Preliminary / For Construction / signed & sealed
+  sourceRef       String? // sheet / detail
+  designCriteria  String? // wind / SDC / flood summary for this source
+  deltaNotes      String? // how this source differed from the canonical
+  rawMarkdown     String? // the original parsed entry (full fidelity, for audit)
+  createdAt       DateTime @default(now())
+
+  assembly EngineeringAssembly @relation(fields: [assemblyId], references: [id], onDelete: Cascade)
+
+  @@index([assemblyId])
+}
