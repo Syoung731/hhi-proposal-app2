@@ -156,6 +156,26 @@ function repairJSON(broken: string): string {
   return s;
 }
 
+/**
+ * Escape stray inch-mark double-quotes inside JSON string values. Construction
+ * estimates routinely contain measurements like `16" o.c.`, `3/4" plywood`, or
+ * `6" min`; if the model emits the inch symbol unescaped it terminates the JSON
+ * string early and JSON.parse fails. A real string terminator after a digit is
+ * always followed by a structural char (`,` `]` `}` `:`) or end-of-input — never
+ * by a letter — so a post-digit quote followed (after optional spaces) by a
+ * letter is an inch mark, and we escape it. Only used in the repair fallback,
+ * so a strictly-valid response is never mutated.
+ */
+function escapeStrayInchQuotes(s: string): string {
+  return s.replace(/(\d)"(?=\s*[A-Za-z])/g, '$1\\"');
+}
+
+/** Pull the byte offset out of a V8 "...in JSON at position N" parse error. */
+function jsonParseErrorPos(err: unknown): number | null {
+  const m = err instanceof Error ? err.message.match(/position (\d+)/) : null;
+  return m ? Number(m[1]) : null;
+}
+
 // ---------- Parser ----------
 
 export function parseEstimateResponse(
@@ -167,15 +187,40 @@ export function parseEstimateResponse(
   let parsed: RawEstimateResponse;
   try {
     parsed = JSON.parse(jsonStr);
-  } catch {
-    // Attempt JSON repair for truncated responses
-    try {
-      const repaired = repairJSON(jsonStr);
-      parsed = JSON.parse(repaired);
+  } catch (firstErr) {
+    // Repair fallbacks — applied ONLY after a strict parse already failed, so a
+    // valid response is never mutated. Two common failure modes in construction
+    // estimates: (a) unescaped inch-mark quotes inside strings (`16" o.c.`), and
+    // (b) truncation. Try each repair, and the combination, in turn.
+    const candidates = [
+      escapeStrayInchQuotes(jsonStr),
+      repairJSON(jsonStr),
+      repairJSON(escapeStrayInchQuotes(jsonStr)),
+    ];
+    let recovered: RawEstimateResponse | null = null;
+    for (const candidate of candidates) {
+      try {
+        recovered = JSON.parse(candidate) as RawEstimateResponse;
+        break;
+      } catch {
+        /* try the next repair */
+      }
+    }
+    if (recovered) {
       // eslint-disable-next-line no-console
-      console.warn("[ai-estimate-parser] Repaired truncated JSON successfully");
-    } catch {
-      throw new Error(`Failed to parse AI estimate JSON: ${jsonStr.slice(0, 200)}...`);
+      console.warn("[ai-estimate-parser] Recovered malformed JSON via repair");
+      parsed = recovered;
+    } else {
+      // Pinpoint the break so the failure is diagnosable instead of a blind prefix.
+      const pos = jsonParseErrorPos(firstErr);
+      const windowText =
+        pos != null
+          ? jsonStr.slice(Math.max(0, pos - 150), pos + 150)
+          : jsonStr.slice(0, 300);
+      throw new Error(
+        `Failed to parse AI estimate JSON (len=${jsonStr.length}` +
+          `${pos != null ? `, near position ${pos}` : ""}): …${windowText}…`,
+      );
     }
   }
 

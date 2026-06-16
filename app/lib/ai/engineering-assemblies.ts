@@ -140,7 +140,7 @@ function renderBlock(items: ScoredAssembly[]): string {
       "match this scope. For the relevant framing / structural / foundation work, you MUST " +
       "use the method and the PER-UNIT quantity rules shown here (do not invent an " +
       "alternative method or quantities for work these cover). Compute totals by scaling each " +
-      "per-unit rule to this room's dimensions (e.g. studs at 16\" o.c. across the wall length, " +
+      "per-unit rule to this room's dimensions (e.g. studs at 16 in o.c. across the wall length, " +
       "one strap per rafter, anchor bolts per LF). Reference the assembly name in the line-item " +
       "notes. PRICING is unchanged — still price every line through the catalog/allowance rules.",
   );
