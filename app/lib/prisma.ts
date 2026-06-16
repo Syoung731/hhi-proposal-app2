@@ -113,6 +113,12 @@ function getPrisma(): PrismaClient {
     cached.jobItem !== undefined &&
     "photoUploadToken" in cached &&
     cached.photoUploadToken !== undefined &&
+    "engineeringAssembly" in cached &&
+    cached.engineeringAssembly !== undefined &&
+    "engineeringAssemblyComponent" in cached &&
+    cached.engineeringAssemblyComponent !== undefined &&
+    "engineeringAssemblySource" in cached &&
+    cached.engineeringAssemblySource !== undefined &&
     hasAllExpectedFields(cached, REQUIRED_RECENT_FIELDS)
   ) {
     return cached;
