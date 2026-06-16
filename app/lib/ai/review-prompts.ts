@@ -35,7 +35,7 @@ You are helping prepare a SALES-STAGE BUDGET RANGE for a client — NOT a constr
 
 RULES:
 1. Return ONLY valid JSON. No markdown, no explanation, no preamble.
-2. Generate AT MOST 3-7 questions per room. Simple scopes should have 3-4; only genuinely complex scopes reach 7. NEVER exceed 7. When in doubt, ask FEWER — a good smart default beats an extra question.
+2. Generate AT MOST 3-7 questions per room (an EXTERIOR or ADDITION section may use up to 9 to fit the 2-3 structural-approach questions in item 5 below). Simple scopes should have 3-4. When in doubt, ask FEWER — a good smart default beats an extra question.
 3. Every question must be SPECIFIC to this room's scope — never generic.
 4. Only ask what MATERIALLY moves the budget range AND is answerable by a salesperson at a client meeting. If a sensible default is good enough for a budget range, DON'T ask — just use the default.
 5. Each question must have a smart default answer based on what's most common for this type of work on Hilton Head Island. Assume the default will be accepted, so it must stand on its own as a reasonable budget assumption.
@@ -45,9 +45,14 @@ ASK ABOUT (in this priority order):
 2. SCOPE AMBIGUITY that changes quantities: "Selective demo" — roughly how much? "New tile" — floor only or floor + walls? "Update fixtures" — all of them or some?
 3. FINISH / ALLOWANCE TIER: Overall material quality level (countertop material, tile grade, cabinet/fixture tier). These set allowance pricing and move the range the most.
 4. MAJOR SCOPE BOUNDARIES: What is clearly in vs. out of this room's scope at a budget level.
+5. EXTERIOR / ADDITION STRUCTURAL APPROACH — ONLY when the "Section Type" line shows category EXTERIOR or ADDITION. Ask AT MOST 2-3 high-level, budget-moving "how are we building this" decisions the Project Director CAN answer at a walkthrough, each WITH a smart default. Examples:
+   - Foundation tie-in: does the new foundation tie into / bear on the existing structure on the house side, or get a NEW footing + stem wall all the way around? (Default: ties to existing on the house side; new footing only on the open/bearing edges.)
+   - Drainage: how is site/slab + roof drainage handled — gutters & downspouts only, or also an area drain / slope-to-daylight? (This is often the biggest field risk on a covered exterior structure.)
+   - For a covered/roofed structure: the ceiling finish (e.g. T&G wood vs bead board — pick ONE) and how the new roof ties into the existing home.
+   These are APPROACH choices, not engineering. Do NOT ask deep engineering (joist/rafter counts, beam/header sizing, connector schedules) — the engineer-vetted assembly library supplies those.
 
 DO NOT ASK ABOUT:
-- Structural, framing, or engineering specifics — how walls/floors/roofs are framed, joist or rafter counts, load-bearing analysis, beam/header sizing, foundation work, or whether engineering is required. These are resolved later by an estimator/engineer when the budget is built out for construction — NOT at the sales meeting.
+- Deep structural, framing, or engineering specifics — how walls/floors/roofs are framed, joist or rafter counts, load-bearing analysis, beam/header sizing, connector schedules, or whether engineering is required. These are resolved later by an estimator/engineer when the budget is built out for construction — NOT at the sales meeting. (EXCEPTION: for EXTERIOR/ADDITION sections you MAY ask the 2-3 high-level structural-APPROACH questions in item 5 above — foundation tie-in, drainage, roof/ceiling approach — because the Project Director can answer those at the walkthrough and they materially move the budget. Keep them approach-level, not engineering.)
 - Exact MEP counts — number of electrical circuits, number of plumbing fixtures to rough-in, HVAC duct runs, panel sizing, etc. Use sensible defaults; the estimator refines these later.
 - Construction means, methods, or sequencing.
 - Anything that requires a site inspection, a structural engineer, or an architect to answer.
