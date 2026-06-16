@@ -183,6 +183,28 @@ FRAMING AND STRUCTURAL ITEMS:
   - Reference the assembly name in the line-item notes.
   - This changes WHAT and HOW MANY only — PRICING is unchanged: still price every
     line through the catalog/allowance rules above (the assemblies carry no prices).
+  - Honor the assembly's spec EXACTLY (sheathing thickness, connector model, member
+    size/grade) — do not substitute heavier or different materials.
+
+STRUCTURAL LOAD PATH (completeness — applies to every estimate):
+  Every roof and floor must have a COMPLETE, supported load path. For any roofed
+  structure carried on columns or posts (porch, pavilion, covered addition), you
+  MUST include the carrying BEAM / GIRDER / HEADER that spans between the columns to
+  support the rafters or joists, plus the beam-to-column connector. NEVER leave
+  rafters or joists bearing on nothing between supports.
+
+SECTION CATEGORY DISCIPLINE:
+  The room's "Section Category" is given in "## Room Details" (INTERIOR, EXTERIOR,
+  SYSTEMS, WHOLE_HOME, ADDITION, FAST). Apply it strictly:
+  - EXTERIOR or ADDITION: do NOT include interior-only items — no interior
+    floor-covering demo (hardwood/carpet/tile removal) UNLESS the scope explicitly
+    says existing material is being removed; no framed interior stud walls or
+    interior wall paint on open/screened sides; no indoor smoke/CO detectors. Demo
+    must reflect what ACTUALLY exists (e.g. existing concrete/slab, not interior
+    flooring). DO include the exterior essentials for any new roof: gutters &
+    downspouts, drip edge, and flashing/counter-flashing where it ties into the
+    existing structure.
+  - INTERIOR: normal interior remodel items apply.
 
 KITCHEN/BATHROOM SPECIFICATION RULES:
   If the prompt includes a KITCHEN SPECIFICATIONS or BATHROOM SPECIFICATIONS section,
@@ -347,6 +369,7 @@ export function buildUserPromptParts(
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
   vettedAssemblies?: string | null,
+  sectionCategory?: string | null,
 ): UserPromptParts {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
@@ -403,6 +426,7 @@ ${assumptionsSection}
 
 ## Room Details
 Room Type: ${roomTemplate.displayName ?? roomTemplate.name}
+Section Category: ${sectionCategory ?? "Not specified"}
 Square Footage: ${roomMetrics ? `${roomMetrics.effectiveSqFt} SF (base room ${roomMetrics.baseSqFt} SF + sub-areas ${roomMetrics.subAreaSqFt} SF)` : squareFootage ?? "Not specified — estimate based on scope"}
 Dimensions: ${dimLine}
 Ceiling Height: ${roomMetrics ? `${roomMetrics.ceilingHeightFt} ft${roomCeilingProvided ? "" : " (defaulted — not specified on room)"}` : roomDimensions?.ceilingHeightFt ? `${roomDimensions.ceilingHeightFt} ft` : "Not provided — assume 9 ft per standard assumptions"}
@@ -494,6 +518,7 @@ export function buildUserPrompt(
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
   vettedAssemblies?: string | null,
+  sectionCategory?: string | null,
 ): string {
   const { dynamicBlock, staticBlock } = buildUserPromptParts(
     roomTemplate,
@@ -508,6 +533,7 @@ export function buildUserPrompt(
     roomDetail,
     roomDetailType,
     vettedAssemblies,
+    sectionCategory,
   );
   return `${dynamicBlock}\n\n${staticBlock}`;
 }

@@ -130,7 +130,7 @@ export async function generateRoomEstimate(
       ceilingHeightIn: true,
       scopeQA: true,
       roomDetail: true,
-      sectionType: { select: { name: true } },
+      sectionType: { select: { name: true, category: true } },
     },
   });
 
@@ -175,6 +175,10 @@ export async function generateRoomEstimate(
   const roomDetailType = room
     ? classifyRoomForDetail(room.name, room.sectionType?.name)
     : null;
+  // Pricing-profile category (INTERIOR | EXTERIOR | SYSTEMS | WHOLE_HOME |
+  // ADDITION | FAST) — drives the exterior/addition scope-discipline rules in
+  // the prompt so interior-only items aren't applied to exterior/addition work.
+  const sectionCategory = room?.sectionType?.category ?? null;
 
   // ---------- Build prompt parts (split for prompt caching) ----------
 
@@ -191,6 +195,7 @@ export async function generateRoomEstimate(
     roomDetail,
     roomDetailType,
     vettedAssemblies,
+    sectionCategory,
   );
 
   // ---------- Call Claude with prompt caching ----------
