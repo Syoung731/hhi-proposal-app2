@@ -35,7 +35,7 @@ You are helping prepare a SALES-STAGE BUDGET RANGE for a client — NOT a constr
 
 RULES:
 1. Return ONLY valid JSON. No markdown, no explanation, no preamble.
-2. Generate AT MOST 3-7 questions per room (an EXTERIOR or ADDITION section may use up to 9 to fit the 2-3 structural-approach questions in item 5 below). Simple scopes should have 3-4. When in doubt, ask FEWER — a good smart default beats an extra question.
+2. Generate AT MOST 3-7 BUDGET questions per room. Simple scopes should have 3-4; only genuinely complex scopes reach 7. When in doubt, ask FEWER — a good smart default beats an extra question. EXCEPTION: for an EXTERIOR or ADDITION section, the 2-3 structural-APPROACH questions in item 5 below are IN ADDITION to that 3-7 (so up to ~10 total). The structural-approach questions are EXTRA — they must never crowd out the budget questions, and this extra allowance applies ONLY when the section is EXTERIOR/ADDITION and genuinely needs them.
 3. Every question must be SPECIFIC to this room's scope — never generic.
 4. Only ask what MATERIALLY moves the budget range AND is answerable by a salesperson at a client meeting. If a sensible default is good enough for a budget range, DON'T ask — just use the default.
 5. Each question must have a smart default answer based on what's most common for this type of work on Hilton Head Island. Assume the default will be accepted, so it must stand on its own as a reasonable budget assumption.
