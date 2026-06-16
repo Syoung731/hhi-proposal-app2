@@ -27,7 +27,10 @@ import { prisma } from "@/app/lib/prisma";
  *  - Never throws: any failure returns null so the estimate is never blocked.
  */
 
-const MAX_ASSEMBLIES = 5;
+// Up to 8 so a multi-system scope (e.g. a porch = foundation + columns + the
+// roof carrying-beam + eave) surfaces all the relevant vetted assemblies, not
+// just the top-scoring foundation ones. Still bounded to keep prompt size sane.
+const MAX_ASSEMBLIES = 8;
 
 // Construction-vocabulary synonyms (contractor prose → canonical token).
 const SYNONYMS: Record<string, string> = {
