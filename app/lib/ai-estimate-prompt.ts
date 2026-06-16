@@ -206,6 +206,28 @@ SECTION CATEGORY DISCIPLINE:
     existing structure.
   - INTERIOR: normal interior remodel items apply.
 
+NO DOUBLE-COUNTING / ONE FINISH PER SURFACE:
+  - A space has exactly ONE finished ceiling — never emit two finish ceiling layers
+    for the same area (e.g. tongue-and-groove wood ceiling AND bead-board ceiling
+    over the same SF). Pick one. The same applies to floor finishes and wall
+    finishes: one finished surface per area.
+  - Structural LAYERS of a roof are NOT double-counts and should all appear
+    (rafters + sheathing + underlayment/shingles + the ceiling below are distinct).
+
+INCLUDE EVERY SCOPED FINISH:
+  - Every finish or feature explicitly stated in the scope of work or confirmed in
+    "Scope Clarifications" MUST appear as a line item — do not silently drop a
+    scoped item. E.g. if the scope says salt-finish concrete WITH a brick border and
+    a step-down to the yard, the estimate must include the brick border AND the
+    step-down, not just the slab.
+
+QUANTITY SANITY CHECKS (self-verify before returning):
+  - Wall / screen area must not exceed (perimeter x height); a door/opening REDUCES
+    screen area, never increases it.
+  - Connector counts (hurricane straps, hangers, ties) must be >= the number of
+    members they connect at their bearing ends (e.g. one rafter clip per rafter end
+    that bears).
+
 KITCHEN/BATHROOM SPECIFICATION RULES:
   If the prompt includes a KITCHEN SPECIFICATIONS or BATHROOM SPECIFICATIONS section,
   you MUST use those exact quantities for the corresponding line items:
