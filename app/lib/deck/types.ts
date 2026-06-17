@@ -544,6 +544,10 @@ export interface InvestmentBySpaceContent extends SharedSlideFields {
   blockTextSize?: number | null;
   /** Stacked Blocks: tower width multiplier. Default 1.0. */
   towerWidth?: number | null;
+  /** Stacked Blocks: overall block/tower height multiplier. Scales every block
+   *  uniformly so a tall stack can be shrunk to fit the page (or a short list
+   *  expanded to fill it). Default 1.0. */
+  blockHeightScale?: number | null;
   /** Anchor text size multiplier (brace text / navy box). Default 1.0. */
   anchorTextSize?: number | null;
   /** Stacked Blocks: retainer foundation text size multiplier. Default 1.0. */

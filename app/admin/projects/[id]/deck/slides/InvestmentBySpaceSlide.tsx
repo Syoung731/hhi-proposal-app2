@@ -752,14 +752,16 @@ function StackedBlocksLayout({ slide, branding, hasAiBackground }: Props) {
 
   const blockScale = content.blockTextSize ?? 1;
   const towerW = content.towerWidth ?? 1;
+  const heightScale = content.blockHeightScale ?? 1;
   const anchorScale = content.anchorTextSize ?? 1;
   const retScale = content.retainerTextSize ?? 1;
   const braceX = content.braceOffsetX ?? 0;
   const braceY = content.braceOffsetY ?? 0;
 
   // Flat, reference-style proportions: tallest block ≈ 2.2× the shortest, with
-  // a smaller base unit when the project has many rooms.
-  const unit = stack.length > 6 ? 1.6 : 2.1;
+  // a smaller base unit when the project has many rooms. blockHeightScale lets
+  // the user shrink the whole tower to fit a tall stack (or expand a short one).
+  const unit = (stack.length > 6 ? 1.6 : 2.1) * heightScale;
   const blockHeight = (it: InvestmentLineItem) =>
     unit + unit * 1.2 * ((effectiveHigh(it) ?? effectiveLow(it) ?? 0) / maxHigh);
 

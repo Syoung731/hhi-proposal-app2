@@ -2408,6 +2408,13 @@ function InvestmentInspector({
           <FieldGroup label={`Tower width — ${(content.towerWidth ?? 1).toFixed(1)}×`}>
             <PSizeSlider accentColor={accent} value={content.towerWidth ?? 1} onChange={(v) => updateContent({ towerWidth: v })} />
           </FieldGroup>
+          <FieldGroup label={`Block height — ${(content.blockHeightScale ?? 1).toFixed(1)}×`}>
+            <PSizeSlider accentColor={accent} value={content.blockHeightScale ?? 1} onChange={(v) => updateContent({ blockHeightScale: v })} />
+          </FieldGroup>
+          <p style={{ fontSize: 10, color: "#9CA3AF", lineHeight: 1.4, margin: "2px 0 0" }}>
+            Shrink to fit many stacked rooms on one page; expand to fill the slide
+            when there are only a few.
+          </p>
           <FieldGroup label={`Total text — ${(content.anchorTextSize ?? 1).toFixed(1)}×`}>
             <PSizeSlider accentColor={accent} value={content.anchorTextSize ?? 1} onChange={(v) => updateContent({ anchorTextSize: v })} />
           </FieldGroup>

@@ -281,6 +281,7 @@ const DESCRIPTORS: Record<string, SlideEditDescriptor> = {
       { key: "badgeSize", kind: "size", desc: "guarantee badge size (0.5-2)" },
       { key: "blockTextSize", kind: "size", desc: "Stacked Blocks block-text size (0.5-2)" },
       { key: "towerWidth", kind: "size", desc: "Stacked Blocks tower width (0.5-2)" },
+      { key: "blockHeightScale", kind: "size", desc: "Stacked Blocks overall block/tower height — shrink to fit many rooms, expand to fill the page (0.5-2)" },
       { key: "anchorTextSize", kind: "size", desc: "money-anchor text size (0.5-2)" },
       { key: "retainerTextSize", kind: "size", desc: "retainer element text size (0.5-2)" },
       { key: "zoneTextSize", kind: "size", desc: "Blueprint zones-list text size (0.5-2)" },
