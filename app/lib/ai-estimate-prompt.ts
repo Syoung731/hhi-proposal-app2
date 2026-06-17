@@ -31,7 +31,9 @@ type RoomTemplateWithDetails = RoomTemplate & {
 const SYSTEM_PROMPT = `You are a construction estimating assistant for HHI Builders, a luxury residential renovation company on Hilton Head Island, SC. You generate detailed line-item budgets for individual rooms based on the scope of work.
 
 RULES:
-1. Return ONLY valid JSON. No markdown, no explanation, no preamble.
+1. Return ONLY valid, strictly-parseable JSON. No markdown, no explanation, no preamble.
+   - Escape every double-quote that appears inside a string value.
+   - NEVER use the inch double-quote symbol inside a string value — write "in" instead. For example use "16 in o.c.", "3/4 in plywood", "6 in min" — NOT 16" o.c. An unescaped inch mark breaks JSON parsing.
 2. For items that match the provided catalog, use the EXACT catalog item name and unitPrice. Do not modify catalog prices.
 3. For items not in the catalog, estimate a price appropriate for the Hilton Head luxury second-home market.
 4. Tag every item with a source:
@@ -168,6 +170,63 @@ FRAMING AND STRUCTURAL ITEMS:
   - HHI Builders typically replaces compromised joists or sisters the entire subfloor run, not individual joists
   - If scope mentions joist repair: include "Joist sistering/replacement" as a lump-sum or per-joist item
   - Note in the description: "Sister or replace as needed per field conditions — quantity is an estimate"
+
+  VETTED ENGINEERING ASSEMBLIES (when present):
+  - If the prompt includes a "## Vetted Engineering Assemblies" section, those are
+    ENGINEER-APPROVED methods + per-unit quantity rules from HHI's drawing library.
+  - For the structural / framing / foundation work they cover, you MUST follow that
+    method and emit line items for its members and connectors using the engineer's
+    per-unit rules (e.g. studs at the given o.c., one hurricane strap per rafter,
+    anchor bolts per LF, rebar continuous + lap). Compute the totals by scaling
+    those per-unit rules to this room's dimensions — do NOT invent a different
+    method or different quantities for work the assembly covers.
+  - Reference the assembly name in the line-item notes.
+  - This changes WHAT and HOW MANY only — PRICING is unchanged: still price every
+    line through the catalog/allowance rules above (the assemblies carry no prices).
+  - Honor the assembly's spec EXACTLY (sheathing thickness, connector model, member
+    size/grade) — do not substitute heavier or different materials.
+
+STRUCTURAL LOAD PATH (completeness — applies to every estimate):
+  Every roof and floor must have a COMPLETE, supported load path. For any roofed
+  structure carried on columns or posts (porch, pavilion, covered addition), you
+  MUST include the carrying BEAM / GIRDER / HEADER that spans between the columns to
+  support the rafters or joists, plus the beam-to-column connector. NEVER leave
+  rafters or joists bearing on nothing between supports.
+
+SECTION CATEGORY DISCIPLINE:
+  The room's "Section Category" is given in "## Room Details" (INTERIOR, EXTERIOR,
+  SYSTEMS, WHOLE_HOME, ADDITION, FAST). Apply it strictly:
+  - EXTERIOR or ADDITION: do NOT include interior-only items — no interior
+    floor-covering demo (hardwood/carpet/tile removal) UNLESS the scope explicitly
+    says existing material is being removed; no framed interior stud walls or
+    interior wall paint on open/screened sides; no indoor smoke/CO detectors. Demo
+    must reflect what ACTUALLY exists (e.g. existing concrete/slab, not interior
+    flooring). DO include the exterior essentials for any new roof: gutters &
+    downspouts, drip edge, and flashing/counter-flashing where it ties into the
+    existing structure.
+  - INTERIOR: normal interior remodel items apply.
+
+NO DOUBLE-COUNTING / ONE FINISH PER SURFACE:
+  - A space has exactly ONE finished ceiling — never emit two finish ceiling layers
+    for the same area (e.g. tongue-and-groove wood ceiling AND bead-board ceiling
+    over the same SF). Pick one. The same applies to floor finishes and wall
+    finishes: one finished surface per area.
+  - Structural LAYERS of a roof are NOT double-counts and should all appear
+    (rafters + sheathing + underlayment/shingles + the ceiling below are distinct).
+
+INCLUDE EVERY SCOPED FINISH:
+  - Every finish or feature explicitly stated in the scope of work or confirmed in
+    "Scope Clarifications" MUST appear as a line item — do not silently drop a
+    scoped item. E.g. if the scope says salt-finish concrete WITH a brick border and
+    a step-down to the yard, the estimate must include the brick border AND the
+    step-down, not just the slab.
+
+QUANTITY SANITY CHECKS (self-verify before returning):
+  - Wall / screen area must not exceed (perimeter x height); a door/opening REDUCES
+    screen area, never increases it.
+  - Connector counts (hurricane straps, hangers, ties) must be >= the number of
+    members they connect at their bearing ends (e.g. one rafter clip per rafter end
+    that bears).
 
 KITCHEN/BATHROOM SPECIFICATION RULES:
   If the prompt includes a KITCHEN SPECIFICATIONS or BATHROOM SPECIFICATIONS section,
@@ -331,6 +390,8 @@ export function buildUserPromptParts(
   scopeQA?: ScopeQAData | null,
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
+  vettedAssemblies?: string | null,
+  sectionCategory?: string | null,
 ): UserPromptParts {
   const activeTradeGroups = roomTemplate.tradeGroups.map((g) => ({
     ...g,
@@ -387,6 +448,7 @@ ${assumptionsSection}
 
 ## Room Details
 Room Type: ${roomTemplate.displayName ?? roomTemplate.name}
+Section Category: ${sectionCategory ?? "Not specified"}
 Square Footage: ${roomMetrics ? `${roomMetrics.effectiveSqFt} SF (base room ${roomMetrics.baseSqFt} SF + sub-areas ${roomMetrics.subAreaSqFt} SF)` : squareFootage ?? "Not specified — estimate based on scope"}
 Dimensions: ${dimLine}
 Ceiling Height: ${roomMetrics ? `${roomMetrics.ceilingHeightFt} ft${roomCeilingProvided ? "" : " (defaulted — not specified on room)"}` : roomDimensions?.ceilingHeightFt ? `${roomDimensions.ceilingHeightFt} ft` : "Not provided — assume 9 ft per standard assumptions"}
@@ -407,7 +469,7 @@ PRE-CALCULATED VALUES — USE THESE EXACT NUMBERS:
   - Doors: ${roomMetrics.doorCount ?? "N/A"} count${roomMetrics.doorsSF ? `, ${roomMetrics.doorsSF} SF opening area` : ""}` : ""}
 ${buildKitchenBathSpecsSection(roomDetail, roomDetailType)}
 ${buildClarificationsSection(scopeQA)}
-## Scope of Work
+${vettedAssemblies ? `${vettedAssemblies}\n\n` : ""}## Scope of Work
 ${scopeNarrative}${correctionHistory ? `\n\n${correctionHistory}` : ""}`;
 
   const staticBlock = `## Room Template Structure
@@ -477,6 +539,8 @@ export function buildUserPrompt(
   scopeQA?: ScopeQAData | null,
   roomDetail?: Record<string, unknown> | null,
   roomDetailType?: "kitchen" | "bathroom" | null,
+  vettedAssemblies?: string | null,
+  sectionCategory?: string | null,
 ): string {
   const { dynamicBlock, staticBlock } = buildUserPromptParts(
     roomTemplate,
@@ -490,6 +554,8 @@ export function buildUserPrompt(
     scopeQA,
     roomDetail,
     roomDetailType,
+    vettedAssemblies,
+    sectionCategory,
   );
   return `${dynamicBlock}\n\n${staticBlock}`;
 }

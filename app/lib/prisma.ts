@@ -8,9 +8,23 @@ import { PrismaPg } from "@prisma/adapter-pg";
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
+/**
+ * Make the Postgres SSL mode explicit. `pg` (via pg-connection-string) currently
+ * treats `sslmode=require|prefer|verify-ca` as `verify-full`, but logs a
+ * deprecation SECURITY WARNING that a future major will weaken `require` to libpq
+ * semantics. Neon's default URL uses `sslmode=require`; rewriting it to
+ * `verify-full` keeps the behavior IDENTICAL to today (full cert verification) —
+ * just stated explicitly — which silences the warning without changing how we
+ * connect. No-op when there's no sslmode param.
+ */
+function withExplicitSslMode(url: string | undefined): string | undefined {
+  if (!url) return url;
+  return url.replace(/([?&]sslmode=)(require|prefer|verify-ca)\b/i, "$1verify-full");
+}
+
 function createPrismaClient(): PrismaClient {
   const adapter = new PrismaPg({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: withExplicitSslMode(process.env.DATABASE_URL),
   });
   return new PrismaClient({
     adapter,
@@ -113,6 +127,12 @@ function getPrisma(): PrismaClient {
     cached.jobItem !== undefined &&
     "photoUploadToken" in cached &&
     cached.photoUploadToken !== undefined &&
+    "engineeringAssembly" in cached &&
+    cached.engineeringAssembly !== undefined &&
+    "engineeringAssemblyComponent" in cached &&
+    cached.engineeringAssemblyComponent !== undefined &&
+    "engineeringAssemblySource" in cached &&
+    cached.engineeringAssemblySource !== undefined &&
     hasAllExpectedFields(cached, REQUIRED_RECENT_FIELDS)
   ) {
     return cached;

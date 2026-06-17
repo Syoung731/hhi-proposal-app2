@@ -3,6 +3,7 @@ import type { Prisma } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
 import {
   publishEstimateWorkerMessage,
+  runJobItemsInline,
   type JobItemPayload,
 } from "@/app/lib/ai/estimate-job";
 import type { ProjectContext } from "@/app/lib/ai-estimate-prompt";
@@ -108,12 +109,32 @@ export async function POST(request: NextRequest) {
     const publishResults = await Promise.allSettled(
       job.items.map((it) => publishEstimateWorkerMessage(it.id)),
     );
-    const publishFailures = publishResults.filter((r) => r.status === "rejected").length;
+    const failedItemIds = job.items
+      .filter((_, i) => publishResults[i].status === "rejected")
+      .map((it) => it.id);
+    const publishFailures = failedItemIds.length;
+
+    // LOCAL-DEV inline fallback: if publishing to QStash failed (e.g. the
+    // `qstash-cli dev` proxy isn't running), run those items in-process so
+    // estimate generation "just works" on localhost without a second terminal.
+    // Fire-and-forget — the dev server stays alive to finish them and the client
+    // polls progress as usual. NEVER runs in production (a publish failure there
+    // is a real error surfaced via `publishFailures`, not something to silently
+    // run inline on a serverless function that would freeze after responding).
+    let inlineFallback = false;
+    if (publishFailures > 0 && process.env.NODE_ENV !== "production") {
+      inlineFallback = true;
+      void runJobItemsInline(failedItemIds).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error("[ai-estimate/bulk] inline dev fallback error:", e);
+      });
+    }
 
     return NextResponse.json({
       jobId: job.id,
       totalItems: job.totalItems,
       publishFailures,
+      inlineFallback,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

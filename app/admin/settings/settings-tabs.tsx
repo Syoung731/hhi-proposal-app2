@@ -29,6 +29,7 @@ export const SETTINGS_TABS: { slug: string; label: string }[] = [
   { slug: "employees", label: "Employees" },
   { slug: "integrations", label: "Integrations" },
   { slug: "ai-pricing", label: "AI Pricing" },
+  { slug: "engineering-assemblies", label: "Engineering Assemblies" },
 ];
 
 export type BrandIconForUI = {

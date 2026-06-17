@@ -89,8 +89,14 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en">
+      {/* suppressHydrationWarning: browser extensions (Scribe, Grammarly, etc.)
+          inject attributes onto <html>/<body> before React hydrates, causing a
+          benign attribute-only hydration mismatch. This suppresses ONLY that
+          one-level attribute warning on these two elements — real mismatches in
+          children are still reported. */}
+      <html lang="en" suppressHydrationWarning>
         <body
+          suppressHydrationWarning
           className={`${geistSans.variable} ${geistMono.variable} ${cormorantGaramond.variable} ${jost.variable} ${playfairDisplay.variable} ${lora.variable} ${raleway.variable} ${dmSerifDisplay.variable} ${inter.variable} ${libreBaskerville.variable} antialiased`}
         >
           {children}

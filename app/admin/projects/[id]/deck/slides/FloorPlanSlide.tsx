@@ -228,7 +228,12 @@ function CalloutMapLayout({ slide, branding, hasAiBackground, content, zones }: 
                   transform: "translateY(-50%)",
                   width: `${CARD_COL_W}%`,
                   background: theme.key === "blueprint" ? "#FFFFFF" : "#F4EFE5",
-                  border: `1px solid ${theme.color.line}`,
+                  // Use longhand sides (not the `border` shorthand) so the orange
+                  // left stripe via borderLeft doesn't mix shorthand+longhand,
+                  // which React warns about and can mis-render.
+                  borderTop: `1px solid ${theme.color.line}`,
+                  borderRight: `1px solid ${theme.color.line}`,
+                  borderBottom: `1px solid ${theme.color.line}`,
                   borderLeft: `0.28em solid ${highlight}`,
                   padding: "0.55em 0.7em",
                   zIndex: 4,

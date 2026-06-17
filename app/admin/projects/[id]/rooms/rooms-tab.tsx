@@ -1501,7 +1501,21 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
 
   async function handleDelete(roomId: string) {
     if (!confirm("Delete this section? Associated media will be unlinked.")) return;
-    await deleteRoomAction(projectId, roomId);
+    try {
+      const res = await deleteRoomAction(projectId, roomId);
+      if (res?.error) {
+        alert(res.error);
+        return;
+      }
+    } catch {
+      // Transport failure (e.g. dev-server restart / dropped connection) — the
+      // server action never returned. Surface a friendly message instead of
+      // crashing to the error overlay, and let the user refresh + retry. (The
+      // delete may have completed server-side; the refresh below would show it.)
+      alert(
+        "Couldn't reach the server to delete the section. Please refresh the page and try again.",
+      );
+    }
     router.refresh();
   }
 

@@ -10,6 +10,7 @@ import {
   type ScopeQAData,
 } from "@/app/lib/ai-estimate-prompt";
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
+import { getEngineeringAssemblies } from "@/app/lib/ai/engineering-assemblies";
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
@@ -129,7 +130,7 @@ export async function generateRoomEstimate(
       ceilingHeightIn: true,
       scopeQA: true,
       roomDetail: true,
-      sectionType: { select: { name: true } },
+      sectionType: { select: { name: true, category: true } },
     },
   });
 
@@ -164,11 +165,20 @@ export async function generateRoomEstimate(
     ? await getCorrectionHistory(roomTemplateId)
     : null;
 
+  // Engineer-vetted assemblies that match this scope (addition framing, hurricane
+  // straps, footings, CMU, etc.). Returns null for cosmetic rooms (fails closed),
+  // so it costs nothing on the ~90% of scopes with no structural match.
+  const vettedAssemblies = await getEngineeringAssemblies(scopeNarrative);
+
   const scopeQA = room?.scopeQA as ScopeQAData | null;
   const roomDetail = room?.roomDetail as Record<string, unknown> | null;
   const roomDetailType = room
     ? classifyRoomForDetail(room.name, room.sectionType?.name)
     : null;
+  // Pricing-profile category (INTERIOR | EXTERIOR | SYSTEMS | WHOLE_HOME |
+  // ADDITION | FAST) — drives the exterior/addition scope-discipline rules in
+  // the prompt so interior-only items aren't applied to exterior/addition work.
+  const sectionCategory = room?.sectionType?.category ?? null;
 
   // ---------- Build prompt parts (split for prompt caching) ----------
 
@@ -184,6 +194,8 @@ export async function generateRoomEstimate(
     scopeQA,
     roomDetail,
     roomDetailType,
+    vettedAssemblies,
+    sectionCategory,
   );
 
   // ---------- Call Claude with prompt caching ----------

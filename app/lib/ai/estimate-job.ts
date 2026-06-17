@@ -2,6 +2,12 @@ import { Client } from "@upstash/qstash";
 import type { Prisma } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
 import { getAiEstimateConcurrency } from "@/app/lib/ai/get-ai-estimate-concurrency";
+import {
+  generateRoomEstimate,
+  GenerateRoomEstimateError,
+} from "@/app/lib/ai/generate-room-estimate";
+import type { ProjectContext } from "@/app/lib/ai-estimate-prompt";
+import { mapWithConcurrency } from "@/app/lib/async-pool";
 
 /**
  * Shared QStash + job-rollup helpers used by the bulk trigger, worker, and
@@ -231,4 +237,200 @@ export async function rollUpJobStatus(
     data: { status: finalStatus, completedAt: new Date() },
   });
   return finalStatus;
+}
+
+// ─── Shared per-item processor (worker route + local-dev inline fallback) ────────
+
+/** Discriminated outcome of processing one JobItem. Never thrown for a retryable
+ *  failure — the caller decides what to do (QStash worker re-throws to retry; the
+ *  inline dev runner loops). */
+export type ProcessJobItemOutcome =
+  | { outcome: "not_found" }
+  | { outcome: "already_done"; estimateId: string | null }
+  | { outcome: "recovered"; estimateId: string }
+  | { outcome: "completed"; estimateId: string; warnings: string[]; copeAutoTriggered: boolean }
+  | { outcome: "failed_terminal"; attempts: number; error: string }
+  | { outcome: "failed_retryable"; attempts: number; error: string };
+
+/**
+ * Process one estimate JobItem end-to-end — the Phase 8C lifecycle in ONE place:
+ * idempotency short-circuit, mid-crash recovery, mark RUNNING + attempts, run
+ * generateRoomEstimate(), finalise (counters + rollUpJobStatus + COPE auto-
+ * trigger). Shared by the QStash worker route AND the local-dev inline fallback
+ * so the two paths can never drift.
+ *
+ * Returns an outcome instead of an HTTP Response/throw: the worker route maps it
+ * to a Response (re-throwing on "failed_retryable" so QStash retries), and the
+ * inline runner loops on "failed_retryable" (no QStash to redeliver in dev).
+ */
+export async function processEstimateJobItem(
+  jobItemId: string,
+): Promise<ProcessJobItemOutcome> {
+  const item = await prisma.jobItem.findUnique({
+    where: { id: jobItemId },
+    include: { estimateJob: { select: { id: true, projectId: true, startedAt: true } } },
+  });
+  if (!item) return { outcome: "not_found" };
+
+  // ---------- Idempotency ----------
+  if (item.status === "COMPLETED") {
+    return { outcome: "already_done", estimateId: item.estimateId };
+  }
+
+  // ---------- Recovery from mid-transaction crash ----------
+  if (item.status === "RUNNING" && item.startedAt) {
+    const orphan = await prisma.aIEstimate.findFirst({
+      where: {
+        projectId: item.estimateJob.projectId,
+        sectionId: item.roomId,
+        createdAt: { gte: item.startedAt },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (orphan) {
+      let rolledUpTo: "COMPLETED" | "PARTIAL" | "FAILED" | null = null;
+      await prisma.$transaction(async (tx) => {
+        await tx.jobItem.update({
+          where: { id: jobItemId },
+          data: {
+            status: "COMPLETED",
+            finishedAt: new Date(),
+            estimateId: orphan.id,
+            error: null,
+          },
+        });
+        await tx.estimateJob.update({
+          where: { id: item.estimateJobId },
+          data: { completedItems: { increment: 1 } },
+        });
+        rolledUpTo = await rollUpJobStatus(tx, item.estimateJobId);
+      });
+      if (rolledUpTo === "COMPLETED") {
+        await maybeAutoTriggerCope(item.estimateJob.projectId, item.estimateJobId);
+      }
+      return { outcome: "recovered", estimateId: orphan.id };
+    }
+    // No orphan — previous attempt failed before creating an estimate; re-run.
+  }
+
+  // ---------- Mark RUNNING ----------
+  await prisma.$transaction(async (tx) => {
+    await tx.jobItem.update({
+      where: { id: jobItemId },
+      data: { status: "RUNNING", startedAt: new Date(), attempts: { increment: 1 }, error: null },
+    });
+    if (!item.estimateJob.startedAt) {
+      await tx.estimateJob.update({
+        where: { id: item.estimateJobId },
+        data: { status: "RUNNING", startedAt: new Date() },
+      });
+    }
+  });
+
+  const reloaded = await prisma.jobItem.findUnique({
+    where: { id: jobItemId },
+    select: { attempts: true, payload: true },
+  });
+  const attemptsSoFar = reloaded?.attempts ?? 1;
+
+  // ---------- Run the estimate ----------
+  try {
+    const payload = (reloaded?.payload ?? item.payload) as unknown as JobItemPayload;
+    if (!payload?.roomTemplateId || typeof payload.scopeNarrative !== "string") {
+      throw new GenerateRoomEstimateError(
+        "NOT_FOUND",
+        `JobItem ${jobItemId} payload missing roomTemplateId or scopeNarrative`,
+      );
+    }
+
+    const result = await generateRoomEstimate({
+      projectId: item.estimateJob.projectId,
+      sectionId: item.roomId,
+      roomTemplateId: payload.roomTemplateId,
+      scopeNarrative: payload.scopeNarrative,
+      ...(payload.squareFootage != null ? { squareFootage: payload.squareFootage } : {}),
+      ...(payload.projectContext
+        ? { projectContext: payload.projectContext as ProjectContext }
+        : {}),
+    });
+
+    // ---------- Finalise ----------
+    let rolledUpTo: "COMPLETED" | "PARTIAL" | "FAILED" | null = null;
+    await prisma.$transaction(async (tx) => {
+      await tx.jobItem.update({
+        where: { id: jobItemId },
+        data: {
+          status: "COMPLETED",
+          finishedAt: new Date(),
+          estimateId: result.estimate.id,
+          error: null,
+        },
+      });
+      await tx.estimateJob.update({
+        where: { id: item.estimateJobId },
+        data: { completedItems: { increment: 1 } },
+      });
+      rolledUpTo = await rollUpJobStatus(tx, item.estimateJobId);
+    });
+
+    if (rolledUpTo === "COMPLETED") {
+      await maybeAutoTriggerCope(item.estimateJob.projectId, item.estimateJobId);
+    }
+
+    return {
+      outcome: "completed",
+      estimateId: result.estimate.id,
+      warnings: result.warnings,
+      copeAutoTriggered: rolledUpTo === "COMPLETED",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    // eslint-disable-next-line no-console
+    console.error(
+      `[estimate-job] item=${jobItemId} attempt=${attemptsSoFar} error:`,
+      message,
+    );
+
+    if (attemptsSoFar >= MAX_JOB_ITEM_ATTEMPTS) {
+      await prisma.$transaction(async (tx) => {
+        await tx.jobItem.update({
+          where: { id: jobItemId },
+          data: { status: "FAILED", finishedAt: new Date(), error: message },
+        });
+        await tx.estimateJob.update({
+          where: { id: item.estimateJobId },
+          data: { failedItems: { increment: 1 } },
+        });
+        await rollUpJobStatus(tx, item.estimateJobId);
+      });
+      return { outcome: "failed_terminal", attempts: attemptsSoFar, error: message };
+    }
+
+    // Non-terminal: reset to QUEUED so the next attempt has a clean slate.
+    await prisma.jobItem.update({
+      where: { id: jobItemId },
+      data: { status: "QUEUED", error: message, startedAt: null },
+    });
+    return { outcome: "failed_retryable", attempts: attemptsSoFar, error: message };
+  }
+}
+
+/**
+ * LOCAL-DEV ONLY inline fallback. When the QStash proxy isn't reachable on
+ * localhost, the bulk trigger runs the JobItems in-process here instead — so
+ * estimate generation "just works" without a second terminal. Fire-and-forget
+ * from the request handler (the dev server stays alive to finish it; the client
+ * polls progress as normal). Retries a retryable item up to MAX attempts since
+ * there's no QStash to redeliver. Never used in production (the bulk route gates
+ * this on NODE_ENV).
+ */
+export async function runJobItemsInline(jobItemIds: string[]): Promise<void> {
+  const concurrency = Math.max(1, Math.min(await getAiEstimateConcurrency(), 4));
+  await mapWithConcurrency(jobItemIds, concurrency, async (id) => {
+    for (let attempt = 0; attempt <= MAX_JOB_ITEM_ATTEMPTS; attempt++) {
+      const result = await processEstimateJobItem(id);
+      if (result.outcome !== "failed_retryable") return;
+    }
+  });
 }
