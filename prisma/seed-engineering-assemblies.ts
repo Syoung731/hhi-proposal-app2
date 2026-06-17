@@ -1,7 +1,14 @@
 // Standalone, idempotent seed for the engineer-vetted structural assembly KB.
 //
-// Run:
+// Run (dev — uses .env.local):
 //   npx dotenv -e .env.local -- node node_modules/tsx/dist/cli.mjs prisma/seed-engineering-assemblies.ts
+//
+// Run (PROD — SEED_DATABASE_URL is read AFTER dotenv so it wins over .env.local,
+// which force-overrides DIRECT_URL; PowerShell):
+//   $env:SEED_DATABASE_URL="<prod DIRECT (non-pooler) Neon URL>"
+//   node node_modules/tsx/dist/cli.mjs prisma/seed-engineering-assemblies.ts
+//   Remove-Item Env:\SEED_DATABASE_URL
+// The script prints the target DB host on startup — confirm dev-vs-prod before it writes.
 //
 // Source data: parsed engineering-drawing KB markdown for 20 Chaplin, 38 Heath,
 // 6 Genoa, 6 Sycamore, 87 Mooring Buoy, and the 40 Planters Wood revision letter
@@ -12,7 +19,7 @@
 // separate families disambiguated by slug + discriminator.
 //
 // Mirrors prisma/seed.ts conventions: dotenv (.env then .env.local override),
-// PrismaPg adapter on DIRECT_URL (fallback DATABASE_URL), main()/catch/finally.
+// PrismaPg adapter on SEED_DATABASE_URL → DIRECT_URL → DATABASE_URL, main()/catch/finally.
 import dotenv from "dotenv";
 import { PrismaClient } from "@/app/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -20,12 +27,28 @@ import { PrismaPg } from "@prisma/adapter-pg";
 dotenv.config({ path: ".env" });
 dotenv.config({ path: ".env.local", override: true });
 
-const seedConnectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+// SEED_DATABASE_URL is read here, AFTER the dotenv calls above, and is not a key
+// present in .env.local — so it cannot be clobbered by the `.env.local` override.
+// ALWAYS use it when targeting prod; otherwise a prod seed would silently hit the
+// dev DB whose DIRECT_URL .env.local force-overrides.
+const seedConnectionString =
+  process.env.SEED_DATABASE_URL ??
+  process.env.DIRECT_URL ??
+  process.env.DATABASE_URL;
 if (!seedConnectionString) {
   throw new Error(
-    "Neither DIRECT_URL nor DATABASE_URL is set. " +
-      "Add DIRECT_URL (non-pooler Neon URL) to .env or .env.local.",
+    "No connection string. Set SEED_DATABASE_URL (explicit target, wins over .env.local) " +
+      "or DIRECT_URL / DATABASE_URL in .env / .env.local.",
   );
+}
+
+// Safety: print the target host (never the credentials) so the operator can
+// confirm dev-vs-prod before this writes.
+try {
+  const target = new URL(seedConnectionString);
+  console.log(`[seed] target DB host: ${target.host}${target.pathname}`);
+} catch {
+  console.log("[seed] target DB host: (unparseable connection string)");
 }
 
 const adapter = new PrismaPg({ connectionString: seedConnectionString });
