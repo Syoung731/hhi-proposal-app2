@@ -1,6 +1,6 @@
 # Engineering Assembly KB + Estimate Accuracy — STATUS (read first after compaction)
 
-_Last updated: 2026-06-16. This is the authoritative "where we are" file for the
+_Last updated: 2026-06-17. This is the authoritative "where we are" file for the
 estimate-side work stream. Companion docs: `engineering-assembly-tags.md` (tag
 vocabulary + per-assembly assignments), `engineering-kb-extraction-guide.md`
 (the Claude.ai project guide), `training/engineering-assembly-kb.md` (admin
@@ -15,16 +15,21 @@ tie-in, drainage, ceiling finish) for exterior/addition sections, builds a
 Reviewed end-to-end on a real Screened Porch addition + Bahama Shutters + COPE —
 **all verified correct.** The estimate-accuracy arc is CLOSED.
 
-## Branch / ship state
-- Branch **`feat/engineering-assembly-kb`** = **18 commits ahead, 5 behind `main`**, tree clean, `tsc` clean.
-  (`main` advanced with the discovery-portal PR merges after this branch forked, so it
-  now diverges — no longer a clean fast-forward.)
-- **PUSHED to origin** (`origin/feat/engineering-assembly-kb` = local tip, 2026-06-17). **NOT merged.** Production is untouched. Steve has more work to do on the branch first.
-- **THE ONE OPEN DECISION (deferred):** merge `feat/engineering-assembly-kb` → `main` to ship to prod.
-  No longer a fast-forward — will need `main` merged into the branch (or a rebase) first,
-  then a merge to `main`. The additive migration (`20260615204620_add_engineering_assembly_kb` =
-  3 new tables only, ZERO alter/drop of existing tables) deploys safely via the
-  Vercel build's `prisma migrate deploy`. Awaiting Steve's go after his own pass + remaining work.
+## Branch / ship state — ✅ SHIPPED TO PROD (2026-06-17)
+- **MERGED to `main` + deployed.** `feat/engineering-assembly-kb` was merged into `main`
+  (`--no-ff` merge commit `05427b7`) and pushed; Vercel deployed it. The additive migration
+  (`20260615204620_add_engineering_assembly_kb` = 3 new tables only, ZERO alter/drop of
+  existing tables) applied via the build's `prisma migrate deploy`.
+- **PROD DB SEEDED.** 43 assemblies / 229 components / 76 sources written to the production
+  `neondb` (endpoint `ep-long-river-aipoc9a2`). The KB is **live** — the estimate retrieves
+  from it in prod now. (Dev DB endpoint is `ep-summer-fire-aih2grgo` — different database.)
+  - **How prod seeding works:** `vercel-build` runs `migrate deploy` (creates tables) but does
+    NOT seed. Seeding is the manual `seed-engineering-assemblies.ts` run, pointed at prod via
+    the **`SEED_DATABASE_URL`** env var (read AFTER dotenv so `.env.local` can't clobber it;
+    the script trims whitespace/quotes and logs the target host as a dev-vs-prod safety check).
+    PowerShell: `$env:SEED_DATABASE_URL="<prod DIRECT non-pooler URL, db=neondb>"; node node_modules/tsx/dist/cli.mjs prisma/seed-engineering-assemblies.ts; Remove-Item Env:\SEED_DATABASE_URL`
+  - ⚠️ The prod Neon project hosts MORE than one database — use **`neondb`**, NOT `remodel_postcards`.
+- The `feat/engineering-assembly-kb` branch is now fully merged; safe to delete whenever.
 
 ## What's built (all committed on the branch)
 - **Schema (additive):** `EngineeringAssembly` (canonical) + `EngineeringAssemblyComponent` + `EngineeringAssemblySource` (provenance/history) + `AssemblyReviewStatus` enum. No FK on existing tables (deliberate — see Deferred).
