@@ -31,10 +31,19 @@ dotenv.config({ path: ".env.local", override: true });
 // present in .env.local — so it cannot be clobbered by the `.env.local` override.
 // ALWAYS use it when targeting prod; otherwise a prod seed would silently hit the
 // dev DB whose DIRECT_URL .env.local force-overrides.
-const seedConnectionString =
+// Strip surrounding whitespace AND surrounding quotes. A leading/trailing space
+// (trivially introduced when pasting into PowerShell) is silently trimmed by
+// `new URL()` — so the host log below looks correct — but the pg driver does NOT
+// trim it and fails with a confusing "Can't reach database server" instead of a
+// parse error. Quote-stripping mirrors the defensive handling in estimate-job.ts.
+const seedConnectionString = (
   process.env.SEED_DATABASE_URL ??
   process.env.DIRECT_URL ??
-  process.env.DATABASE_URL;
+  process.env.DATABASE_URL
+)
+  ?.trim()
+  .replace(/^['"]|['"]$/g, "")
+  .trim();
 if (!seedConnectionString) {
   throw new Error(
     "No connection string. Set SEED_DATABASE_URL (explicit target, wins over .env.local) " +
