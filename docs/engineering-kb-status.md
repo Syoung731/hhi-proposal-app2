@@ -16,12 +16,15 @@ Reviewed end-to-end on a real Screened Porch addition + Bahama Shutters + COPE �
 **all verified correct.** The estimate-accuracy arc is CLOSED.
 
 ## Branch / ship state
-- Branch **`feat/engineering-assembly-kb`** = **17 commits ahead of `main`**, tree clean, `tsc` clean.
-- **NOT pushed / NOT merged.** Local only. Production is untouched.
-- **THE ONE OPEN DECISION:** merge `feat/engineering-assembly-kb` → `main` to ship to prod.
-  Fast-forward; the additive migration (`20260615204620_add_engineering_assembly_kb` =
+- Branch **`feat/engineering-assembly-kb`** = **18 commits ahead, 5 behind `main`**, tree clean, `tsc` clean.
+  (`main` advanced with the discovery-portal PR merges after this branch forked, so it
+  now diverges — no longer a clean fast-forward.)
+- **PUSHED to origin** (`origin/feat/engineering-assembly-kb` = local tip, 2026-06-17). **NOT merged.** Production is untouched. Steve has more work to do on the branch first.
+- **THE ONE OPEN DECISION (deferred):** merge `feat/engineering-assembly-kb` → `main` to ship to prod.
+  No longer a fast-forward — will need `main` merged into the branch (or a rebase) first,
+  then a merge to `main`. The additive migration (`20260615204620_add_engineering_assembly_kb` =
   3 new tables only, ZERO alter/drop of existing tables) deploys safely via the
-  Vercel build's `prisma migrate deploy`. Awaiting Steve's go after his own pass.
+  Vercel build's `prisma migrate deploy`. Awaiting Steve's go after his own pass + remaining work.
 
 ## What's built (all committed on the branch)
 - **Schema (additive):** `EngineeringAssembly` (canonical) + `EngineeringAssemblyComponent` + `EngineeringAssemblySource` (provenance/history) + `AssemblyReviewStatus` enum. No FK on existing tables (deliberate — see Deferred).
