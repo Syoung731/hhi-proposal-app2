@@ -49,10 +49,17 @@ import type {
 interface RawCostCode {
   id: string;
   name: string;
+  /** JobTread cost-code number, e.g. "01L", "29S" (null if unset). */
+  number: string | null;
   /** Pre-normalized name for matching (lowercased, punctuation stripped). */
   normName: string;
   /** Normalized tokens of the name, for token-overlap scoring. */
   tokens: string[];
+}
+
+/** Display label "<number> - <name>" (or just name when there is no number). */
+function codeLabel(c: { number: string | null; name: string }): string {
+  return c.number ? `${c.number} - ${c.name}` : c.name;
 }
 
 interface RawCostType {
@@ -194,8 +201,9 @@ async function fetchCostCodesAndTypes(): Promise<{
       const id = safeStr(n?.id);
       const name = safeStr(n?.name);
       if (!id || !name) continue;
+      const number = safeStr(n?.number);
       const normName = normalize(name);
-      codes.push({ id, name, normName, tokens: tokenize(normName) });
+      codes.push({ id, name, number, normName, tokens: tokenize(normName) });
     }
     page = safeStr(org?.costCodes?.nextPage);
     guard += 1;
@@ -259,8 +267,17 @@ class LiveCostCodeResolver implements CostCodeResolver {
     this.types = types;
     this.codeByNorm = new Map();
     for (const c of codes) {
-      // First-writer-wins on duplicate normalized names (catalog shouldn't dup).
-      if (!this.codeByNorm.has(c.normName)) this.codeByNorm.set(c.normName, c);
+      // Index every form a stored costCode might take so the push resolves
+      // regardless: plain name ("Permits - Labor"), numbered ("01L - Permits -
+      // Labor"), or the number alone ("01L"). First-writer-wins per key.
+      const keys = [c.normName];
+      if (c.number) {
+        keys.push(normalize(codeLabel(c)));
+        keys.push(normalize(c.number));
+      }
+      for (const key of keys) {
+        if (key && !this.codeByNorm.has(key)) this.codeByNorm.set(key, c);
+      }
     }
     this.typeByNorm = new Map();
     for (const t of types) {
@@ -315,7 +332,7 @@ class LiveCostCodeResolver implements CostCodeResolver {
 
     return {
       costCodeId: code.id,
-      costCodeName: code.name,
+      costCodeName: codeLabel(code),
       costTypeId: costType?.id ?? null,
       costTypeName: costType?.name ?? null,
       confidence: 1,
@@ -369,7 +386,7 @@ class LiveCostCodeResolver implements CostCodeResolver {
 
     return {
       costCodeId: best.id,
-      costCodeName: best.name,
+      costCodeName: codeLabel(best),
       costTypeId: costType?.id ?? null,
       costTypeName: costType?.name ?? null,
       confidence: Math.min(1, Math.max(0, bestScore)),
@@ -425,8 +442,10 @@ export async function getCostCodeCatalog(): Promise<{
 }> {
   const { codes, types } = await fetchCostCodesAndTypes();
   return {
+    // "<number> - <name>" so pickers show the code (e.g. "01L - Permits - Labor").
+    // Sorting by this label also orders them by code number.
     costCodes: codes
-      .map((c) => ({ id: c.id, name: c.name }))
+      .map((c) => ({ id: c.id, name: codeLabel(c) }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     costTypes: types
       .map((t) => ({ id: t.id, name: t.name }))
