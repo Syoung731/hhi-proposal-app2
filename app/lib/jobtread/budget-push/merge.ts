@@ -102,6 +102,7 @@ type LoadedEstimateLineItem = {
   unitCost: number;
   unitPrice: number;
   source: string;
+  notes: string | null;
   sortOrder: number;
 };
 
@@ -167,6 +168,7 @@ export async function buildJobTreadBudgetTree(
                 unitCost: true,
                 unitPrice: true,
                 source: true,
+                notes: true,
                 sortOrder: true,
               },
             },
@@ -474,6 +476,7 @@ function scaffoldItemFromTemplate(ti: LoadedTemplateItem): JTCostItem {
     costCodeId: null,
     costTypeName: ti.costType ?? null,
     costTypeId: null,
+    notes: null, // scaffold-only line has no estimate → no AI notes
     allowanceType: null,
     lineSource: "TEMPLATE_SCAFFOLD" satisfies JTLineSource,
     templateItemId: ti.id,
@@ -501,6 +504,7 @@ function applyEstimateToScaffold(
   if (line.unit) scaffold.unit = line.unit;
   scaffold.lineSource = "ESTIMATE";
   scaffold.estimateLineItemId = line.id;
+  scaffold.notes = line.notes ?? null; // carry the estimate's AI notes
   scaffold.allowanceType = line.source === "ALLOWANCE" ? "1" : null;
 }
 
@@ -525,6 +529,7 @@ function extraItemFromEstimate(
     costCodeId: null,
     costTypeName: null,
     costTypeId: null,
+    notes: line.notes ?? null, // carry the estimate's AI notes
     allowanceType: line.source === "ALLOWANCE" ? "1" : null,
     lineSource: "EXTRA" satisfies JTLineSource,
     estimateLineItemId: line.id,

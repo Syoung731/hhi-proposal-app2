@@ -59,6 +59,13 @@ import "server-only";
  */
 export type JTLineSource = "TEMPLATE_SCAFFOLD" | "ESTIMATE" | "EXTRA";
 
+/**
+ * JobTread custom-field id for the cost-item "Internal Notes" field (confirmed
+ * live, costItem target). The estimate line's AI notes are written here via
+ * `createCostItem`'s `customFieldValues: { [this]: notes }`.
+ */
+export const JOBTREAD_INTERNAL_NOTES_FIELD_ID = "22P68yhCDCde";
+
 // ---------------------------------------------------------------------------
 // Tree node types (the pure, in-memory merge result)
 // ---------------------------------------------------------------------------
@@ -93,6 +100,12 @@ export interface JTCostItem {
    * `fallback` (Misc-defaulted) / `fuzzy` / `unmatched` need a human choice.
    */
   costCodeMatchKind?: CostCodeMatchKind;
+  /**
+   * The estimate line's "AI NOTES" (`EstimateLineItem.notes`) — pushed to the
+   * JobTread cost item's "Internal Notes" custom field. Null for scaffold-only
+   * lines (no estimate) and estimate lines that had no notes.
+   */
+  notes: string | null;
   /**
    * JobTread allowance type, set when the source estimate line had
    * `source === "ALLOWANCE"`. Null for normal lines.

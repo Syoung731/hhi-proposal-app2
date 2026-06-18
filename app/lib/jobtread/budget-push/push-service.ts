@@ -16,7 +16,7 @@ import { prisma } from "@/app/lib/prisma";
 import { jobTreadRequest } from "@/app/lib/jobtread/client";
 import { getOrgId } from "@/app/lib/jobtread/catalog-api";
 import { mapWithConcurrency } from "@/app/lib/async-pool";
-import type { JobTreadBudgetTree } from "./types";
+import { JOBTREAD_INTERNAL_NOTES_FIELD_ID, type JobTreadBudgetTree } from "./types";
 
 /** "Job Stage" custom-field id (confirmed live). */
 export const JOB_STAGE_FIELD_ID = "22P5KyX5Me24";
@@ -120,6 +120,8 @@ export async function jtCreateCostItem(opts: {
   costCodeId?: string | null;
   costTypeId?: string | null;
   description?: string | null;
+  /** AI estimator notes → JobTread cost-item "Internal Notes" custom field. */
+  notes?: string | null;
 }): Promise<string> {
   const $: Record<string, unknown> = {
     costGroupId: opts.costGroupId,
@@ -131,6 +133,11 @@ export async function jtCreateCostItem(opts: {
   if (opts.costCodeId) $.costCodeId = opts.costCodeId;
   if (opts.costTypeId) $.costTypeId = opts.costTypeId;
   if (opts.description?.trim()) $.description = opts.description.trim();
+  // Write the AI notes into the "Internal Notes" custom field (confirmed live:
+  // createCostItem accepts customFieldValues keyed by field id).
+  if (opts.notes?.trim()) {
+    $.customFieldValues = { [JOBTREAD_INTERNAL_NOTES_FIELD_ID]: opts.notes.trim() };
+  }
   const raw = await jobTreadRequest(
     { createCostItem: { $, createdCostItem: { id: {} } } },
     { step: "createCostItem" },
@@ -266,6 +273,7 @@ export async function pushBudgetToJob(
           costCodeId: item.costCodeId,
           costTypeId: item.costTypeId,
           description: item.unit ? `Unit: ${item.unit}` : null,
+          notes: item.notes,
         }),
       );
       createdItemIds.push(...ids);

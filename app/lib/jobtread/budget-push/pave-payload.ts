@@ -37,6 +37,7 @@ import "server-only";
  * nothing.
  */
 
+import { JOBTREAD_INTERNAL_NOTES_FIELD_ID } from "./types";
 import type {
   BuildCreateJobOptions,
   BuildExistingJobOptions,
@@ -176,6 +177,12 @@ function buildCostItemInput(
   if (costCodeId != null) input.costCodeId = costCodeId;
   if (costTypeId != null) input.costTypeId = costTypeId;
   if (item.allowanceType != null) input.allowanceType = item.allowanceType;
+  // AI notes → JobTread cost-item "Internal Notes" custom field.
+  if (item.notes && item.notes.trim()) {
+    input.customFieldValues = {
+      [JOBTREAD_INTERNAL_NOTES_FIELD_ID]: item.notes.trim(),
+    };
+  }
 
   return input;
 }
