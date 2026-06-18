@@ -414,3 +414,22 @@ export async function createCostCodeResolver(): Promise<CostCodeResolver> {
   const { codes, types } = await fetchCostCodesAndTypes();
   return new LiveCostCodeResolver(codes, types);
 }
+
+/**
+ * Raw cost-code + cost-type catalog (id + name) for UI pickers — name-sorted.
+ * Shares the same single live fetch the resolver uses. Read-only.
+ */
+export async function getCostCodeCatalog(): Promise<{
+  costCodes: Array<{ id: string; name: string }>;
+  costTypes: Array<{ id: string; name: string }>;
+}> {
+  const { codes, types } = await fetchCostCodesAndTypes();
+  return {
+    costCodes: codes
+      .map((c) => ({ id: c.id, name: c.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    costTypes: types
+      .map((t) => ({ id: t.id, name: t.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}

@@ -14,7 +14,9 @@ import {
   addTemplateItem,
   updateTemplateItem,
   deleteTemplateItem,
+  deleteRoomTemplate,
   getTemplateForEdit,
+  getJobTreadCostCodeOptions,
 } from "./builder-actions";
 
 /**
@@ -28,13 +30,16 @@ export function TemplateBuilder({
   onClose,
   onSaved,
   initialMode = "blank",
+  isDraft = false,
 }: {
   templateId: string | null; // null = create mode
   onClose: () => void;
   onSaved: () => void; // notify parent to refresh its list
   initialMode?: "blank" | "from-estimate";
+  isDraft?: boolean; // true when templateId is a freshly-created draft → Cancel discards it
 }) {
   const [tplId, setTplId] = useState<string | null>(templateId);
+  const [wasCreatedHere, setWasCreatedHere] = useState(false);
   const [mode, setMode] = useState<"blank" | "from-estimate">(initialMode);
   const [sources, setSources] = useState<EstimateSourceProject[] | null>(null);
   const [selProjectId, setSelProjectId] = useState("");
@@ -51,10 +56,21 @@ export function TemplateBuilder({
   const [newCope, setNewCope] = useState(false);
   // add-group input
   const [groupName, setGroupName] = useState("");
+  // JobTread cost-code / cost-type dropdown options (names); empty => text fallback.
+  const [costCodeOptions, setCostCodeOptions] = useState<string[]>([]);
+  const [costTypeOptions, setCostTypeOptions] = useState<string[]>([]);
 
   const reload = useCallback(async (id: string) => {
     const fresh = await getTemplateForEdit(id);
     setTpl(fresh);
+  }, []);
+
+  // Load JobTread cost-code / cost-type names for the dropdowns (once). On
+  // failure the lists stay empty and the fields fall back to free text.
+  useEffect(() => {
+    getJobTreadCostCodeOptions()
+      .then((o) => { setCostCodeOptions(o.costCodes); setCostTypeOptions(o.costTypes); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -99,6 +115,7 @@ export function TemplateBuilder({
         isProjectOverhead: newCope,
       });
       setTplId(id);
+      setWasCreatedHere(true);
       setDirty(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create failed");
@@ -125,6 +142,7 @@ export function TemplateBuilder({
     try {
       const { id } = await createTemplateFromRoomEstimate(selRoomId);
       setTplId(id);
+      setWasCreatedHere(true);
       setDirty(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generate failed");
@@ -136,6 +154,26 @@ export function TemplateBuilder({
   function close() {
     if (dirty) onSaved();
     onClose();
+  }
+
+  // A freshly-created template (blank, from-estimate, or per-room) is a draft —
+  // Cancel deletes it (and, via the room FK's SetNull, unlinks any room). Editing
+  // a pre-existing template just closes (its changes are already persisted).
+  const treatAsDraft = isDraft || wasCreatedHere;
+
+  async function discard() {
+    if (!tplId || !treatAsDraft) { onClose(); return; }
+    if (!confirm("Discard this template? It will be deleted.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteRoomTemplate(tplId);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not discard the template.");
+      setBusy(false);
+    }
   }
 
   const overlay = "fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4";
@@ -304,20 +342,18 @@ export function TemplateBuilder({
                           defaultValue={it.name}
                           onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== it.name) void run(() => updateTemplateItem(it.id, { name: e.target.value })); }}
                         />
-                        <input
-                          className={`w-44 ${input}`} placeholder="Cost code (e.g. Framing - Material)"
-                          defaultValue={it.costCode ?? ""}
-                          onBlur={(e) => { if ((e.target.value.trim() || null) !== it.costCode) void run(() => updateTemplateItem(it.id, { costCode: e.target.value })); }}
+                        <CostSelect
+                          value={it.costCode ?? ""} options={costCodeOptions} placeholder="— cost code —" className={`w-48 ${input}`}
+                          onCommit={(v) => { if ((v.trim() || null) !== it.costCode) void run(() => updateTemplateItem(it.id, { costCode: v })); }}
                         />
-                        <input
-                          className={`w-28 ${input}`} placeholder="Cost type"
-                          defaultValue={it.costType ?? ""}
-                          onBlur={(e) => { if ((e.target.value.trim() || null) !== it.costType) void run(() => updateTemplateItem(it.id, { costType: e.target.value })); }}
+                        <CostSelect
+                          value={it.costType ?? ""} options={costTypeOptions} placeholder="— cost type —" className={`w-40 ${input}`}
+                          onCommit={(v) => { if ((v.trim() || null) !== it.costType) void run(() => updateTemplateItem(it.id, { costType: v })); }}
                         />
                         <button onClick={() => void run(() => deleteTemplateItem(it.id))} className="rounded px-1.5 py-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30" title="Delete item">✕</button>
                       </div>
                     ))}
-                    <AddItemRow groupId={g.id} disabled={busy} onAdd={(name, costCode, costType) => run(() => addTemplateItem(g.id, { name, costCode, costType }))} inputClass={input} />
+                    <AddItemRow groupId={g.id} disabled={busy} onAdd={(name, costCode, costType) => run(() => addTemplateItem(g.id, { name, costCode, costType }))} inputClass={input} costCodeOptions={costCodeOptions} costTypeOptions={costTypeOptions} />
                   </div>
                 </div>
               ))}
@@ -335,7 +371,14 @@ export function TemplateBuilder({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
+          <button
+            onClick={discard}
+            disabled={busy}
+            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {treatAsDraft ? "Cancel & discard" : "Cancel"}
+          </button>
           <button onClick={close} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900">Done</button>
         </div>
       </div>
@@ -348,27 +391,82 @@ function AddItemRow({
   disabled,
   onAdd,
   inputClass,
+  costCodeOptions,
+  costTypeOptions,
 }: {
   groupId: string;
   disabled: boolean;
   onAdd: (name: string, costCode: string, costType: string) => Promise<void>;
   inputClass: string;
+  costCodeOptions: string[];
+  costTypeOptions: string[];
 }) {
   const [name, setName] = useState("");
   const [costCode, setCostCode] = useState("");
   const [costType, setCostType] = useState("");
   return (
-    <div className="flex flex-wrap items-center gap-2 bg-zinc-50/60 px-3 py-1.5 dark:bg-zinc-800/40">
+    <div className="flex flex-wrap items-center gap-2 bg-zinc-50/60 px-3 py-1.5 dark:bg-zinc-800/40" data-group={groupId}>
       <input className={`min-w-[14rem] flex-1 ${inputClass}`} value={name} onChange={(e) => setName(e.target.value)} placeholder="New item name" />
-      <input className={`w-44 ${inputClass}`} value={costCode} onChange={(e) => setCostCode(e.target.value)} placeholder="Cost code (optional)" />
-      <input className={`w-28 ${inputClass}`} value={costType} onChange={(e) => setCostType(e.target.value)} placeholder="Cost type" />
+      {costCodeOptions.length === 0 ? (
+        <input className={`w-48 ${inputClass}`} value={costCode} onChange={(e) => setCostCode(e.target.value)} placeholder="Cost code (optional)" />
+      ) : (
+        <select className={`w-48 ${inputClass}`} value={costCode} onChange={(e) => setCostCode(e.target.value)}>
+          <option value="">— cost code —</option>
+          {costCode && !costCodeOptions.includes(costCode) && <option value={costCode}>{costCode}</option>}
+          {costCodeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      )}
+      {costTypeOptions.length === 0 ? (
+        <input className={`w-40 ${inputClass}`} value={costType} onChange={(e) => setCostType(e.target.value)} placeholder="Cost type" />
+      ) : (
+        <select className={`w-40 ${inputClass}`} value={costType} onChange={(e) => setCostType(e.target.value)}>
+          <option value="">— cost type —</option>
+          {costType && !costTypeOptions.includes(costType) && <option value={costType}>{costType}</option>}
+          {costTypeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      )}
       <button
         onClick={async () => { if (name.trim()) { await onAdd(name, costCode, costType); setName(""); setCostCode(""); setCostType(""); } }}
         disabled={disabled || !name.trim()}
         className="rounded px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-700"
-        // groupId intentionally unused in markup; kept for caller clarity
-        data-group={groupId}
       >+ Add item</button>
     </div>
+  );
+}
+
+/**
+ * Cost code / cost type field for an existing item row: a dropdown over the live
+ * JobTread options (uncontrolled, commits on change), falling back to a free-text
+ * input when no options loaded. Preserves a current value not present in the list.
+ */
+function CostSelect({
+  value,
+  options,
+  placeholder,
+  className,
+  onCommit,
+}: {
+  value: string;
+  options: string[];
+  placeholder: string;
+  className: string;
+  onCommit: (v: string) => void;
+}) {
+  if (options.length === 0) {
+    return (
+      <input
+        className={className}
+        placeholder={placeholder}
+        defaultValue={value}
+        onBlur={(e) => { if (e.target.value !== value) onCommit(e.target.value); }}
+      />
+    );
+  }
+  return (
+    <select className={className} defaultValue={value} onChange={(e) => onCommit(e.target.value)}>
+      <option value="">{placeholder}</option>
+      {value && !options.includes(value) && <option value={value}>{value}</option>}
+      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
   );
 }

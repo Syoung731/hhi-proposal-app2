@@ -2176,6 +2176,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       {tplBuilderId && (
         <TemplateBuilder
           templateId={tplBuilderId}
+          isDraft
           onClose={() => { setTplBuilderId(null); router.refresh(); }}
           onSaved={() => router.refresh()}
         />

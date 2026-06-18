@@ -15,6 +15,7 @@
 
 import { requireAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { getCostCodeCatalog } from "@/app/lib/jobtread/budget-push/cost-code-resolver";
 
 export interface BuilderTemplateItem {
   id: string;
@@ -200,6 +201,29 @@ export async function reorderTemplateItems(tradeGroupId: string, orderedIds: str
       }),
     ),
   );
+}
+
+// ── Cost-code / cost-type options (for builder dropdowns) ────────────────────
+
+/**
+ * JobTread costCode + costType NAMES for the Template Builder dropdowns. Fails
+ * SOFT (returns empty arrays) so the builder degrades to free-text inputs when
+ * JobTread is unreachable rather than blocking template authoring.
+ */
+export async function getJobTreadCostCodeOptions(): Promise<{
+  costCodes: string[];
+  costTypes: string[];
+}> {
+  await requireAdmin();
+  try {
+    const { costCodes, costTypes } = await getCostCodeCatalog();
+    return {
+      costCodes: costCodes.map((c) => c.name),
+      costTypes: costTypes.map((t) => t.name),
+    };
+  } catch {
+    return { costCodes: [], costTypes: [] };
+  }
 }
 
 // ── Build-from-estimate ──────────────────────────────────────────────────────
