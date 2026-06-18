@@ -100,6 +100,24 @@ const HINT_TO_COST_TYPE_NAME: Record<Exclude<CostTypeHint, null>, string> = {
 };
 
 /**
+ * Trade-name token aliases applied before fuzzy matching, to bridge common
+ * estimate/template trade names to the JobTread catalog's trade naming. Keyed by
+ * a normalized source token → the catalog's normalized token. Conservative on
+ * purpose — only unambiguous 1:1 mappings live here; genuinely ambiguous trades
+ * (e.g. "ceiling", "fixtures", "specialty", "pool") are left to fall to Misc and
+ * get flagged for manual selection. Extend as new abbreviations show up.
+ */
+const TRADE_TOKEN_ALIASES: Record<string, string> = {
+  demo: "demolition", // "Demo" / "Demo & Site Clearing" → Demolition
+  cabinetry: "cabinets",
+  closet: "closets", // "Closet" / "Closet System" → Shelving / Closets
+  miscellaneous: "misc",
+  screening: "screens", // screened-porch screening → Screens
+  landscape: "landscaping",
+  railing: "handrails", // → Decking / Porches / Handrails
+};
+
+/**
  * The org costType NAME implied by a cost-code's "- <Type>" suffix.
  * Used during fuzzy matching to derive the costType from the chosen code.
  * Keyed by normalized suffix token.
@@ -128,6 +146,11 @@ function normalize(s: string): string {
 /** Split a normalized string into non-empty tokens. */
 function tokenize(normalized: string): string[] {
   return normalized.split(" ").filter((t) => t.length > 0);
+}
+
+/** Apply the trade-name token aliases (e.g. "demo" → "demolition"). */
+function aliasTradeTokens(tokens: string[]): string[] {
+  return tokens.map((t) => TRADE_TOKEN_ALIASES[t] ?? t);
 }
 
 function safeStr(v: any): string | null {
@@ -375,7 +398,7 @@ class LiveCostCodeResolver implements CostCodeResolver {
     tradeName: string,
     costTypeHint: CostTypeHint,
   ): CostCodeResolution {
-    const tradeTokens = tokenize(normalize(tradeName));
+    const tradeTokens = aliasTradeTokens(tokenize(normalize(tradeName)));
     if (tradeTokens.length === 0) return this.miscFallback(costTypeHint);
 
     // The type-suffix word the hint targets ("material" | "subcontract").
