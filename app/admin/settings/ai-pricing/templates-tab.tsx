@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { TemplateBuilder } from "./templates/TemplateBuilder";
 
 type TemplateItem = {
   id: string;
@@ -42,6 +43,8 @@ export function TemplatesTab() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
 
   async function loadTemplates() {
     setLoading(true);
@@ -173,6 +176,12 @@ export function TemplatesTab() {
         >
           Import from JobTread
         </button>
+        <button
+          onClick={() => { setEditingTemplateId(null); setBuilderOpen(true); }}
+          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          + New Template
+        </button>
         {importResult && (
           <span className={`text-sm ${importResult.startsWith("Error") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
             {importResult}
@@ -213,6 +222,16 @@ export function TemplatesTab() {
                       {t.tradeGroups.length} trade groups · {items} items · {matched}/{items} matched
                     </span>
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTemplateId(t.id);
+                      setBuilderOpen(true);
+                    }}
+                    className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    Edit
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -346,6 +365,15 @@ export function TemplatesTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Template Builder (create / edit) */}
+      {builderOpen && (
+        <TemplateBuilder
+          templateId={editingTemplateId}
+          onClose={() => setBuilderOpen(false)}
+          onSaved={() => { void loadTemplates(); }}
+        />
       )}
     </div>
   );
