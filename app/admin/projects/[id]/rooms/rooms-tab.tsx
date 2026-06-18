@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { copeShortButtonLabel, type CopeStatus } from "@/app/admin/_estimate-job/cope-button-label";
+import { autoMatchTemplate } from "./auto-match-template";
 import type { UnmatchedRoomItem } from "./actions";
 import {
   createRoomAction,
@@ -844,29 +845,6 @@ function RendrDataGrid({ room, projectId }: { room: Room; projectId: string }) {
   );
 }
 
-/** Auto-match a room name to a template name. */
-function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): string | null {
-  const lower = roomName.toLowerCase();
-  const rules: [string[], string][] = [
-    [["kitchen"], "kitchen"],
-    [["bath", "bathroom", "powder"], "bath"],
-    [["laundry", "mud room", "mudroom"], "laundry"],
-    [["closet"], "closet"],
-    [["cope", "admin", "project execution", "overhead"], "cope"],
-  ];
-  for (const [keywords, match] of rules) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      const t = templates.find((t) => t.name.toLowerCase().includes(match));
-      if (t) return t.id;
-    }
-  }
-  // Default: Standard Room for everything else
-  return templates.find((t) => {
-    const n = t.name.toLowerCase();
-    return n.includes("standard") || n === "general" || n === "standard room";
-  })?.id ?? null;
-}
-
 type Props = {
   projectId: string;
   projectStylePresetId: string | null;
@@ -1458,7 +1436,9 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
         // Use saved roomTemplateId if available, otherwise auto-match by name
         const matches: Record<string, string | null> = {};
         for (const room of initialRooms) {
-          matches[room.id] = room.roomTemplateId ?? autoMatchTemplate(room.name, templates);
+          matches[room.id] =
+            room.roomTemplateId ??
+            autoMatchTemplate(room.name, templates, room.sectionType?.category ?? null);
         }
         setSelectedTemplates((prev) => ({ ...matches, ...prev }));
       })
@@ -2003,7 +1983,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       {showBulkEstimateModal && (
         <BulkReviewAndEstimateModal
           projectId={projectId}
-          rooms={rooms.filter((r) => !r.isProjectOverhead).map((r) => ({ id: r.id, name: r.name, scopeNarrative: r.scopeNarrative, scopeQA: r.scopeQA, isProjectOverhead: false, estimateStaleReason: r.estimateStaleReason ?? null, roomTemplateId: r.roomTemplateId ?? null }))}
+          rooms={rooms.filter((r) => !r.isProjectOverhead).map((r) => ({ id: r.id, name: r.name, scopeNarrative: r.scopeNarrative, scopeQA: r.scopeQA, isProjectOverhead: false, estimateStaleReason: r.estimateStaleReason ?? null, roomTemplateId: r.roomTemplateId ?? null, sectionCategory: r.sectionType?.category ?? null }))}
           roomTemplates={roomTemplates}
           selectedTemplates={selectedTemplates}
           projectQA={projectQA}

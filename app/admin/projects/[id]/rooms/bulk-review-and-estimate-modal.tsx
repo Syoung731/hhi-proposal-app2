@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { QuestionInput, type ReviewQuestion } from "./scope-review-modal";
 import { useEstimateJob } from "@/app/admin/_estimate-job/context";
+import { autoMatchTemplate } from "./auto-match-template";
 
 // ---------- Types ----------
 
@@ -14,6 +15,12 @@ type Room = {
   isProjectOverhead: boolean;
   estimateStaleReason?: string | null;
   roomTemplateId?: string | null;
+  /**
+   * SectionType.category (INTERIOR | EXTERIOR | ADDITION | ...). Used by
+   * autoMatchTemplate to prefer exterior-flavored templates for exterior/
+   * addition rooms. Optional — callers that don't have it pass nothing.
+   */
+  sectionCategory?: string | null;
 };
 
 type RoomTemplateOption = {
@@ -95,30 +102,6 @@ function mergeAnswer(
   return answer;
 }
 
-// ---------- Template auto-matching ----------
-
-function autoMatchTemplate(roomName: string, templates: RoomTemplateOption[]): string | null {
-  const lower = roomName.toLowerCase();
-  const rules: [string[], string][] = [
-    [["kitchen"], "kitchen"],
-    [["bath", "bathroom", "powder"], "bath"],
-    [["laundry", "mud room", "mudroom"], "laundry"],
-    [["closet"], "closet"],
-    [["cope", "admin", "project execution", "overhead"], "cope"],
-  ];
-  for (const [keywords, match] of rules) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      const t = templates.find((t) => t.name.toLowerCase().includes(match));
-      if (t) return t.id;
-    }
-  }
-  // Default: Standard Room for everything else
-  return templates.find((t) => {
-    const n = t.name.toLowerCase();
-    return n.includes("standard") || n === "general" || n === "standard room";
-  })?.id ?? null;
-}
-
 // ---------- Component ----------
 
 export function BulkReviewAndEstimateModal({
@@ -181,7 +164,7 @@ export function BulkReviewAndEstimateModal({
           hasScope: !!room.scopeNarrative?.trim(),
           hasEstimate: checkMap.get(room.id) ?? false,
           isStale: !!room.estimateStaleReason,
-          templateId: selectedTemplates[room.id] ?? room.roomTemplateId ?? autoMatchTemplate(room.name, roomTemplates),
+          templateId: selectedTemplates[room.id] ?? room.roomTemplateId ?? autoMatchTemplate(room.name, roomTemplates, room.sectionCategory ?? null),
           checked: true,
         }))
       );
