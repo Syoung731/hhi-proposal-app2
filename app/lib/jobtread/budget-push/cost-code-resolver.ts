@@ -118,6 +118,21 @@ const TRADE_TOKEN_ALIASES: Record<string, string> = {
 };
 
 /**
+ * Trades whose work is inherently subcontracted LABOR (no material supply), so a
+ * line with no explicit "- Material"/"- Install" suffix defaults to the trade's
+ * "- Subcontract" code instead of "- Material". E.g. Demolition — "Remove
+ * Existing Concrete Slab" is labor, not a material. Keyed by normalized trade
+ * token (compared against the aliased trade tokens). Extend as confirmed.
+ * An explicit "- Material" line under these trades still resolves to Material.
+ */
+const SUBCONTRACT_DEFAULT_TRADE_TOKENS = new Set<string>(["demolition"]);
+
+/** True when the trade defaults unsuffixed lines to Subcontract (labor trade). */
+function tradeDefaultsToSubcontract(tradeTokens: string[]): boolean {
+  return tradeTokens.some((t) => SUBCONTRACT_DEFAULT_TRADE_TOKENS.has(t));
+}
+
+/**
  * The org costType NAME implied by a cost-code's "- <Type>" suffix.
  * Used during fuzzy matching to derive the costType from the chosen code.
  * Keyed by normalized suffix token.
@@ -393,26 +408,35 @@ class LiveCostCodeResolver implements CostCodeResolver {
    * `SUFFIX_BONUS` tie-breaker. This prevents cross-trade mismatches like
    * "Demolition - <Material>" tie-breaking onto "Permits - Material" just
    * because both contain "Material". Fails soft to the Misc fallback.
+   *
+   * When the line name gave NO explicit type (`costTypeHint == null`) the
+   * default is trade-aware: inherently subcontracted-labor trades (Demolition,
+   * see `SUBCONTRACT_DEFAULT_TRADE_TOKENS`) default to Subcontract; every other
+   * trade defaults to Material (most unsuffixed lines are physical materials).
    */
   private resolveFuzzy(
     tradeName: string,
     costTypeHint: CostTypeHint,
   ): CostCodeResolution {
     const tradeTokens = aliasTradeTokens(tokenize(normalize(tradeName)));
-    if (tradeTokens.length === 0) return this.miscFallback(costTypeHint);
+    if (tradeTokens.length === 0) {
+      return this.miscFallback(costTypeHint ?? "Material");
+    }
 
-    // The type-suffix word the hint targets ("material" | "subcontract").
-    const suffixWord = costTypeHint
-      ? normalize(HINT_TO_CODE_SUFFIX[costTypeHint])
-      : null;
+    // Resolve the ambiguous (null) hint to a concrete default by trade.
+    const effectiveHint: Exclude<CostTypeHint, null> =
+      costTypeHint ??
+      (tradeDefaultsToSubcontract(tradeTokens) ? "Sub" : "Material");
+
+    // The type-suffix word the effective hint targets ("material"/"subcontract").
+    const suffixWord = normalize(HINT_TO_CODE_SUFFIX[effectiveHint]);
 
     let best: RawCostCode | null = null;
     let bestScore = 0;
     for (const code of this.codes) {
       const tradeScore = tokenOverlapScore(tradeTokens, code.tokens);
       if (tradeScore <= 0) continue; // must share the trade to be a candidate
-      const suffixBonus =
-        suffixWord && code.tokens.includes(suffixWord) ? SUFFIX_BONUS : 0;
+      const suffixBonus = code.tokens.includes(suffixWord) ? SUFFIX_BONUS : 0;
       const score = tradeScore + suffixBonus;
       if (score > bestScore) {
         bestScore = score;
@@ -422,17 +446,17 @@ class LiveCostCodeResolver implements CostCodeResolver {
 
     if (!best) {
       // No code shares the trade name — park it under Misc, flagged for review.
-      return this.miscFallback(costTypeHint);
+      return this.miscFallback(effectiveHint);
     }
 
     // Cost type comes from the MATCHED code's "- <Type>" suffix so the costCode
-    // and costType are always consistent; fall back to the hint's intended type
-    // only if the matched code's suffix is unrecognized.
+    // and costType are always consistent; fall back to the effective hint's
+    // intended type only if the matched code's suffix is unrecognized.
     let costType = this.costTypeFromCodeName(best.name);
-    if (!costType && costTypeHint) {
+    if (!costType) {
       costType =
         this.typeByNorm.get(
-          normalize(HINT_TO_COST_TYPE_NAME[costTypeHint]),
+          normalize(HINT_TO_COST_TYPE_NAME[effectiveHint]),
         ) ?? null;
     }
 
