@@ -195,10 +195,12 @@ export interface JobTreadBudgetTree {
  * - `fuzzy` — no template code (an `EXTRA` line); resolved by fuzzy-matching
  *   the trade name + Material/Install/Sub hint against the live costCode list.
  *   The push UI shows these for per-line verify/override.
- * - `unmatched` — nothing matched; ids are null and the push UI must require
- *   a manual selection before sending.
+ * - `fallback` — nothing matched, so defaulted to the "Misc" cost code (by cost
+ *   type) so the line is still pushable; the push UI flags these for review.
+ * - `unmatched` — not even a Misc fallback was available; ids are null and the
+ *   push UI must require a manual selection before sending.
  */
-export type CostCodeMatchKind = "template-exact" | "fuzzy" | "unmatched";
+export type CostCodeMatchKind = "template-exact" | "fuzzy" | "fallback" | "unmatched";
 
 /**
  * Resolved JobTread cost code + cost type for a single line.

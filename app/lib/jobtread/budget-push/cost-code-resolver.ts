@@ -261,6 +261,8 @@ class LiveCostCodeResolver implements CostCodeResolver {
   private readonly codeByNorm: Map<string, RawCostCode>;
   /** Exact-name lookup for costTypes, keyed by normalized name. */
   private readonly typeByNorm: Map<string, RawCostType>;
+  /** "Misc - <type>" catch-all codes per hint, for the never-null fallback. */
+  private readonly miscByHint: Partial<Record<Exclude<CostTypeHint, null>, RawCostCode>>;
 
   constructor(codes: RawCostCode[], types: RawCostType[]) {
     this.codes = codes;
@@ -282,6 +284,15 @@ class LiveCostCodeResolver implements CostCodeResolver {
     this.typeByNorm = new Map();
     for (const t of types) {
       if (!this.typeByNorm.has(t.normName)) this.typeByNorm.set(t.normName, t);
+    }
+    // Precompute the "Misc - <type>" catch-all codes (e.g. 50M/50L/50S) for the
+    // never-null fallback so custom/unmatched items are still pushable.
+    this.miscByHint = {};
+    for (const c of codes) {
+      if (!c.normName.includes("misc")) continue;
+      if (c.normName.includes("material")) this.miscByHint.Material ??= c;
+      else if (c.normName.includes("labor")) this.miscByHint.Install ??= c;
+      else if (c.normName.includes("subcontract")) this.miscByHint.Sub ??= c;
     }
   }
 
@@ -350,7 +361,7 @@ class LiveCostCodeResolver implements CostCodeResolver {
     costTypeHint: CostTypeHint,
   ): CostCodeResolution {
     const tradeNorm = normalize(tradeName);
-    if (!tradeNorm) return { ...UNMATCHED };
+    if (!tradeNorm) return this.miscFallback(costTypeHint);
 
     const suffix = costTypeHint ? HINT_TO_CODE_SUFFIX[costTypeHint] : null;
     const targetName = suffix ? `${tradeName} - ${suffix}` : tradeName;
@@ -367,7 +378,7 @@ class LiveCostCodeResolver implements CostCodeResolver {
     }
 
     if (!best || bestScore < FUZZY_FLOOR) {
-      return { ...UNMATCHED };
+      return this.miscFallback(costTypeHint);
     }
 
     // Cost type: prefer the hint's intended type (so "Install" lands on Labor
@@ -391,6 +402,33 @@ class LiveCostCodeResolver implements CostCodeResolver {
       costTypeName: costType?.name ?? null,
       confidence: Math.min(1, Math.max(0, bestScore)),
       matchKind: "fuzzy",
+    };
+  }
+
+  /**
+   * Never-null fallback: park an unmatched item under "Misc - <type>" so it is
+   * still pushable (JobTread requires a costCodeId on every cost item). Unknown
+   * cost type defaults to Labor. Returns UNMATCHED only when the org has no Misc
+   * code at all. matchKind "fallback" → the push UI flags it for review.
+   */
+  private miscFallback(hint: CostTypeHint): CostCodeResolution {
+    const effective: Exclude<CostTypeHint, null> = hint ?? "Install";
+    const misc =
+      this.miscByHint[effective] ??
+      this.miscByHint.Install ??
+      this.miscByHint.Material ??
+      this.miscByHint.Sub;
+    if (!misc) return { ...UNMATCHED };
+    const costType =
+      this.typeByNorm.get(normalize(HINT_TO_COST_TYPE_NAME[effective])) ??
+      this.costTypeFromCodeName(misc.name);
+    return {
+      costCodeId: misc.id,
+      costCodeName: codeLabel(misc),
+      costTypeId: costType?.id ?? null,
+      costTypeName: costType?.name ?? null,
+      confidence: 0.1,
+      matchKind: "fallback",
     };
   }
 
