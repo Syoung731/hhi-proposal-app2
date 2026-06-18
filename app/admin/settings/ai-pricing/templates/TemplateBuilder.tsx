@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   type BuilderTemplate,
+  type EstimateSourceProject,
   createRoomTemplate,
+  createTemplateFromRoomEstimate,
+  listEstimateSources,
   updateRoomTemplate,
   addTradeGroup,
   updateTradeGroup,
@@ -24,12 +27,18 @@ export function TemplateBuilder({
   templateId,
   onClose,
   onSaved,
+  initialMode = "blank",
 }: {
   templateId: string | null; // null = create mode
   onClose: () => void;
   onSaved: () => void; // notify parent to refresh its list
+  initialMode?: "blank" | "from-estimate";
 }) {
   const [tplId, setTplId] = useState<string | null>(templateId);
+  const [mode, setMode] = useState<"blank" | "from-estimate">(initialMode);
+  const [sources, setSources] = useState<EstimateSourceProject[] | null>(null);
+  const [selProjectId, setSelProjectId] = useState("");
+  const [selRoomId, setSelRoomId] = useState("");
   const [tpl, setTpl] = useState<BuilderTemplate | null>(null);
   const [loading, setLoading] = useState<boolean>(templateId != null);
   const [busy, setBusy] = useState(false);
@@ -98,6 +107,32 @@ export function TemplateBuilder({
     }
   }
 
+  // Load promotable estimates when the user picks "from estimate" in create mode.
+  useEffect(() => {
+    if (tplId || mode !== "from-estimate" || sources !== null) return;
+    listEstimateSources()
+      .then((s) => setSources(s))
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load estimates"));
+  }, [tplId, mode, sources]);
+
+  async function handleGenerateFromEstimate() {
+    if (!selRoomId) {
+      setError("Pick a project and room first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const { id } = await createTemplateFromRoomEstimate(selRoomId);
+      setTplId(id);
+      setDirty(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Generate failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function close() {
     if (dirty) onSaved();
     onClose();
@@ -111,35 +146,94 @@ export function TemplateBuilder({
 
   // ── Create mode ───────────────────────────────────────────────────────────
   if (!tplId) {
+    const selProject = (sources ?? []).find((p) => p.id === selProjectId) ?? null;
+    const toggleBtn = (active: boolean) =>
+      `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "border border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"}`;
     return (
       <div className={overlay} role="dialog" aria-modal="true" onClick={close}>
         <div className={panel} style={{ maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
           <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
             <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">New Room Template</h3>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Build a template (e.g. an exterior template) to scaffold estimates and push to JobTread.
+              Build from an existing AI estimate (recommended), or start blank. Created inactive — review &amp; activate to accept.
             </p>
+            <div className="mt-3 flex gap-2">
+              <button className={toggleBtn(mode === "from-estimate")} onClick={() => setMode("from-estimate")}>From an estimate</button>
+              <button className={toggleBtn(mode === "blank")} onClick={() => setMode("blank")}>Blank</button>
+            </div>
           </div>
+
           <div className="space-y-3 px-6 py-4">
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-            <label className="block">
-              <span className="text-xs font-medium text-zinc-500">Name</span>
-              <input className={`mt-1 w-full ${input}`} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Exterior — Porch / Deck" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-zinc-500">Display name (optional)</span>
-              <input className={`mt-1 w-full ${input}`} value={newDisplay} onChange={(e) => setNewDisplay(e.target.value)} placeholder="Porch / Deck" />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-              <input type="checkbox" checked={newCope} onChange={(e) => setNewCope(e.target.checked)} />
-              Project-overhead (COPE) template
-            </label>
+
+            {mode === "from-estimate" ? (
+              sources === null ? (
+                <p className="py-4 text-center text-sm text-zinc-500">Loading estimates…</p>
+              ) : sources.length === 0 ? (
+                <p className="py-4 text-center text-sm text-zinc-500">No projects have an AI estimate yet.</p>
+              ) : (
+                <>
+                  <label className="block">
+                    <span className="text-xs font-medium text-zinc-500">Project</span>
+                    <select
+                      className={`mt-1 w-full ${input}`}
+                      value={selProjectId}
+                      onChange={(e) => { setSelProjectId(e.target.value); setSelRoomId(""); }}
+                    >
+                      <option value="">Select a project…</option>
+                      {sources.map((p) => (<option key={p.id} value={p.id}>{p.title}</option>))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-zinc-500">Room / estimate to promote</span>
+                    <select
+                      className={`mt-1 w-full ${input}`}
+                      value={selRoomId}
+                      onChange={(e) => setSelRoomId(e.target.value)}
+                      disabled={!selProject}
+                    >
+                      <option value="">Select a room…</option>
+                      {(selProject?.rooms ?? []).map((r) => (
+                        <option key={r.roomId} value={r.roomId}>
+                          {r.roomName} — {r.lineItemCount} items{r.templateName ? ` (est. as ${r.templateName})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="text-xs text-zinc-400">
+                    We&apos;ll group the estimate&apos;s line items by trade, drop quantities &amp; prices, and carry cost codes — then you can edit before activating.
+                  </p>
+                </>
+              )
+            ) : (
+              <>
+                <label className="block">
+                  <span className="text-xs font-medium text-zinc-500">Name</span>
+                  <input className={`mt-1 w-full ${input}`} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Exterior — Porch / Deck" />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-zinc-500">Display name (optional)</span>
+                  <input className={`mt-1 w-full ${input}`} value={newDisplay} onChange={(e) => setNewDisplay(e.target.value)} placeholder="Porch / Deck" />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <input type="checkbox" checked={newCope} onChange={(e) => setNewCope(e.target.checked)} />
+                  Project-overhead (COPE) template
+                </label>
+              </>
+            )}
           </div>
+
           <div className="flex items-center justify-end gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
             <button onClick={close} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">Cancel</button>
-            <button onClick={handleCreate} disabled={busy || !newName.trim()} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900">
-              {busy ? "Creating…" : "Create & edit"}
-            </button>
+            {mode === "from-estimate" ? (
+              <button onClick={handleGenerateFromEstimate} disabled={busy || !selRoomId} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900">
+                {busy ? "Generating…" : "Generate & edit"}
+              </button>
+            ) : (
+              <button onClick={handleCreate} disabled={busy || !newName.trim()} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900">
+                {busy ? "Creating…" : "Create & edit"}
+              </button>
+            )}
           </div>
         </div>
       </div>

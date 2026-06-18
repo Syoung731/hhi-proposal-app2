@@ -45,6 +45,7 @@ export function TemplatesTab() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [builderMode, setBuilderMode] = useState<"blank" | "from-estimate">("blank");
 
   async function loadTemplates() {
     setLoading(true);
@@ -177,7 +178,13 @@ export function TemplatesTab() {
           Import from JobTread
         </button>
         <button
-          onClick={() => { setEditingTemplateId(null); setBuilderOpen(true); }}
+          onClick={() => { setEditingTemplateId(null); setBuilderMode("from-estimate"); setBuilderOpen(true); }}
+          className="rounded-lg border border-orange-300 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300 dark:hover:bg-orange-900/20"
+        >
+          + Build from Estimate
+        </button>
+        <button
+          onClick={() => { setEditingTemplateId(null); setBuilderMode("blank"); setBuilderOpen(true); }}
           className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           + New Template
@@ -371,6 +378,7 @@ export function TemplatesTab() {
       {builderOpen && (
         <TemplateBuilder
           templateId={editingTemplateId}
+          initialMode={builderMode}
           onClose={() => setBuilderOpen(false)}
           onSaved={() => { void loadTemplates(); }}
         />
