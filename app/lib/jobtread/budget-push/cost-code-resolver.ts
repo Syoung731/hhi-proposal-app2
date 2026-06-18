@@ -121,11 +121,14 @@ const TRADE_TOKEN_ALIASES: Record<string, string> = {
  * Trades whose work is inherently subcontracted LABOR (no material supply), so a
  * line with no explicit "- Material"/"- Install" suffix defaults to the trade's
  * "- Subcontract" code instead of "- Material". E.g. Demolition — "Remove
- * Existing Concrete Slab" is labor, not a material. Keyed by normalized trade
- * token (compared against the aliased trade tokens). Extend as confirmed.
- * An explicit "- Material" line under these trades still resolves to Material.
+ * Existing Concrete Slab" is labor, not a material. Keyed by a distinctive
+ * normalized trade token (compared against the aliased trade tokens):
+ *   "demolition" → Demolition
+ *   "clean"      → Construction Clean / Final Construction Clean
+ * Extend as Steve confirms more subcontracted-labor trades. An explicit
+ * "- Material" line under these trades still resolves to Material.
  */
-const SUBCONTRACT_DEFAULT_TRADE_TOKENS = new Set<string>(["demolition"]);
+const SUBCONTRACT_DEFAULT_TRADE_TOKENS = new Set<string>(["demolition", "clean"]);
 
 /** True when the trade defaults unsuffixed lines to Subcontract (labor trade). */
 function tradeDefaultsToSubcontract(tradeTokens: string[]): boolean {
