@@ -1,0 +1,416 @@
+/**
+ * Live JobTread cost-code / cost-type resolver for the template-overlay budget push.
+ *
+ * `createCostCodeResolver()` fetches the org's full costCode + costType catalog
+ * ONCE (the expensive part) and returns a synchronous `CostCodeResolver` whose
+ * `resolve()` is called per pushed line.
+ *
+ * # Resolution strategy (per the contract in ./types.ts)
+ *   1. Template-exact — if the line carried an authoritative template
+ *      `costCodeName` / `costTypeName` (from `RoomTemplateItem.costCode` /
+ *      `.costType`), match them by EXACT (normalized) name against the live
+ *      catalog. Highest confidence (1, matchKind "template-exact").
+ *   2. Fuzzy — otherwise compose a target costCode name from the trade name +
+ *      the Material/Install/Sub hint ("<Trade> - <Material|Labor|Subcontract>")
+ *      and pick the live costCode with the best normalized token overlap.
+ *      The chosen code's "- <Type>" suffix selects the costType id. matchKind
+ *      "fuzzy", confidence in (0, 1).
+ *   3. Unmatched — nothing reasonable matched: all ids/names null, confidence 0,
+ *      matchKind "unmatched". NEVER throws.
+ *
+ * # Cost-code naming convention (live, confirmed)
+ *   costCodes are named "<Trade> - <Type>", e.g. "Framing - Material",
+ *   "Framing - Labor", "Framing - Subcontract". costTypes are the 5 org types:
+ *   Labor, Materials, Other, Subcontractor, "Sub Labor / Materials".
+ *
+ * # Hint → costCode-suffix → costType mapping
+ *   "Material" → "Material"     suffix → costType "Materials"
+ *   "Install"  → "Labor"        suffix → costType "Labor"
+ *   "Sub"      → "Subcontract"  suffix → costType "Subcontractor"
+ *
+ * Server-only — built from the JobTread Pave API via the shared client.
+ */
+import "server-only";
+
+import { jobTreadRequest } from "@/app/lib/jobtread/client";
+import { getOrgId } from "@/app/lib/jobtread/catalog-api";
+import type {
+  CostCodeResolution,
+  CostCodeResolver,
+  CostTypeHint,
+} from "@/app/lib/jobtread/budget-push/types";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+// ---------------------------------------------------------------------------
+// Raw catalog row shapes (the part of the live catalog we cache)
+// ---------------------------------------------------------------------------
+
+interface RawCostCode {
+  id: string;
+  name: string;
+  /** Pre-normalized name for matching (lowercased, punctuation stripped). */
+  normName: string;
+  /** Normalized tokens of the name, for token-overlap scoring. */
+  tokens: string[];
+}
+
+interface RawCostType {
+  id: string;
+  name: string;
+  normName: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hint → cost-code suffix / cost-type name mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * The cost-code-name suffix each line-level hint targets.
+ * "Material" → "Material", "Install" → "Labor", "Sub" → "Subcontract".
+ */
+const HINT_TO_CODE_SUFFIX: Record<Exclude<CostTypeHint, null>, string> = {
+  Material: "Material",
+  Install: "Labor",
+  Sub: "Subcontract",
+};
+
+/**
+ * The org costType NAME each line-level hint maps to.
+ * "Material" → "Materials", "Install" → "Labor", "Sub" → "Subcontractor".
+ */
+const HINT_TO_COST_TYPE_NAME: Record<Exclude<CostTypeHint, null>, string> = {
+  Material: "Materials",
+  Install: "Labor",
+  Sub: "Subcontractor",
+};
+
+/**
+ * The org costType NAME implied by a cost-code's "- <Type>" suffix.
+ * Used during fuzzy matching to derive the costType from the chosen code.
+ * Keyed by normalized suffix token.
+ */
+const CODE_SUFFIX_TO_COST_TYPE_NAME: Record<string, string> = {
+  material: "Materials",
+  materials: "Materials",
+  labor: "Labor",
+  subcontract: "Subcontractor",
+  subcontractor: "Subcontractor",
+};
+
+// ---------------------------------------------------------------------------
+// Normalization helpers
+// ---------------------------------------------------------------------------
+
+/** Lowercase, strip punctuation, collapse whitespace. */
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Split a normalized string into non-empty tokens. */
+function tokenize(normalized: string): string[] {
+  return normalized.split(" ").filter((t) => t.length > 0);
+}
+
+function safeStr(v: any): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+// ---------------------------------------------------------------------------
+// Pave query for the org's costCodes + costTypes (one fetch)
+// ---------------------------------------------------------------------------
+
+// JobTread caps Pave connection page size (~100); larger sizes 400. costCodes
+// are paginated; costTypes are few (5 today) and fit one small page.
+const PAGE_SIZE = 100;
+
+function buildOrgCostTypesQuery(orgId: string): Record<string, unknown> {
+  return {
+    organization: {
+      $: { id: orgId },
+      costTypes: {
+        $: { size: 50 },
+        nodes: { id: {}, name: {} },
+      },
+    },
+  };
+}
+
+function buildOrgCostCodesPageQuery(
+  orgId: string,
+  page: string | null,
+): Record<string, unknown> {
+  return {
+    organization: {
+      $: { id: orgId },
+      costCodes: {
+        $: { size: PAGE_SIZE, ...(page != null ? { page } : {}) },
+        nextPage: {},
+        nodes: { id: {}, name: {}, number: {} },
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Catalog fetch
+// ---------------------------------------------------------------------------
+
+async function fetchCostCodesAndTypes(): Promise<{
+  codes: RawCostCode[];
+  types: RawCostType[];
+}> {
+  const orgId = await getOrgId();
+
+  // costTypes — single small fetch.
+  const typesRaw = (await jobTreadRequest(buildOrgCostTypesQuery(orgId), {
+    step: "orgCostTypes",
+  })) as any;
+  const typesOrg = typesRaw?.organization ?? typesRaw?.data?.organization;
+  const typeNodes: any[] = typesOrg?.costTypes?.nodes ?? [];
+  const types: RawCostType[] = [];
+  for (const n of typeNodes) {
+    const id = safeStr(n?.id);
+    const name = safeStr(n?.name);
+    if (!id || !name) continue;
+    types.push({ id, name, normName: normalize(name) });
+  }
+
+  // costCodes — paginated (page size capped; loop until nextPage is null).
+  const codes: RawCostCode[] = [];
+  let page: string | null = null;
+  let guard = 0;
+  do {
+    const raw = (await jobTreadRequest(buildOrgCostCodesPageQuery(orgId, page), {
+      step: "orgCostCodes",
+    })) as any;
+    const org = raw?.organization ?? raw?.data?.organization;
+    const codeNodes: any[] = org?.costCodes?.nodes ?? [];
+    for (const n of codeNodes) {
+      const id = safeStr(n?.id);
+      const name = safeStr(n?.name);
+      if (!id || !name) continue;
+      const normName = normalize(name);
+      codes.push({ id, name, normName, tokens: tokenize(normName) });
+    }
+    page = safeStr(org?.costCodes?.nextPage);
+    guard += 1;
+  } while (page && guard < 20);
+
+  return { codes, types };
+}
+
+// ---------------------------------------------------------------------------
+// Scoring
+// ---------------------------------------------------------------------------
+
+const UNMATCHED: CostCodeResolution = {
+  costCodeId: null,
+  costCodeName: null,
+  costTypeId: null,
+  costTypeName: null,
+  confidence: 0,
+  matchKind: "unmatched",
+};
+
+/**
+ * Token-overlap score in [0, 1] between a target token set and a candidate.
+ * Symmetric-ish: counts shared tokens over the union so a candidate that is a
+ * strict superset still scores high but not perfect.
+ */
+function tokenOverlapScore(target: string[], candidate: string[]): number {
+  if (target.length === 0 || candidate.length === 0) return 0;
+  const candSet = new Set(candidate);
+  let shared = 0;
+  for (const t of target) {
+    if (candSet.has(t)) shared++;
+  }
+  if (shared === 0) return 0;
+  const union = new Set([...target, ...candidate]).size;
+  return shared / union;
+}
+
+/**
+ * Minimum fuzzy confidence below which we treat the result as unmatched.
+ * Token overlap of a single shared trade token against a two-token code yields
+ * ~0.33; we keep the floor low enough to accept "<Trade>" alone matching but
+ * high enough to reject codes that share no meaningful trade token.
+ */
+const FUZZY_FLOOR = 0.2;
+
+// ---------------------------------------------------------------------------
+// Resolver implementation
+// ---------------------------------------------------------------------------
+
+class LiveCostCodeResolver implements CostCodeResolver {
+  private readonly codes: RawCostCode[];
+  private readonly types: RawCostType[];
+  /** Exact-name lookup for costCodes, keyed by normalized name. */
+  private readonly codeByNorm: Map<string, RawCostCode>;
+  /** Exact-name lookup for costTypes, keyed by normalized name. */
+  private readonly typeByNorm: Map<string, RawCostType>;
+
+  constructor(codes: RawCostCode[], types: RawCostType[]) {
+    this.codes = codes;
+    this.types = types;
+    this.codeByNorm = new Map();
+    for (const c of codes) {
+      // First-writer-wins on duplicate normalized names (catalog shouldn't dup).
+      if (!this.codeByNorm.has(c.normName)) this.codeByNorm.set(c.normName, c);
+    }
+    this.typeByNorm = new Map();
+    for (const t of types) {
+      if (!this.typeByNorm.has(t.normName)) this.typeByNorm.set(t.normName, t);
+    }
+  }
+
+  resolve(
+    tradeName: string,
+    costTypeHint: CostTypeHint,
+    templateCostCodeName?: string | null,
+    templateCostTypeName?: string | null,
+  ): CostCodeResolution {
+    // ---- 1. Template-exact ------------------------------------------------
+    const exact = this.resolveTemplateExact(
+      templateCostCodeName,
+      templateCostTypeName,
+    );
+    if (exact) return exact;
+
+    // ---- 2. Fuzzy ---------------------------------------------------------
+    return this.resolveFuzzy(tradeName, costTypeHint);
+  }
+
+  /**
+   * Exact (normalized) name match against the live catalog using the
+   * authoritative template cost code / cost type. Returns null when no
+   * template costCodeName was given OR it didn't match a live code — the
+   * caller falls through to fuzzy in that case.
+   */
+  private resolveTemplateExact(
+    templateCostCodeName?: string | null,
+    templateCostTypeName?: string | null,
+  ): CostCodeResolution | null {
+    const codeName = safeStr(templateCostCodeName ?? null);
+    if (!codeName) return null;
+
+    const code = this.codeByNorm.get(normalize(codeName));
+    if (!code) return null;
+
+    // Resolve the cost type: prefer the explicit template costType name; else
+    // derive it from the matched code's "- <Type>" suffix.
+    let costType: RawCostType | null = null;
+
+    const typeName = safeStr(templateCostTypeName ?? null);
+    if (typeName) {
+      costType = this.typeByNorm.get(normalize(typeName)) ?? null;
+    }
+    if (!costType) {
+      costType = this.costTypeFromCodeName(code.name);
+    }
+
+    return {
+      costCodeId: code.id,
+      costCodeName: code.name,
+      costTypeId: costType?.id ?? null,
+      costTypeName: costType?.name ?? null,
+      confidence: 1,
+      matchKind: "template-exact",
+    };
+  }
+
+  /**
+   * Compose "<Trade> - <Material|Labor|Subcontract>" from the trade name + hint
+   * and pick the best live costCode by token overlap. The chosen code's suffix
+   * selects the costType. Fails soft to "unmatched".
+   */
+  private resolveFuzzy(
+    tradeName: string,
+    costTypeHint: CostTypeHint,
+  ): CostCodeResolution {
+    const tradeNorm = normalize(tradeName);
+    if (!tradeNorm) return { ...UNMATCHED };
+
+    const suffix = costTypeHint ? HINT_TO_CODE_SUFFIX[costTypeHint] : null;
+    const targetName = suffix ? `${tradeName} - ${suffix}` : tradeName;
+    const targetTokens = tokenize(normalize(targetName));
+
+    let best: RawCostCode | null = null;
+    let bestScore = 0;
+    for (const code of this.codes) {
+      const score = tokenOverlapScore(targetTokens, code.tokens);
+      if (score > bestScore) {
+        bestScore = score;
+        best = code;
+      }
+    }
+
+    if (!best || bestScore < FUZZY_FLOOR) {
+      return { ...UNMATCHED };
+    }
+
+    // Cost type: prefer the hint's intended type (so "Install" lands on Labor
+    // even if the matched code's suffix wording differs); fall back to the
+    // matched code's own suffix.
+    let costType: RawCostType | null = null;
+    if (costTypeHint) {
+      costType =
+        this.typeByNorm.get(
+          normalize(HINT_TO_COST_TYPE_NAME[costTypeHint]),
+        ) ?? null;
+    }
+    if (!costType) {
+      costType = this.costTypeFromCodeName(best.name);
+    }
+
+    return {
+      costCodeId: best.id,
+      costCodeName: best.name,
+      costTypeId: costType?.id ?? null,
+      costTypeName: costType?.name ?? null,
+      confidence: Math.min(1, Math.max(0, bestScore)),
+      matchKind: "fuzzy",
+    };
+  }
+
+  /**
+   * Derive the org costType from a costCode name's trailing "- <Type>" segment,
+   * e.g. "Framing - Material" → Materials, "Framing - Labor" → Labor,
+   * "Framing - Subcontract" → Subcontractor. Returns null when the suffix is
+   * unrecognized or the implied type isn't in the live catalog.
+   */
+  private costTypeFromCodeName(codeName: string): RawCostType | null {
+    const dash = codeName.lastIndexOf("-");
+    if (dash < 0) return null;
+    const suffixNorm = normalize(codeName.slice(dash + 1));
+    if (!suffixNorm) return null;
+    const typeName = CODE_SUFFIX_TO_COST_TYPE_NAME[suffixNorm];
+    if (!typeName) return null;
+    return this.typeByNorm.get(normalize(typeName)) ?? null;
+  }
+}
+
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a `CostCodeResolver` over the live JobTread costCode/costType catalog.
+ * The catalog is fetched ONCE here; the returned resolver is synchronous and
+ * holds the lookup maps in memory for the lifetime of the instance.
+ *
+ * The fetch failing (network / config) propagates as a `JobTreadApiError` /
+ * `JobTreadConfigError` from the client — that's a build-time failure the
+ * caller should surface before any write. Per-line `resolve()` itself never
+ * throws and fails soft to "unmatched".
+ */
+export async function createCostCodeResolver(): Promise<CostCodeResolver> {
+  const { codes, types } = await fetchCostCodesAndTypes();
+  return new LiveCostCodeResolver(codes, types);
+}

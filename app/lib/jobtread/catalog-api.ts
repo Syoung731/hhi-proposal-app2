@@ -105,7 +105,7 @@ const FALLBACK_ORG_ID = "22P3uKaSn7Ca";
 
 let _cachedOrgId: string | null = null;
 
-async function getOrgId(): Promise<string> {
+export async function getOrgId(): Promise<string> {
   if (_cachedOrgId) return _cachedOrgId;
 
   // Try to resolve dynamically via currentGrant
