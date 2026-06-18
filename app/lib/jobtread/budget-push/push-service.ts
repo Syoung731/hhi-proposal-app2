@@ -160,7 +160,11 @@ export interface JTJobLite { id: string; name: string; number: string | null; cl
 export interface JTLocationLite { id: string; name: string | null; jobs: JTJobLite[]; }
 export interface JTCustomerLite { id: string; name: string; }
 
-/** ACTIVE customer accounts (not archived), id + name, paginated, name-sorted. */
+/**
+ * Customer accounts that are NOT archived AND have at least one OPEN job
+ * (a job with `closedOn == null`) — mirrors JobTread's "Archived At does not
+ * exist" + "Open Jobs > 0" filter. id + name, paginated, name-sorted.
+ */
 export async function listCustomers(): Promise<JTCustomerLite[]> {
   const orgId = await getOrgId();
   const out: JTCustomerLite[] = [];
@@ -168,14 +172,30 @@ export async function listCustomers(): Promise<JTCustomerLite[]> {
   let guard = 0;
   do {
     const raw: any = await jobTreadRequest(
-      { organization: { $: { id: orgId }, accounts: { $: { size: 100, where: ["type", "customer"], ...(page ? { page } : {}) }, nextPage: {}, nodes: { id: {}, name: {}, archivedAt: {} } } } },
+      {
+        organization: {
+          $: { id: orgId },
+          accounts: {
+            $: { size: 100, where: ["type", "customer"], ...(page ? { page } : {}) },
+            nextPage: {},
+            nodes: {
+              id: {},
+              name: {},
+              archivedAt: {},
+              // open-job count for this account (jobs with no closedOn)
+              openJobs: { _: "jobs", $: { where: ["closedOn", null] }, count: {} },
+            },
+          },
+        },
+      },
       { step: "listCustomers" },
     );
     const acc = readField(raw, "organization")?.accounts;
     for (const n of acc?.nodes ?? []) {
       const id = str(n?.id), name = str(n?.name);
-      // archivedAt is set when the customer is archived → exclude (active only).
-      if (id && name && !str(n?.archivedAt)) out.push({ id, name });
+      const openJobs = Number(n?.openJobs?.count ?? 0);
+      // Active (not archived) AND has at least one open job.
+      if (id && name && !str(n?.archivedAt) && openJobs > 0) out.push({ id, name });
     }
     page = str(acc?.nextPage);
     guard += 1;
