@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { copeShortButtonLabel, type CopeStatus } from "@/app/admin/_estimate-job/cope-button-label";
 import { autoMatchTemplate } from "./auto-match-template";
+import { TemplateBuilder } from "@/app/admin/settings/ai-pricing/templates/TemplateBuilder";
+import { createTemplateFromRoomEstimate } from "@/app/admin/settings/ai-pricing/templates/builder-actions";
 import type { UnmatchedRoomItem } from "./actions";
 import {
   createRoomAction,
@@ -1366,6 +1368,37 @@ function RoomSubAreasEditor({
   );
 }
 
+/**
+ * Per-room prompt shown above a room in the sections list when the room has an
+ * AI estimate but isn't yet linked to a saved Room Template — lets the user
+ * promote that estimate into a template right there. Self-gating (renders null
+ * otherwise).
+ */
+function CreateTemplateFromEstimateButton({
+  room,
+  busy,
+  onClick,
+}: {
+  room: { roomTemplateId?: string | null; pricingTier?: string | null };
+  busy: boolean;
+  onClick: () => void;
+}) {
+  if (room.roomTemplateId || room.pricingTier !== "AI_ESTIMATE") return null;
+  return (
+    <div className="mb-1 flex justify-end">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        title="This room isn't backed by a saved template — build one from its AI estimate."
+        className="rounded-md border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-300"
+      >
+        {busy ? "Creating template…" : "+ Create template from this estimate"}
+      </button>
+    </div>
+  );
+}
+
 export function RoomsTab({ projectId, projectStylePresetId: initialProjectStylePresetId, defaultCeilingHeightFt: initialCeilingHeight, rooms: initialRooms, projectQA, stylePresets, sectionTypes, roomTypeLowPct = DEFAULT_LOW_PCT, roomTypeHighPct = DEFAULT_HIGH_PCT, projectCopeStatus }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1388,6 +1421,9 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   const [showBulkEstimateModal, setShowBulkEstimateModal] = useState(false);
   const [estimateRefreshKey, setEstimateRefreshKey] = useState(0);
   const [reviewingRoomId, setReviewingRoomId] = useState<string | null>(null);
+  // Template Builder opened from a room's estimate ("Create template from this estimate").
+  const [tplBuilderId, setTplBuilderId] = useState<string | null>(null);
+  const [creatingTplFor, setCreatingTplFor] = useState<string | null>(null);
   // Project-level review is now handled by the unified BulkReviewAndEstimateModal
   const [rewritingRoomId, setRewritingRoomId] = useState<string | null>(null);
   const [unmatchedRooms, setUnmatchedRooms] = useState<UnmatchedRoomItem[] | null>(null);
@@ -1478,6 +1514,22 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       },
     })
   );
+
+  async function handleCreateTemplateFromRoom(roomId: string) {
+    setCreatingTplFor(roomId);
+    try {
+      const { id } = await createTemplateFromRoomEstimate(roomId);
+      // Link the room to its new (inactive) template so the prompt resolves; the
+      // user reviews + activates it in the builder to "accept".
+      await updateRoomTemplateAction(projectId, roomId, id);
+      setSelectedTemplates((prev) => ({ ...prev, [roomId]: id }));
+      setTplBuilderId(id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not create a template from this estimate.");
+    } finally {
+      setCreatingTplFor(null);
+    }
+  }
 
   async function handleDelete(roomId: string) {
     if (!confirm("Delete this section? Associated media will be unlinked.")) return;
@@ -2013,8 +2065,9 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
       {!mounted || editingId ? (
         <div className="space-y-2">
             {rooms.filter((r) => !r.isProjectOverhead).map((room) => (
+            <div key={room.id} className="space-y-1">
+            <CreateTemplateFromEstimateButton room={room} busy={creatingTplFor === room.id} onClick={() => handleCreateTemplateFromRoom(room.id)} />
             <StaticRoomCard
-              key={room.id}
               projectId={projectId}
               room={room}
               activeRoomTypes={activeRoomTypes}
@@ -2046,6 +2099,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
               estimateRefreshKey={estimateRefreshKey}
               onReviewScope={() => setReviewingRoomId(room.id)}
             />
+            </div>
           ))}
         </div>
       ) : (
@@ -2060,8 +2114,9 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           >
             <div className="space-y-2">
               {rooms.filter((r) => !r.isProjectOverhead).map((room) => (
+                <div key={room.id} className="space-y-1">
+                <CreateTemplateFromEstimateButton room={room} busy={creatingTplFor === room.id} onClick={() => handleCreateTemplateFromRoom(room.id)} />
                 <SortableRoomCard
-                  key={room.id}
                   projectId={projectId}
                   room={room}
                   activeRoomTypes={activeRoomTypes}
@@ -2093,6 +2148,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
                   estimateRefreshKey={estimateRefreshKey}
                   onReviewScope={() => setReviewingRoomId(room.id)}
                 />
+                </div>
               ))}
             </div>
           </SortableContext>
@@ -2115,6 +2171,15 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
         />
       )}
       {/* Project-level review is now handled by the unified BulkReviewAndEstimateModal */}
+
+      {/* Template Builder — opened from a room's "Create template from estimate" */}
+      {tplBuilderId && (
+        <TemplateBuilder
+          templateId={tplBuilderId}
+          onClose={() => { setTplBuilderId(null); router.refresh(); }}
+          onSaved={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }
