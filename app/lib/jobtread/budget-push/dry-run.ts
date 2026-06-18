@@ -53,6 +53,13 @@ export interface BudgetPushDryRun {
  * Derive the Material / Install (labor) / Sub hint from a line's name suffix,
  * matching the convention documented on `CostCodeResolver.resolve`: names follow
  * "[PREFIX] Item - Material" / " - Install" (Sub for subcontract).
+ *
+ * An "Install"/"Labor" line is later routed to the trade's "- Subcontract" cost
+ * code by the resolver (HHI subs out trade labor). Anything that doesn't clearly
+ * read as install/labor/sub defaults to MATERIAL — most unsuffixed estimate
+ * lines (e.g. "[FRM] Roof Sheathing - 19/32 in OSB", "[ROF] Architectural
+ * Shingles") are physical materials, and a concrete default beats a null hint
+ * (which made the resolver pick an arbitrary "<Trade>" code).
  */
 export function costTypeHintFromName(name: string): CostTypeHint {
   const lower = name.toLowerCase();
@@ -62,7 +69,7 @@ export function costTypeHintFromName(name: string): CostTypeHint {
   if (lower.includes("material")) return "Material";
   if (lower.includes("labor") || lower.includes("install")) return "Install";
   if (lower.includes("sub")) return "Sub";
-  return null;
+  return "Material";
 }
 
 /** Resolve a costCode/costType for every line in place; returns the unmatched count. */

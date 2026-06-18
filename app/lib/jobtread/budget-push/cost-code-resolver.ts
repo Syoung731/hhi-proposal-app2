@@ -25,8 +25,14 @@
  *
  * # Hint → costCode-suffix → costType mapping
  *   "Material" → "Material"     suffix → costType "Materials"
- *   "Install"  → "Labor"        suffix → costType "Labor"
+ *   "Install"  → "Subcontract"  suffix → costType "Subcontractor"
  *   "Sub"      → "Subcontract"  suffix → costType "Subcontractor"
+ *
+ *   HHI subcontracts its trade install/labor work, so an "Install" (or "Labor")
+ *   line routes to the trade's "- Subcontract" cost code, NOT "- Labor".
+ *   Genuine in-house labor (admin/supervision/permit fees) carries an explicit
+ *   "- Labor" cost code in the template and resolves via the template-exact path,
+ *   which this hint mapping never overrides.
  *
  * Server-only — built from the JobTread Pave API via the shared client.
  */
@@ -74,21 +80,22 @@ interface RawCostType {
 
 /**
  * The cost-code-name suffix each line-level hint targets.
- * "Material" → "Material", "Install" → "Labor", "Sub" → "Subcontract".
+ * "Material" → "Material", "Install"/"Sub" → "Subcontract".
+ * (HHI subs out install/labor work, so Install routes to "- Subcontract".)
  */
 const HINT_TO_CODE_SUFFIX: Record<Exclude<CostTypeHint, null>, string> = {
   Material: "Material",
-  Install: "Labor",
+  Install: "Subcontract",
   Sub: "Subcontract",
 };
 
 /**
  * The org costType NAME each line-level hint maps to.
- * "Material" → "Materials", "Install" → "Labor", "Sub" → "Subcontractor".
+ * "Material" → "Materials", "Install"/"Sub" → "Subcontractor".
  */
 const HINT_TO_COST_TYPE_NAME: Record<Exclude<CostTypeHint, null>, string> = {
   Material: "Materials",
-  Install: "Labor",
+  Install: "Subcontractor",
   Sub: "Subcontractor",
 };
 
@@ -243,12 +250,12 @@ function tokenOverlapScore(target: string[], candidate: string[]): number {
 }
 
 /**
- * Minimum fuzzy confidence below which we treat the result as unmatched.
- * Token overlap of a single shared trade token against a two-token code yields
- * ~0.33; we keep the floor low enough to accept "<Trade>" alone matching but
- * high enough to reject codes that share no meaningful trade token.
+ * Bonus added when a candidate code also carries the hint's type suffix
+ * ("Material"/"Subcontract"). Kept well below a single shared trade token so the
+ * TRADE identity always dominates — a same-trade code beats a different-trade
+ * code that merely shares the type word.
  */
-const FUZZY_FLOOR = 0.2;
+const SUFFIX_BONUS = 0.25;
 
 // ---------------------------------------------------------------------------
 // Resolver implementation
@@ -285,15 +292,18 @@ class LiveCostCodeResolver implements CostCodeResolver {
     for (const t of types) {
       if (!this.typeByNorm.has(t.normName)) this.typeByNorm.set(t.normName, t);
     }
-    // Precompute the "Misc - <type>" catch-all codes (e.g. 50M/50L/50S) for the
+    // Precompute the "Misc - <type>" catch-all codes (e.g. 50M/50S) for the
     // never-null fallback so custom/unmatched items are still pushable.
     this.miscByHint = {};
     for (const c of codes) {
       if (!c.normName.includes("misc")) continue;
       if (c.normName.includes("material")) this.miscByHint.Material ??= c;
-      else if (c.normName.includes("labor")) this.miscByHint.Install ??= c;
       else if (c.normName.includes("subcontract")) this.miscByHint.Sub ??= c;
+      // "Misc - Labor" (50L) is intentionally NOT used as a default target —
+      // install/labor lines route to the Subcontract misc below.
     }
+    // Install/Labor lines fall back to the Subcontract misc (HHI subs the work).
+    this.miscByHint.Install = this.miscByHint.Sub;
   }
 
   resolve(
@@ -352,47 +362,55 @@ class LiveCostCodeResolver implements CostCodeResolver {
   }
 
   /**
-   * Compose "<Trade> - <Material|Labor|Subcontract>" from the trade name + hint
-   * and pick the best live costCode by token overlap. The chosen code's suffix
-   * selects the costType. Fails soft to "unmatched".
+   * Pick the best live costCode for "<Trade>" + the Material/Subcontract hint.
+   *
+   * The TRADE name is the dominant signal: a candidate must share at least one
+   * trade token, and trade-token overlap outweighs the type suffix. A candidate
+   * that also carries the hint's suffix ("Material"/"Subcontract") gets a small
+   * `SUFFIX_BONUS` tie-breaker. This prevents cross-trade mismatches like
+   * "Demolition - <Material>" tie-breaking onto "Permits - Material" just
+   * because both contain "Material". Fails soft to the Misc fallback.
    */
   private resolveFuzzy(
     tradeName: string,
     costTypeHint: CostTypeHint,
   ): CostCodeResolution {
-    const tradeNorm = normalize(tradeName);
-    if (!tradeNorm) return this.miscFallback(costTypeHint);
+    const tradeTokens = tokenize(normalize(tradeName));
+    if (tradeTokens.length === 0) return this.miscFallback(costTypeHint);
 
-    const suffix = costTypeHint ? HINT_TO_CODE_SUFFIX[costTypeHint] : null;
-    const targetName = suffix ? `${tradeName} - ${suffix}` : tradeName;
-    const targetTokens = tokenize(normalize(targetName));
+    // The type-suffix word the hint targets ("material" | "subcontract").
+    const suffixWord = costTypeHint
+      ? normalize(HINT_TO_CODE_SUFFIX[costTypeHint])
+      : null;
 
     let best: RawCostCode | null = null;
     let bestScore = 0;
     for (const code of this.codes) {
-      const score = tokenOverlapScore(targetTokens, code.tokens);
+      const tradeScore = tokenOverlapScore(tradeTokens, code.tokens);
+      if (tradeScore <= 0) continue; // must share the trade to be a candidate
+      const suffixBonus =
+        suffixWord && code.tokens.includes(suffixWord) ? SUFFIX_BONUS : 0;
+      const score = tradeScore + suffixBonus;
       if (score > bestScore) {
         bestScore = score;
         best = code;
       }
     }
 
-    if (!best || bestScore < FUZZY_FLOOR) {
+    if (!best) {
+      // No code shares the trade name — park it under Misc, flagged for review.
       return this.miscFallback(costTypeHint);
     }
 
-    // Cost type: prefer the hint's intended type (so "Install" lands on Labor
-    // even if the matched code's suffix wording differs); fall back to the
-    // matched code's own suffix.
-    let costType: RawCostType | null = null;
-    if (costTypeHint) {
+    // Cost type comes from the MATCHED code's "- <Type>" suffix so the costCode
+    // and costType are always consistent; fall back to the hint's intended type
+    // only if the matched code's suffix is unrecognized.
+    let costType = this.costTypeFromCodeName(best.name);
+    if (!costType && costTypeHint) {
       costType =
         this.typeByNorm.get(
           normalize(HINT_TO_COST_TYPE_NAME[costTypeHint]),
         ) ?? null;
-    }
-    if (!costType) {
-      costType = this.costTypeFromCodeName(best.name);
     }
 
     return {
@@ -408,16 +426,16 @@ class LiveCostCodeResolver implements CostCodeResolver {
   /**
    * Never-null fallback: park an unmatched item under "Misc - <type>" so it is
    * still pushable (JobTread requires a costCodeId on every cost item). Unknown
-   * cost type defaults to Labor. Returns UNMATCHED only when the org has no Misc
-   * code at all. matchKind "fallback" → the push UI flags it for review.
+   * cost type defaults to Material. Returns UNMATCHED only when the org has no
+   * Misc code at all. matchKind "fallback" → the push UI flags it for review.
    */
   private miscFallback(hint: CostTypeHint): CostCodeResolution {
-    const effective: Exclude<CostTypeHint, null> = hint ?? "Install";
+    const effective: Exclude<CostTypeHint, null> = hint ?? "Material";
     const misc =
       this.miscByHint[effective] ??
-      this.miscByHint.Install ??
       this.miscByHint.Material ??
-      this.miscByHint.Sub;
+      this.miscByHint.Sub ??
+      this.miscByHint.Install;
     if (!misc) return { ...UNMATCHED };
     const costType =
       this.typeByNorm.get(normalize(HINT_TO_COST_TYPE_NAME[effective])) ??

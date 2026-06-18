@@ -103,7 +103,10 @@ function deriveCostTypeHint(item: JTCostItem): CostTypeHint {
   if (/\s-\s*sub\b/.test(name) || name.endsWith("- sub")) {
     return "Sub";
   }
-  return null;
+  // Default to Material — most unsuffixed lines are physical materials, and the
+  // resolver routes Install/Labor to Subcontract separately. (Mirrors
+  // costTypeHintFromName in dry-run.ts.)
+  return "Material";
 }
 
 /**
