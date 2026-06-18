@@ -128,9 +128,35 @@ model Project {
   copeGeneratedAt DateTime?
   copeError       String?
 
+  // JobTread budget-push linkage (Phase 2). Set when the estimate is pushed to a
+  // JobTread job. jobtreadJobId is unique — one HHI project maps to one JT job.
+  jobtreadJobId          String?              @unique
+  jobtreadJobNumber      String?
+  jobtreadAccountId      String?
+  jobtreadLocationId     String?
+  // Set when a budget is pushed — acts as a "push once" lock until unlocked.
+  jobtreadBudgetLockedAt DateTime?
+  jobtreadPushedItems    JobTreadPushedItem[]
+
   @@index([status])
   @@index([createdAt])
   @@index([stylePresetId])
+}
+
+/**
+ * Cost groups + cost items WE created in JobTread for a project's budget push.
+ * Recorded so a later Overwrite (Phase 3) can replace exactly what we pushed
+ * without disturbing anything added manually in JobTread.
+ */
+model JobTreadPushedItem {
+  id         String   @id @default(cuid())
+  projectId  String
+  jobtreadId String // the created JobTread cost group / cost item id
+  kind       String // "COST_GROUP" | "COST_ITEM"
+  pushedAt   DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 /**
