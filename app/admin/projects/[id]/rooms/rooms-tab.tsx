@@ -6,6 +6,7 @@ import { copeShortButtonLabel, type CopeStatus } from "@/app/admin/_estimate-job
 import { autoMatchTemplate } from "./auto-match-template";
 import { TemplateBuilder } from "@/app/admin/settings/ai-pricing/templates/TemplateBuilder";
 import { createTemplateFromRoomEstimate } from "@/app/admin/settings/ai-pricing/templates/builder-actions";
+import { PushToJobTreadModal } from "../jobtread-push/PushToJobTreadModal";
 import type { UnmatchedRoomItem } from "./actions";
 import {
   createRoomAction,
@@ -1424,6 +1425,7 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
   // Template Builder opened from a room's estimate ("Create template from this estimate").
   const [tplBuilderId, setTplBuilderId] = useState<string | null>(null);
   const [creatingTplFor, setCreatingTplFor] = useState<string | null>(null);
+  const [showPushModal, setShowPushModal] = useState(false);
   // Project-level review is now handled by the unified BulkReviewAndEstimateModal
   const [rewritingRoomId, setRewritingRoomId] = useState<string | null>(null);
   const [unmatchedRooms, setUnmatchedRooms] = useState<UnmatchedRoomItem[] | null>(null);
@@ -1787,6 +1789,13 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Add section
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPushModal(true)}
+            className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-300"
+          >
+            Push to JobTread
           </button>
           <button
             type="button"
@@ -2180,6 +2189,11 @@ export function RoomsTab({ projectId, projectStylePresetId: initialProjectStyleP
           onClose={() => { setTplBuilderId(null); router.refresh(); }}
           onSaved={() => router.refresh()}
         />
+      )}
+
+      {/* Push to JobTread (Phase 2) */}
+      {showPushModal && (
+        <PushToJobTreadModal projectId={projectId} onClose={() => { setShowPushModal(false); router.refresh(); }} />
       )}
     </div>
   );

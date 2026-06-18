@@ -88,6 +88,12 @@ export interface JTCostItem {
   /** Resolved JobTread costType id (null if unresolved — push UI must verify). */
   costTypeId: string | null;
   /**
+   * How the cost code was resolved (set during the resolve pass). The push
+   * modal flags anything that isn't `template-exact` for per-line verify —
+   * `fallback` (Misc-defaulted) / `fuzzy` / `unmatched` need a human choice.
+   */
+  costCodeMatchKind?: CostCodeMatchKind;
+  /**
    * JobTread allowance type, set when the source estimate line had
    * `source === "ALLOWANCE"`. Null for normal lines.
    */
