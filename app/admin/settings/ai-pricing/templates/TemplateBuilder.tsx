@@ -17,6 +17,7 @@ import {
   deleteRoomTemplate,
   getTemplateForEdit,
   getJobTreadCostCodeOptions,
+  getTemplateUsage,
 } from "./builder-actions";
 
 /**
@@ -172,6 +173,42 @@ export function TemplateBuilder({
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not discard the template.");
+      setBusy(false);
+    }
+  }
+
+  // Delete an EXISTING template — warn (with the specific projects/rooms) when
+  // it's in use, since deletion unlinks those rooms + strips it from their
+  // estimates (Room/AIEstimate.roomTemplateId are SetNull).
+  async function handleDelete() {
+    if (!tplId) return;
+    setBusy(true);
+    setError(null);
+    let affected: string[];
+    try {
+      affected = (await getTemplateUsage(tplId)).affected;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not check template usage.");
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    let msg: string;
+    if (affected.length > 0) {
+      const shown = affected.slice(0, 15).join("\n• ");
+      const more = affected.length > 15 ? `\n…and ${affected.length - 15} more` : "";
+      msg = `⚠️ Removing this template will affect ${affected.length} room(s):\n\n• ${shown}${more}\n\nThose rooms will be unlinked and lose this template from their estimate. Delete anyway?`;
+    } else {
+      msg = "Delete this template? It isn't used by any project. This can't be undone.";
+    }
+    if (!confirm(msg)) return;
+    setBusy(true);
+    try {
+      await deleteRoomTemplate(tplId);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete the template.");
       setBusy(false);
     }
   }
@@ -371,15 +408,28 @@ export function TemplateBuilder({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
-          <button
-            onClick={discard}
-            disabled={busy}
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            {treatAsDraft ? "Cancel & discard" : "Cancel"}
-          </button>
-          <button onClick={close} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900">Done</button>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
+          {treatAsDraft ? (
+            <span />
+          ) : (
+            <button
+              onClick={handleDelete}
+              disabled={busy}
+              className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+            >
+              Delete template
+            </button>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={discard}
+              disabled={busy}
+              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {treatAsDraft ? "Cancel & discard" : "Cancel"}
+            </button>
+            <button onClick={close} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900">Done</button>
+          </div>
         </div>
       </div>
     </div>

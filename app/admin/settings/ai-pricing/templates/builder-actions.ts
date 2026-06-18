@@ -92,6 +92,35 @@ export async function deleteRoomTemplate(id: string): Promise<void> {
   await prisma.roomTemplate.delete({ where: { id } });
 }
 
+export interface TemplateUsage {
+  /** Unique "Project — Room" labels that reference this template (room link or estimate). */
+  affected: string[];
+}
+
+/**
+ * What deleting a template would affect: rooms linked via `Room.roomTemplateId`
+ * and estimates referencing it via `AIEstimate.roomTemplateId`. Both relations
+ * are `onDelete: SetNull`, so deletion unlinks those rooms and strips the
+ * template from their estimates — surface that before the user confirms.
+ */
+export async function getTemplateUsage(templateId: string): Promise<TemplateUsage> {
+  await requireAdmin();
+  const [rooms, estimates] = await Promise.all([
+    prisma.room.findMany({
+      where: { roomTemplateId: templateId },
+      select: { name: true, project: { select: { title: true } } },
+    }),
+    prisma.aIEstimate.findMany({
+      where: { roomTemplateId: templateId },
+      select: { section: { select: { name: true } }, project: { select: { title: true } } },
+    }),
+  ]);
+  const labels = new Set<string>();
+  for (const r of rooms) labels.add(`${r.project.title} — ${r.name}`);
+  for (const e of estimates) labels.add(`${e.project.title} — ${e.section.name}`);
+  return { affected: Array.from(labels).sort() };
+}
+
 // ── Trade-group-level ──────────────────────────────────────────────────────
 
 export async function addTradeGroup(templateId: string, name: string): Promise<{ id: string }> {
