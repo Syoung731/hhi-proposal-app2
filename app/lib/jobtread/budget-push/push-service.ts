@@ -160,7 +160,7 @@ export interface JTJobLite { id: string; name: string; number: string | null; cl
 export interface JTLocationLite { id: string; name: string | null; jobs: JTJobLite[]; }
 export interface JTCustomerLite { id: string; name: string; }
 
-/** All customer accounts (id + name), paginated, name-sorted. */
+/** ACTIVE customer accounts (not archived), id + name, paginated, name-sorted. */
 export async function listCustomers(): Promise<JTCustomerLite[]> {
   const orgId = await getOrgId();
   const out: JTCustomerLite[] = [];
@@ -168,13 +168,14 @@ export async function listCustomers(): Promise<JTCustomerLite[]> {
   let guard = 0;
   do {
     const raw: any = await jobTreadRequest(
-      { organization: { $: { id: orgId }, accounts: { $: { size: 100, where: ["type", "customer"], ...(page ? { page } : {}) }, nextPage: {}, nodes: { id: {}, name: {} } } } },
+      { organization: { $: { id: orgId }, accounts: { $: { size: 100, where: ["type", "customer"], ...(page ? { page } : {}) }, nextPage: {}, nodes: { id: {}, name: {}, archivedAt: {} } } } },
       { step: "listCustomers" },
     );
     const acc = readField(raw, "organization")?.accounts;
     for (const n of acc?.nodes ?? []) {
       const id = str(n?.id), name = str(n?.name);
-      if (id && name) out.push({ id, name });
+      // archivedAt is set when the customer is archived → exclude (active only).
+      if (id && name && !str(n?.archivedAt)) out.push({ id, name });
     }
     page = str(acc?.nextPage);
     guard += 1;
@@ -198,7 +199,8 @@ export async function listCustomerJobs(accountId: string): Promise<JTLocationLit
       name: str(l?.name),
       jobs: (l?.jobs?.nodes ?? [])
         .map((j: any) => ({ id: str(j?.id), name: str(j?.name) ?? "(unnamed)", number: str(j?.number), closedOn: str(j?.closedOn) }))
-        .filter((j: JTJobLite) => j.id),
+        // Active jobs only — a closed (completed) job has closedOn set.
+        .filter((j: JTJobLite) => j.id && !j.closedOn),
     });
   }
   return locs;
