@@ -21,10 +21,12 @@
  * aren't `template-exact`), and surfaces project-derived defaults for the form.
  */
 
+import type { Prisma } from "@/app/generated/prisma";
 import { prisma } from "@/app/lib/prisma";
 import { requireAdmin } from "@/app/lib/auth";
 
 import { buildJobTreadBudgetTree } from "./merge";
+import { publishPushWorkerMessage, runPushJobInline } from "./push-job";
 import {
   createCostCodeResolver,
   getCostCodeCatalog,
@@ -335,4 +337,111 @@ export async function pushBudgetAction(
 export async function clearPushLinkageAction(projectId: string): Promise<void> {
   await requireAdmin();
   await clearProjectPushLinkage(projectId);
+}
+
+// ---------------------------------------------------------------------------
+// Background push job — start + poll
+// ---------------------------------------------------------------------------
+
+export type PushJobMode = "create" | "overwrite" | "append";
+
+export interface PushJobStatus {
+  status: string; // JobStatus: QUEUED | RUNNING | COMPLETED | FAILED | PARTIAL
+  mode: string;
+  totalGroups: number;
+  totalItems: number;
+  createdGroups: number;
+  createdItems: number;
+  jobtreadJobId: string;
+  jobtreadJobNumber: string | null;
+  error: string | null;
+}
+
+/**
+ * Enqueue a BACKGROUND budget push: validate the tree, persist a JobTreadPushJob
+ * (verified tree + target job/linkage + mode), then hand off to the QStash
+ * worker so large budgets don't hit the request timeout. On localhost (no QStash
+ * proxy) a publish failure falls back to running the push in-process. Returns the
+ * push job id for the modal to poll via `getPushJobStatus`.
+ */
+export async function startPushJobAction(
+  projectId: string,
+  jobId: string,
+  tree: JobTreadBudgetTree,
+  linkage: {
+    accountId?: string | null;
+    locationId?: string | null;
+    jobNumber?: string | null;
+  },
+  mode: PushJobMode = "create",
+): Promise<{ pushJobId: string }> {
+  await requireAdmin();
+
+  // Validate + count up front (same cost-code guard as the synchronous path).
+  let totalGroups = 0;
+  let totalItems = 0;
+  for (const room of tree.rooms) {
+    totalGroups += 1; // room group
+    for (const trade of room.trades) {
+      totalGroups += 1; // trade group
+      for (const item of trade.items) {
+        totalItems += 1;
+        if (item.costCodeId == null) {
+          throw new Error("Every line must have a cost code before pushing.");
+        }
+      }
+    }
+  }
+
+  const job = await prisma.jobTreadPushJob.create({
+    data: {
+      projectId,
+      jobtreadJobId: jobId,
+      jobtreadJobNumber: linkage.jobNumber ?? null,
+      jobtreadAccountId: linkage.accountId ?? null,
+      jobtreadLocationId: linkage.locationId ?? null,
+      mode,
+      tree: tree as unknown as Prisma.InputJsonValue,
+      totalGroups,
+      totalItems,
+    },
+    select: { id: true },
+  });
+
+  try {
+    await publishPushWorkerMessage(job.id);
+  } catch (err) {
+    // Local-dev fallback: run inline when QStash isn't reachable. Never in prod
+    // (a publish failure there is a real error to surface, not silently inline).
+    if (process.env.NODE_ENV !== "production") {
+      void runPushJobInline(job.id).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error("[jobtread push] inline dev fallback error:", e);
+      });
+    } else {
+      throw err;
+    }
+  }
+
+  return { pushJobId: job.id };
+}
+
+/** Poll a background push job's progress/status. Returns null if not found. */
+export async function getPushJobStatus(
+  pushJobId: string,
+): Promise<PushJobStatus | null> {
+  await requireAdmin();
+  const job = await prisma.jobTreadPushJob.findUnique({ where: { id: pushJobId } });
+  if (!job) return null;
+  return {
+    status: job.status,
+    mode: job.mode,
+    totalGroups: job.totalGroups,
+    totalItems: job.totalItems,
+    createdGroups: job.createdGroups,
+    createdItems: job.createdItems,
+    jobtreadJobId: job.jobtreadJobId,
+    jobtreadJobNumber: job.jobtreadJobNumber,
+    error: job.error,
+  };
 }

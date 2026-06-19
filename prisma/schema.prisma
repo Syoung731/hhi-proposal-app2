@@ -137,6 +137,7 @@ model Project {
   // Set when a budget is pushed — acts as a "push once" lock until unlocked.
   jobtreadBudgetLockedAt DateTime?
   jobtreadPushedItems    JobTreadPushedItem[]
+  jobtreadPushJobs       JobTreadPushJob[]
 
   @@index([status])
   @@index([createdAt])
@@ -157,6 +158,38 @@ model JobTreadPushedItem {
   project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+/**
+ * Background budget-push job. The push modal enqueues one of these (storing the
+ * verified budget tree + target job/linkage + mode); a QStash worker runs the
+ * push so large budgets don't hit the serverless request timeout. Progress
+ * counters drive the modal's progress banner.
+ */
+model JobTreadPushJob {
+  id                 String    @id @default(cuid())
+  projectId          String
+  status             JobStatus @default(QUEUED)
+  mode               String    @default("create") // "create" | "overwrite" | "append"
+  // Target JobTread job + linkage to record on success.
+  jobtreadJobId      String
+  jobtreadJobNumber  String?
+  jobtreadAccountId  String?
+  jobtreadLocationId String?
+  // The verified JobTreadBudgetTree (every line resolved) the worker pushes.
+  tree               Json
+  totalGroups        Int       @default(0)
+  totalItems         Int       @default(0)
+  createdGroups      Int       @default(0)
+  createdItems       Int       @default(0)
+  error              String?
+  createdAt          DateTime  @default(now())
+  startedAt          DateTime?
+  completedAt        DateTime?
+  project            Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
 }
 
 /**

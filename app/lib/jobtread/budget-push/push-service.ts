@@ -361,7 +361,11 @@ export async function pushBudgetToJob(
   jobId: string,
   tree: JobTreadBudgetTree,
   linkage: { accountId?: string | null; locationId?: string | null; jobNumber?: string | null },
-  opts?: { overwrite?: boolean },
+  opts?: {
+    overwrite?: boolean;
+    /** Progress callback fired after each trade's items are created (cumulative counts). */
+    onProgress?: (p: { groups: number; items: number }) => void | Promise<void>;
+  },
 ): Promise<PushBudgetResult> {
   // Overwrite: remove our prior cost groups/items (and their records) first.
   if (opts?.overwrite) {
@@ -394,6 +398,13 @@ export async function pushBudgetToJob(
           }),
         );
         createdItemIds.push(...ids);
+
+        if (opts?.onProgress) {
+          await opts.onProgress({
+            groups: createdGroupIds.length,
+            items: createdItemIds.length,
+          });
+        }
       }
     }
 
