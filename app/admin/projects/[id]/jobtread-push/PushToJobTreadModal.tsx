@@ -185,19 +185,31 @@ export function PushToJobTreadModal({
     return opts;
   }, [tree]);
 
-  // Flagged lines that haven't been resolved yet.
+  // Flagged lines that haven't been resolved yet. Excluded lines (unchecked)
+  // won't be pushed, so they don't need resolution and don't count here.
   const unresolvedFlaggedCount = useMemo(() => {
     if (!tree) return 0;
     let n = 0;
     tree.rooms.forEach((room, ri) => {
       room.trades.forEach((trade, ti) => {
         trade.items.forEach((item, ii) => {
+          if (item.included === false) return;
           if (isFlagged(item) && !resolved[lineKey(ri, ti, ii)]) n += 1;
         });
       });
     });
     return n;
   }, [tree, resolved]);
+
+  // Lines currently selected (checked) to push.
+  const includedItemCount = useMemo(() => {
+    if (!tree) return 0;
+    let n = 0;
+    for (const room of tree.rooms)
+      for (const trade of room.trades)
+        for (const item of trade.items) if (item.included !== false) n += 1;
+    return n;
+  }, [tree]);
 
   const allFlaggedResolved = unresolvedFlaggedCount === 0;
 
@@ -214,7 +226,12 @@ export function PushToJobTreadModal({
     jobMode === "existing" ? selJob !== null : newJobName.trim().length > 0;
   const targetChosen = repushMode !== null || (customerChosen && jobChosen);
 
-  const canPush = targetChosen && allFlaggedResolved && !pushing && !success;
+  const canPush =
+    targetChosen &&
+    allFlaggedResolved &&
+    includedItemCount > 0 &&
+    !pushing &&
+    !success;
 
   // Re-home a line to a different room → trade. Re-keys the resolved map so the
   // line keeps its "resolved" flag at its new coordinates.
@@ -251,6 +268,46 @@ export function PushToJobTreadModal({
   // Mark a flagged line resolved once the person interacts with it.
   function markResolved(ri: number, ti: number, ii: number) {
     setResolved((r) => ({ ...r, [lineKey(ri, ti, ii)]: true }));
+  }
+
+  // ── Push selection (include/exclude checkboxes) ────────────────────────────
+  // Set `included` on every item matching `pred`. The flag lives ON the item, so
+  // it survives cost-code edits (spread) and re-homing (the object moves).
+  function setItemsIncluded(
+    pred: (ri: number, ti: number, ii: number) => boolean,
+    value: boolean,
+  ) {
+    setTree((prev) => {
+      if (!prev) return prev;
+      const rooms = prev.rooms.map((room, ri) => ({
+        ...room,
+        trades: room.trades.map((trade, ti) => ({
+          ...trade,
+          items: trade.items.map((item, ii) =>
+            pred(ri, ti, ii) ? { ...item, included: value } : item,
+          ),
+        })),
+      }));
+      return { ...prev, rooms };
+    });
+  }
+
+  function toggleItemIncluded(ri: number, ti: number, ii: number) {
+    const cur = tree?.rooms[ri]?.trades[ti]?.items[ii];
+    if (!cur) return;
+    setItemsIncluded((r, t, i) => r === ri && t === ti && i === ii, cur.included === false);
+  }
+
+  function toggleTradeIncluded(ri: number, ti: number) {
+    const items = tree?.rooms[ri]?.trades[ti]?.items ?? [];
+    const anyIncluded = items.some((it) => it.included !== false);
+    setItemsIncluded((r, t) => r === ri && t === ti, !anyIncluded);
+  }
+
+  function toggleRoomIncluded(ri: number) {
+    const items = tree?.rooms[ri]?.trades.flatMap((t) => t.items) ?? [];
+    const anyIncluded = items.some((it) => it.included !== false);
+    setItemsIncluded((r) => r === ri, !anyIncluded);
   }
 
   // Set the cost code on a line from a CodeOption; derive cost type if a
@@ -456,11 +513,31 @@ export function PushToJobTreadModal({
         }
       }
 
+      // Only push the SELECTED (checked) lines — prune excluded items and any
+      // trade/room left empty by the selection.
+      const filteredTree: JobTreadBudgetTree = {
+        ...tree,
+        rooms: tree.rooms
+          .map((room) => ({
+            ...room,
+            trades: room.trades
+              .map((trade) => ({
+                ...trade,
+                items: trade.items.filter((it) => it.included !== false),
+              }))
+              .filter((trade) => trade.items.length > 0),
+          }))
+          .filter((room) => room.trades.length > 0),
+      };
+      if (filteredTree.rooms.length === 0) {
+        throw new Error("Select at least one line to push.");
+      }
+
       // Enqueue the background push; the poll effect takes over from here.
       const { pushJobId: newId } = await startPushJobAction(
         projectId,
         jobId,
-        tree,
+        filteredTree,
         { accountId, locationId, jobNumber },
         mode,
       );
@@ -656,9 +733,13 @@ export function PushToJobTreadModal({
                   }
                   groupOptions={groupOptions}
                   unresolvedFlaggedCount={unresolvedFlaggedCount}
+                  includedItemCount={includedItemCount}
                   onPickCostCode={setLineCostCode}
                   onMoveLine={moveLine}
                   onMarkResolved={markResolved}
+                  onToggleItem={toggleItemIncluded}
+                  onToggleTrade={toggleTradeIncluded}
+                  onToggleRoom={toggleRoomIncluded}
                 />
               )}
             </>
@@ -1048,9 +1129,13 @@ function VerifyStep({
   toggleExpanded,
   groupOptions,
   unresolvedFlaggedCount,
+  includedItemCount,
   onPickCostCode,
   onMoveLine,
   onMarkResolved,
+  onToggleItem,
+  onToggleTrade,
+  onToggleRoom,
 }: {
   prepared: PreparedPush;
   tree: JobTreadBudgetTree;
@@ -1059,10 +1144,23 @@ function VerifyStep({
   toggleExpanded: (k: string) => void;
   groupOptions: GroupOption[];
   unresolvedFlaggedCount: number;
+  includedItemCount: number;
   onPickCostCode: (ri: number, ti: number, ii: number, codeId: string) => void;
   onMoveLine: (ri: number, ti: number, ii: number, targetKey: string) => void;
   onMarkResolved: (ri: number, ti: number, ii: number) => void;
+  onToggleItem: (ri: number, ti: number, ii: number) => void;
+  onToggleTrade: (ri: number, ti: number) => void;
+  onToggleRoom: (ri: number) => void;
 }) {
+  const totalItems = tree.rooms.reduce(
+    (s, r) => s + r.trades.reduce((t, tr) => t + tr.items.length, 0),
+    0,
+  );
+  // include-state of a group of items → "all" | "some" | "none"
+  const groupSel = (items: JTCostItem[]): "all" | "some" | "none" => {
+    const inc = items.filter((it) => it.included !== false).length;
+    return inc === 0 ? "none" : inc === items.length ? "all" : "some";
+  };
   return (
     <div className="space-y-4">
       {/* Summary banner */}
@@ -1077,6 +1175,21 @@ function VerifyStep({
           All lines resolved. Ready to push.
         </div>
       )}
+
+      {/* Selection summary — checkboxes let you push a subset (great for Append). */}
+      <div
+        className={`rounded-lg border px-3 py-2 text-sm ${
+          includedItemCount < totalItems
+            ? "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-900/15 dark:text-orange-200"
+            : "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-400"
+        }`}
+      >
+        Pushing <strong>{includedItemCount}</strong> of {totalItems} line
+        {totalItems === 1 ? "" : "s"}
+        {includedItemCount < totalItems
+          ? " — unchecked lines are skipped."
+          : ". Uncheck rooms, trades, or lines to push a subset."}
+      </div>
 
       {(tree.roomsWithoutTemplate.length > 0 ||
         tree.roomsWithoutEstimate.length > 0) && (
@@ -1100,7 +1213,12 @@ function VerifyStep({
             key={`${room.roomId}-${ri}`}
             className="rounded-lg border border-zinc-200 dark:border-zinc-700"
           >
-            <div className="border-b border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-800/40">
+            <div className="flex items-center gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-800/40">
+              <TriCheckbox
+                state={groupSel(room.trades.flatMap((t) => t.items))}
+                onChange={() => onToggleRoom(ri)}
+                title="Include/exclude this whole room"
+              />
               <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 {room.roomName}
               </span>
@@ -1130,8 +1248,15 @@ function VerifyStep({
                 return (
                   <div key={`${trade.tradeName}-${ti}`} className="px-3 py-2">
                     <div className="mb-1 flex items-center justify-between">
-                      <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                        {trade.tradeName}
+                      <span className="flex items-center gap-2">
+                        <TriCheckbox
+                          state={groupSel(trade.items)}
+                          onChange={() => onToggleTrade(ri, ti)}
+                          title="Include/exclude this trade"
+                        />
+                        <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                          {trade.tradeName}
+                        </span>
                       </span>
                       {exactItems.length > 0 && (
                         <button
@@ -1151,6 +1276,8 @@ function VerifyStep({
                         ri={ri}
                         ti={ti}
                         ii={ii}
+                        included={it.included !== false}
+                        onToggle={() => onToggleItem(ri, ti, ii)}
                         resolved={!!resolved[lineKey(ri, ti, ii)]}
                         currentGroupKey={groupKey(ri, ti)}
                         groupOptions={groupOptions}
@@ -1164,7 +1291,12 @@ function VerifyStep({
                     {/* Matched (template-exact) items — read-only, collapsible */}
                     {isExp &&
                       exactItems.map(({ it, ii }) => (
-                        <ExactLine key={`e-${ii}`} item={it} />
+                        <ExactLine
+                          key={`e-${ii}`}
+                          item={it}
+                          included={it.included !== false}
+                          onToggle={() => onToggleItem(ri, ti, ii)}
+                        />
                       ))}
 
                     {trade.items.length === 0 && (
@@ -1181,10 +1313,27 @@ function VerifyStep({
   );
 }
 
-// One read-only template-exact line.
-function ExactLine({ item }: { item: JTCostItem }) {
+// One read-only template-exact line (with include/exclude checkbox).
+function ExactLine({
+  item,
+  included,
+  onToggle,
+}: {
+  item: JTCostItem;
+  included: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1 text-sm">
+    <div
+      className={`flex items-center gap-3 py-1 text-sm ${included ? "" : "opacity-40"}`}
+    >
+      <input
+        type="checkbox"
+        checked={included}
+        onChange={onToggle}
+        title="Include/exclude this line"
+        className="h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 text-orange-600 focus:ring-orange-500 dark:border-zinc-600"
+      />
       <span className="flex-1 truncate text-zinc-700 dark:text-zinc-300">
         {item.name}
       </span>
@@ -1198,6 +1347,35 @@ function ExactLine({ item }: { item: JTCostItem }) {
         {item.costCodeName ?? "—"}
       </span>
     </div>
+  );
+}
+
+/**
+ * Tri-state include/exclude checkbox for a group (room / trade). Shows checked
+ * when all children are included, indeterminate when some, unchecked when none.
+ */
+function TriCheckbox({
+  state,
+  onChange,
+  title,
+}: {
+  state: "all" | "some" | "none";
+  onChange: () => void;
+  title?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = state === "some";
+  }, [state]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={state === "all"}
+      onChange={onChange}
+      title={title}
+      className="h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 text-orange-600 focus:ring-orange-500 dark:border-zinc-600"
+    />
   );
 }
 
@@ -1335,6 +1513,8 @@ function FlaggedLine({
   ri,
   ti,
   ii,
+  included,
+  onToggle,
   resolved,
   currentGroupKey,
   groupOptions,
@@ -1347,6 +1527,8 @@ function FlaggedLine({
   ri: number;
   ti: number;
   ii: number;
+  included: boolean;
+  onToggle: () => void;
   resolved: boolean;
   currentGroupKey: string;
   groupOptions: GroupOption[];
@@ -1358,19 +1540,32 @@ function FlaggedLine({
   return (
     <div
       className={`my-1 rounded-lg border p-2 ${
-        resolved
-          ? "border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
-          : "border-amber-300 bg-amber-50/60 dark:border-amber-700 dark:bg-amber-900/15"
+        !included
+          ? "border-zinc-200 bg-zinc-50 opacity-50 dark:border-zinc-700 dark:bg-zinc-900/40"
+          : resolved
+            ? "border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+            : "border-amber-300 bg-amber-50/60 dark:border-amber-700 dark:bg-amber-900/15"
       }`}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
+        <input
+          type="checkbox"
+          checked={included}
+          onChange={onToggle}
+          title="Include/exclude this line"
+          className="h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 text-orange-600 focus:ring-orange-500 dark:border-zinc-600"
+        />
         <span className="flex-1 truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
           {item.name}
         </span>
         <span className="text-xs text-zinc-400">
           {item.quantity} {item.unit} · {usd(item.unitPrice)}
         </span>
-        {resolved ? (
+        {!included ? (
+          <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
+            excluded
+          </span>
+        ) : resolved ? (
           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
             resolved
           </span>

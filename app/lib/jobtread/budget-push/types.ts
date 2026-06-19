@@ -111,6 +111,13 @@ export interface JTCostItem {
    * `source === "ALLOWANCE"`. Null for normal lines.
    */
   allowanceType: string | null;
+  /**
+   * Client/UI-only push-selection flag. The push modal's per-line / per-trade /
+   * per-room checkboxes set this; `false` excludes the line from the push (the
+   * tree is filtered before it's sent). Undefined or `true` = included. The merge
+   * never sets it (default include); the server/push never reads it.
+   */
+  included?: boolean;
   /** Provenance of this line within the template-overlay merge. */
   lineSource: JTLineSource;
   /**
