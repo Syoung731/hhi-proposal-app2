@@ -7,10 +7,13 @@ import {
   createCustomerAction,
   createLocationAction,
   createJobAction,
-  pushBudgetAction,
+  startPushJobAction,
+  getPushJobStatus,
   clearPushLinkageAction,
   type PreparedPush,
   type CodeOption,
+  type PushJobMode,
+  type PushJobStatus,
 } from "@/app/lib/jobtread/budget-push/push-actions";
 import type {
   JobTreadBudgetTree,
@@ -87,7 +90,7 @@ export function PushToJobTreadModal({
   const [error, setError] = useState<string | null>(null);
 
   // The tree lives in local state so verify edits (re-homed lines + chosen
-  // codes) are reflected before we hand it to pushBudgetAction.
+  // codes) are reflected before we hand it to startPushJobAction.
   const [tree, setTree] = useState<JobTreadBudgetTree | null>(null);
 
   // step machine
@@ -128,6 +131,9 @@ export function PushToJobTreadModal({
   // ── push state ──────────────────────────────────────────────────────────────
   const [pushing, setPushing] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
+  // Background push job (set once enqueued) + its latest polled progress.
+  const [pushJobId, setPushJobId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<PushJobStatus | null>(null);
   const [success, setSuccess] = useState<{
     jobId: string;
     jobNumber: string | null;
@@ -381,99 +387,129 @@ export function PushToJobTreadModal({
     }
   }
 
-  // Orchestrate the push.
+  // Orchestrate the push: resolve the target job, then ENQUEUE a background push
+  // job. The poll effect below drives the progress UI + completion.
   async function handlePush() {
     if (!tree) return;
     setPushing(true);
     setPushError(null);
     try {
-      // Re-push into the existing linked job (Overwrite or Append).
-      if (repushMode && prepared?.linkage.jobtreadJobId) {
-        const jobId = prepared.linkage.jobtreadJobId;
-        const res = await pushBudgetAction(
-          projectId,
-          jobId,
-          tree,
-          {
-            accountId: prepared.linkage.jobtreadAccountId,
-            locationId: prepared.linkage.jobtreadLocationId,
-            jobNumber: prepared.linkage.jobtreadJobNumber,
-          },
-          { overwrite: repushMode === "overwrite" },
-        );
-        setSuccess({
-          jobId,
-          jobNumber: prepared.linkage.jobtreadJobNumber,
-          groupCount: res.groupCount,
-          itemCount: res.itemCount,
-        });
-        return;
-      }
-
       let accountId: string | null = null;
       let locationId: string | null = null;
       let jobId: string;
       let jobNumber: string | null = null;
+      let mode: PushJobMode = "create";
 
-      if (custMode === "existing") {
-        accountId = selCustomer?.id ?? null;
+      if (repushMode && prepared?.linkage.jobtreadJobId) {
+        // Re-push into the existing linked job (Overwrite or Append).
+        jobId = prepared.linkage.jobtreadJobId;
+        accountId = prepared.linkage.jobtreadAccountId;
+        locationId = prepared.linkage.jobtreadLocationId;
+        jobNumber = prepared.linkage.jobtreadJobNumber;
+        mode = repushMode;
       } else {
-        const c = await createCustomerAction(newCustName.trim());
-        accountId = c.accountId;
-        const l = await createLocationAction(
-          accountId,
-          newCustName.trim(),
-          newCustAddress.trim(),
-        );
-        locationId = l.locationId;
-      }
+        // New push: resolve (or create) customer → location → job.
+        if (custMode === "existing") {
+          accountId = selCustomer?.id ?? null;
+        } else {
+          const c = await createCustomerAction(newCustName.trim());
+          accountId = c.accountId;
+          const l = await createLocationAction(
+            accountId,
+            newCustName.trim(),
+            newCustAddress.trim(),
+          );
+          locationId = l.locationId;
+        }
 
-      if (jobMode === "existing" && selJob) {
-        jobId = selJob.job.id;
-        locationId = selJob.locationId;
-        jobNumber = selJob.job.number;
-      } else {
-        // New job. For an existing customer + new job, we need a location: pick
-        // the first existing location, else create one.
-        if (!locationId) {
-          if (custMode === "existing" && accountId) {
-            const firstLoc = (locations ?? []).find((l) => l.id)?.id ?? null;
-            if (firstLoc) {
-              locationId = firstLoc;
-            } else {
-              const l = await createLocationAction(
-                accountId,
-                selCustomer?.name ?? newCustName.trim(),
-                newCustAddress.trim(),
-              );
-              locationId = l.locationId;
+        if (jobMode === "existing" && selJob) {
+          jobId = selJob.job.id;
+          locationId = selJob.locationId;
+          jobNumber = selJob.job.number;
+        } else {
+          // New job. For an existing customer + new job, we need a location:
+          // pick the first existing location, else create one.
+          if (!locationId) {
+            if (custMode === "existing" && accountId) {
+              const firstLoc = (locations ?? []).find((l) => l.id)?.id ?? null;
+              if (firstLoc) {
+                locationId = firstLoc;
+              } else {
+                const l = await createLocationAction(
+                  accountId,
+                  selCustomer?.name ?? newCustName.trim(),
+                  newCustAddress.trim(),
+                );
+                locationId = l.locationId;
+              }
             }
           }
+          if (!locationId)
+            throw new Error("Could not determine a location for the new job.");
+          const created = await createJobAction(
+            locationId,
+            newJobName.trim(),
+            newJobStage,
+          );
+          jobId = created.jobId;
+          jobNumber = created.jobNumber;
         }
-        if (!locationId) throw new Error("Could not determine a location for the new job.");
-        const created = await createJobAction(locationId, newJobName.trim(), newJobStage);
-        jobId = created.jobId;
-        jobNumber = created.jobNumber;
       }
 
-      const res = await pushBudgetAction(projectId, jobId, tree, {
-        accountId,
-        locationId,
-        jobNumber,
-      });
-
-      setSuccess({
+      // Enqueue the background push; the poll effect takes over from here.
+      const { pushJobId: newId } = await startPushJobAction(
+        projectId,
         jobId,
-        jobNumber,
-        groupCount: res.groupCount,
-        itemCount: res.itemCount,
-      });
+        tree,
+        { accountId, locationId, jobNumber },
+        mode,
+      );
+      setPushJobId(newId);
     } catch (e) {
       setPushError(e instanceof Error ? e.message : "Push failed.");
     } finally {
       setPushing(false);
     }
   }
+
+  // Poll the background push job until it completes or fails.
+  useEffect(() => {
+    if (!pushJobId || success) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const s = await getPushJobStatus(pushJobId);
+        if (cancelled) return;
+        if (s) {
+          setProgress(s);
+          if (s.status === "COMPLETED") {
+            setSuccess({
+              jobId: s.jobtreadJobId,
+              jobNumber: s.jobtreadJobNumber,
+              groupCount: s.createdGroups,
+              itemCount: s.createdItems,
+            });
+            return;
+          }
+          if (s.status === "FAILED") {
+            setPushError(s.error ?? "Push failed.");
+            setPushJobId(null);
+            setProgress(null);
+            return;
+          }
+        }
+        timer = setTimeout(poll, 2000);
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, 3000);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [pushJobId, success]);
 
   // Customer type-ahead filter.
   const filteredCustomers = useMemo(() => {
@@ -525,6 +561,8 @@ export function PushToJobTreadModal({
             </p>
           ) : success ? (
             <SuccessPanel success={success} onClose={onClose} />
+          ) : pushJobId ? (
+            <PushProgress progress={progress} />
           ) : !prepared || !tree ? (
             <p className="py-12 text-center text-sm text-zinc-500">No data.</p>
           ) : alreadyPushed ? (
@@ -628,7 +666,7 @@ export function PushToJobTreadModal({
         </div>
 
         {/* Footer */}
-        {!success && !loading && prepared && tree && !alreadyPushed && (
+        {!success && !loading && prepared && tree && !alreadyPushed && !pushJobId && (
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
             <button
               onClick={
@@ -1498,6 +1536,45 @@ function AlreadyPushedGate({
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Background push progress ───────────────────────────────────────────────────
+
+function PushProgress({ progress }: { progress: PushJobStatus | null }) {
+  const total = progress?.totalItems ?? 0;
+  const done = progress?.createdItems ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const status = progress?.status ?? "QUEUED";
+  const label =
+    status === "QUEUED"
+      ? "Queued — starting…"
+      : status === "RUNNING"
+        ? "Pushing budget to JobTread…"
+        : status;
+
+  return (
+    <div className="flex flex-col items-center gap-4 py-12 text-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-orange-500 dark:border-zinc-700 dark:border-t-orange-400" />
+      <div className="w-full max-w-sm">
+        <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+          {label}
+        </p>
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+          <div
+            className="h-full rounded-full bg-orange-500 transition-all duration-500 dark:bg-orange-400"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          {total > 0 ? `${done} / ${total} line items` : "Preparing…"}
+        </p>
+      </div>
+      <p className="max-w-md text-xs text-zinc-400">
+        This runs in the background — large budgets may take a couple of minutes.
+        You can leave this open to watch progress.
+      </p>
     </div>
   );
 }

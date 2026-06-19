@@ -39,7 +39,6 @@ import {
   jtCreateLocation,
   listCustomers,
   listCustomerJobs,
-  pushBudgetToJob,
   getProjectPushLinkage,
   clearProjectPushLinkage,
 } from "./push-service";
@@ -289,44 +288,6 @@ export async function createJobAction(
   await requireAdmin();
   const { id, number } = await jtCreateJob({ locationId, name, jobStage });
   return { jobId: id, jobNumber: number };
-}
-
-// ---------------------------------------------------------------------------
-// pushBudgetAction — the actual budget write
-// ---------------------------------------------------------------------------
-
-/**
- * Push the (modal-edited) budget tree into an existing JobTread job.
- *
- * VALIDATES first: every line across `tree.rooms[].trades[].items[]` must carry
- * a non-null `costCodeId` (the modal forces a human to resolve every flagged
- * line before enabling Push). Throws if any line is still missing a code.
- */
-export async function pushBudgetAction(
-  projectId: string,
-  jobId: string,
-  tree: JobTreadBudgetTree,
-  linkage: {
-    accountId?: string | null;
-    locationId?: string | null;
-    jobNumber?: string | null;
-  },
-  opts?: { overwrite?: boolean },
-): Promise<{ groupCount: number; itemCount: number }> {
-  await requireAdmin();
-
-  for (const room of tree.rooms) {
-    for (const trade of room.trades) {
-      for (const item of trade.items) {
-        if (item.costCodeId == null) {
-          throw new Error("Every line must have a cost code before pushing.");
-        }
-      }
-    }
-  }
-
-  const result = await pushBudgetToJob(projectId, jobId, tree, linkage, opts);
-  return { groupCount: result.groupCount, itemCount: result.itemCount };
 }
 
 /**
