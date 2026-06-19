@@ -345,6 +345,10 @@ export interface PushBudgetResult {
  * record what we created (for re-push Overwrite) and set the project's push lock.
  * The tree's costCodeId/costTypeId must already be resolved by the caller.
  *
+ * Rollback: if any create OR the final DB record throws, every JobTread entity
+ * created during this run is deleted before re-throwing, so a failed push never
+ * orphans a partial budget on the job.
+ *
  * Re-push modes (`opts.overwrite`):
  *   - false/undefined → first push OR Append (just creates + records; existing
  *     JobTreadPushedItem rows from a prior push are kept so a later Overwrite
@@ -367,50 +371,63 @@ export async function pushBudgetToJob(
   const createdGroupIds: string[] = [];
   const createdItemIds: string[] = [];
 
-  for (const room of tree.rooms) {
-    const roomGroupId = await jtCreateCostGroup({ jobId, name: room.roomName });
-    createdGroupIds.push(roomGroupId);
+  try {
+    for (const room of tree.rooms) {
+      const roomGroupId = await jtCreateCostGroup({ jobId, name: room.roomName });
+      createdGroupIds.push(roomGroupId);
 
-    for (const trade of room.trades) {
-      const tradeGroupId = await jtCreateCostGroup({ jobId, name: trade.tradeName, parentCostGroupId: roomGroupId });
-      createdGroupIds.push(tradeGroupId);
+      for (const trade of room.trades) {
+        const tradeGroupId = await jtCreateCostGroup({ jobId, name: trade.tradeName, parentCostGroupId: roomGroupId });
+        createdGroupIds.push(tradeGroupId);
 
-      const ids = await mapWithConcurrency(trade.items, ITEM_CONCURRENCY, (item) =>
-        jtCreateCostItem({
-          costGroupId: tradeGroupId,
-          name: item.name,
-          quantity: item.quantity,
-          unitCost: item.unitCost,
-          unitPrice: item.unitPrice,
-          costCodeId: item.costCodeId,
-          costTypeId: item.costTypeId,
-          description: item.unit ? `Unit: ${item.unit}` : null,
-          notes: item.notes,
-        }),
-      );
-      createdItemIds.push(...ids);
+        const ids = await mapWithConcurrency(trade.items, ITEM_CONCURRENCY, (item) =>
+          jtCreateCostItem({
+            costGroupId: tradeGroupId,
+            name: item.name,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            unitPrice: item.unitPrice,
+            costCodeId: item.costCodeId,
+            costTypeId: item.costTypeId,
+            description: item.unit ? `Unit: ${item.unit}` : null,
+            notes: item.notes,
+          }),
+        );
+        createdItemIds.push(...ids);
+      }
     }
-  }
 
-  // Record created entities + set the linkage/lock atomically.
-  await prisma.$transaction([
-    prisma.jobTreadPushedItem.createMany({
-      data: [
-        ...createdGroupIds.map((id) => ({ projectId, jobtreadId: id, kind: "COST_GROUP" })),
-        ...createdItemIds.map((id) => ({ projectId, jobtreadId: id, kind: "COST_ITEM" })),
-      ],
-    }),
-    prisma.project.update({
-      where: { id: projectId },
-      data: {
-        jobtreadJobId: jobId,
-        jobtreadJobNumber: linkage.jobNumber ?? undefined,
-        jobtreadAccountId: linkage.accountId ?? undefined,
-        jobtreadLocationId: linkage.locationId ?? undefined,
-        jobtreadBudgetLockedAt: new Date(),
-      },
-    }),
-  ]);
+    // Record created entities + set the linkage/lock atomically.
+    await prisma.$transaction([
+      prisma.jobTreadPushedItem.createMany({
+        data: [
+          ...createdGroupIds.map((id) => ({ projectId, jobtreadId: id, kind: "COST_GROUP" })),
+          ...createdItemIds.map((id) => ({ projectId, jobtreadId: id, kind: "COST_ITEM" })),
+        ],
+      }),
+      prisma.project.update({
+        where: { id: projectId },
+        data: {
+          jobtreadJobId: jobId,
+          jobtreadJobNumber: linkage.jobNumber ?? undefined,
+          jobtreadAccountId: linkage.accountId ?? undefined,
+          jobtreadLocationId: linkage.locationId ?? undefined,
+          jobtreadBudgetLockedAt: new Date(),
+        },
+      }),
+    ]);
+  } catch (err) {
+    // Roll back THIS run's JobTread writes so a failed push (or a failed DB
+    // record after the writes landed) leaves no orphaned job budget. Every
+    // created item lives under a group in createdGroupIds, so deleting those
+    // groups cascades the items too (cascade verified live). Best-effort: ignore
+    // delete errors so we never mask the original failure (a child already
+    // removed by an ancestor's cascade returns 404).
+    for (const groupId of createdGroupIds) {
+      await jtDeleteCostGroup(groupId).catch(() => {});
+    }
+    throw err;
+  }
 
   return { jobId, groupCount: createdGroupIds.length, itemCount: createdItemIds.length };
 }
