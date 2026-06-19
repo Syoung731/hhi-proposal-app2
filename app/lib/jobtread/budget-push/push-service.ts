@@ -26,8 +26,13 @@ export const JOB_STAGE_OPTIONS = [
   "Work Complete", "Warranty", "Warranty Issue", "Build Lost", "Legal", "Archived",
 ] as const;
 
-/** Bounded concurrency for cost-item creation (JobTread rate limits unpublished). */
-const ITEM_CONCURRENCY = 4;
+/**
+ * Cost-item creation MUST be serial. JobTread rejects concurrent `createCostItem`
+ * calls under the same cost group with HTTP 400 (auto-sortOrder / row-lock
+ * collision) — verified live: concurrency 4 failed ~60% of items on a 153-line
+ * push, concurrency 1 succeeded 100%. Do NOT raise this without re-verifying.
+ */
+const ITEM_CONCURRENCY = 1;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
