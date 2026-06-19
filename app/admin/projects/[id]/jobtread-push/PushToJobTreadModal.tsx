@@ -8,6 +8,7 @@ import {
   createLocationAction,
   createJobAction,
   pushBudgetAction,
+  clearPushLinkageAction,
   type PreparedPush,
   type CodeOption,
 } from "@/app/lib/jobtread/budget-push/push-actions";
@@ -91,6 +92,13 @@ export function PushToJobTreadModal({
 
   // step machine
   const [step, setStep] = useState<1 | 2 | 3>(1);
+
+  // Re-push (when the project was already pushed). null = showing the gate /
+  // not a re-push; "overwrite"/"append" = re-pushing into the existing job.
+  const [repushMode, setRepushMode] = useState<"overwrite" | "append" | null>(
+    null,
+  );
+  const [gateBusy, setGateBusy] = useState(false);
 
   // ── STEP 1: customer ────────────────────────────────────────────────────────
   const [custMode, setCustMode] = useState<"existing" | "new">("existing");
@@ -187,12 +195,18 @@ export function PushToJobTreadModal({
 
   const allFlaggedResolved = unresolvedFlaggedCount === 0;
 
-  // Whether a customer + job target has been chosen.
+  // Project was already pushed → show the re-push gate until the user chooses a
+  // re-push mode (or starts over, which clears the linkage).
+  const alreadyPushed =
+    !!prepared?.linkage.jobtreadJobId && repushMode === null;
+
+  // Whether a customer + job target has been chosen. In re-push mode the target
+  // IS the existing linked job, so it's always satisfied.
   const customerChosen =
     custMode === "existing" ? selCustomer !== null : newCustName.trim().length > 0;
   const jobChosen =
     jobMode === "existing" ? selJob !== null : newJobName.trim().length > 0;
-  const targetChosen = customerChosen && jobChosen;
+  const targetChosen = repushMode !== null || (customerChosen && jobChosen);
 
   const canPush = targetChosen && allFlaggedResolved && !pushing && !success;
 
@@ -322,12 +336,80 @@ export function PushToJobTreadModal({
     setStep(3);
   }
 
+  // ── Re-push gate actions ────────────────────────────────────────────────
+  function chooseRepush(mode: "overwrite" | "append") {
+    setError(null);
+    setPushError(null);
+    setRepushMode(mode);
+    setStep(3); // straight to Verify — target is the existing linked job
+  }
+
+  function backToGate() {
+    setRepushMode(null);
+    setPushError(null);
+  }
+
+  async function startOver() {
+    setGateBusy(true);
+    setPushError(null);
+    try {
+      await clearPushLinkageAction(projectId);
+      // Forget the stale link locally so the gate hides and the normal flow runs.
+      setPrepared((p) =>
+        p
+          ? {
+              ...p,
+              linkage: {
+                ...p.linkage,
+                jobtreadJobId: null,
+                jobtreadJobNumber: null,
+                jobtreadAccountId: null,
+                jobtreadLocationId: null,
+                lockedAt: null,
+                pushedGroupCount: 0,
+                pushedItemCount: 0,
+              },
+            }
+          : p,
+      );
+      setRepushMode(null);
+      setStep(1);
+    } catch (e) {
+      setPushError(e instanceof Error ? e.message : "Could not start over.");
+    } finally {
+      setGateBusy(false);
+    }
+  }
+
   // Orchestrate the push.
   async function handlePush() {
     if (!tree) return;
     setPushing(true);
     setPushError(null);
     try {
+      // Re-push into the existing linked job (Overwrite or Append).
+      if (repushMode && prepared?.linkage.jobtreadJobId) {
+        const jobId = prepared.linkage.jobtreadJobId;
+        const res = await pushBudgetAction(
+          projectId,
+          jobId,
+          tree,
+          {
+            accountId: prepared.linkage.jobtreadAccountId,
+            locationId: prepared.linkage.jobtreadLocationId,
+            jobNumber: prepared.linkage.jobtreadJobNumber,
+          },
+          { overwrite: repushMode === "overwrite" },
+        );
+        setSuccess({
+          jobId,
+          jobNumber: prepared.linkage.jobtreadJobNumber,
+          groupCount: res.groupCount,
+          itemCount: res.itemCount,
+        });
+        return;
+      }
+
       let accountId: string | null = null;
       let locationId: string | null = null;
       let jobId: string;
@@ -426,7 +508,7 @@ export function PushToJobTreadModal({
               </p>
             )}
           </div>
-          {!success && !loading && (
+          {!success && !loading && !alreadyPushed && !repushMode && (
             <Stepper step={step} />
           )}
         </div>
@@ -445,12 +527,44 @@ export function PushToJobTreadModal({
             <SuccessPanel success={success} onClose={onClose} />
           ) : !prepared || !tree ? (
             <p className="py-12 text-center text-sm text-zinc-500">No data.</p>
+          ) : alreadyPushed ? (
+            <AlreadyPushedGate
+              linkage={prepared.linkage}
+              busy={gateBusy}
+              pushError={pushError}
+              onOverwrite={() => chooseRepush("overwrite")}
+              onAppend={() => chooseRepush("append")}
+              onStartOver={startOver}
+              onCancel={onClose}
+            />
           ) : (
             <>
               {error && (
                 <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
                   {error}
                 </p>
+              )}
+
+              {repushMode && (
+                <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm dark:border-orange-800 dark:bg-orange-900/15">
+                  <span className="text-orange-800 dark:text-orange-200">
+                    Re-push (
+                    <strong>
+                      {repushMode === "overwrite" ? "Overwrite" : "Append"}
+                    </strong>
+                    ) into the existing job
+                    {prepared.linkage.jobtreadJobNumber
+                      ? ` #${prepared.linkage.jobtreadJobNumber}`
+                      : ""}
+                    .
+                  </span>
+                  <button
+                    onClick={backToGate}
+                    className="shrink-0 rounded px-2 py-0.5 text-xs font-medium text-orange-700 hover:bg-orange-100 dark:text-orange-300 dark:hover:bg-orange-900/30"
+                  >
+                    Change
+                  </button>
+                </div>
               )}
 
               {step === 1 && (
@@ -514,10 +628,16 @@ export function PushToJobTreadModal({
         </div>
 
         {/* Footer */}
-        {!success && !loading && prepared && tree && (
+        {!success && !loading && prepared && tree && !alreadyPushed && (
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
             <button
-              onClick={step === 1 ? onClose : () => setStep((s) => (s === 3 ? 2 : 1))}
+              onClick={
+                repushMode
+                  ? backToGate
+                  : step === 1
+                    ? onClose
+                    : () => setStep((s) => (s === 3 ? 2 : 1))
+              }
               disabled={pushing}
               className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
@@ -561,7 +681,13 @@ export function PushToJobTreadModal({
                   }
                   className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                 >
-                  {pushing ? "Pushing…" : "Push to JobTread"}
+                  {pushing
+                    ? "Pushing…"
+                    : repushMode === "overwrite"
+                      ? "Overwrite & push"
+                      : repushMode === "append"
+                        ? "Append & push"
+                        : "Push to JobTread"}
                 </button>
               )}
             </div>
@@ -1258,6 +1384,120 @@ function FlaggedLine({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Already-pushed gate (re-push: Overwrite / Append / Start over) ─────────────
+
+function AlreadyPushedGate({
+  linkage,
+  busy,
+  pushError,
+  onOverwrite,
+  onAppend,
+  onStartOver,
+  onCancel,
+}: {
+  linkage: PreparedPush["linkage"];
+  busy: boolean;
+  pushError: string | null;
+  onOverwrite: () => void;
+  onAppend: () => void;
+  onStartOver: () => void;
+  onCancel: () => void;
+}) {
+  const jobUrl = linkage.jobtreadJobId
+    ? `https://app.jobtread.com/jobs/${linkage.jobtreadJobId}`
+    : null;
+  const pushedOn = linkage.lockedAt
+    ? new Date(linkage.lockedAt).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : null;
+
+  return (
+    <div className="py-2">
+      <div className="rounded-lg border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-700 dark:bg-amber-900/15">
+        <h4 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+          This project was already pushed to JobTread
+        </h4>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+          {pushedOn ? `Pushed ${pushedOn}` : "Pushed"}
+          {linkage.jobtreadJobNumber ? ` · job #${linkage.jobtreadJobNumber}` : ""}{" "}
+          · {linkage.pushedGroupCount} cost group
+          {linkage.pushedGroupCount === 1 ? "" : "s"} /{" "}
+          {linkage.pushedItemCount} line item
+          {linkage.pushedItemCount === 1 ? "" : "s"} created by this app.
+        </p>
+        {jobUrl && (
+          <a
+            href={jobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-block text-sm font-medium text-orange-600 hover:underline dark:text-orange-400"
+          >
+            Open job in JobTread →
+          </a>
+        )}
+      </div>
+
+      <p className="mt-4 text-sm font-medium text-zinc-700 dark:text-zinc-200">
+        How do you want to re-push?
+      </p>
+      <div className="mt-2 space-y-2">
+        <button
+          onClick={onOverwrite}
+          disabled={busy}
+          className="block w-full rounded-lg border border-zinc-300 p-3 text-left hover:border-orange-400 hover:bg-orange-50/50 disabled:opacity-50 dark:border-zinc-600 dark:hover:border-orange-500 dark:hover:bg-orange-900/10"
+        >
+          <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Overwrite
+          </span>
+          <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+            Delete the {linkage.pushedItemCount} line item
+            {linkage.pushedItemCount === 1 ? "" : "s"} this app created and
+            replace with the current estimate. Manual edits made in JobTread are
+            kept.
+          </span>
+        </button>
+        <button
+          onClick={onAppend}
+          disabled={busy}
+          className="block w-full rounded-lg border border-zinc-300 p-3 text-left hover:border-orange-400 hover:bg-orange-50/50 disabled:opacity-50 dark:border-zinc-600 dark:hover:border-orange-500 dark:hover:bg-orange-900/10"
+        >
+          <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Append
+          </span>
+          <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+            Add the current budget into the same job alongside everything already
+            there (may create duplicates).
+          </span>
+        </button>
+      </div>
+
+      {pushError && (
+        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{pushError}</p>
+      )}
+
+      <div className="mt-4 flex items-center justify-between border-t border-zinc-200 pt-3 dark:border-zinc-700">
+        <button
+          onClick={onStartOver}
+          disabled={busy}
+          className="text-xs font-medium text-zinc-500 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
+        >
+          {busy ? "Working…" : "Job deleted in JobTread? Start over"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

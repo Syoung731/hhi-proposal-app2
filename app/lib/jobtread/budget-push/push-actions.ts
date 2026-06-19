@@ -38,10 +38,16 @@ import {
   listCustomers,
   listCustomerJobs,
   pushBudgetToJob,
+  getProjectPushLinkage,
+  clearProjectPushLinkage,
 } from "./push-service";
 
 import type { JobTreadBudgetTree } from "./types";
-import type { JTCustomerLite, JTLocationLite } from "./push-service";
+import type {
+  JTCustomerLite,
+  JTLocationLite,
+  ProjectPushLinkage,
+} from "./push-service";
 
 // ---------------------------------------------------------------------------
 // Public types (the modal imports these via `import type`)
@@ -82,6 +88,12 @@ export interface PreparedPush {
   tree: JobTreadBudgetTree;
   /** Existing JobTread customer accounts (id + name), name-sorted. */
   customers: JTCustomerLite[];
+  /**
+   * Existing push linkage. When `linkage.jobtreadJobId` is set, this project was
+   * already pushed — the modal opens to the "already pushed" gate (re-push
+   * Overwrite/Append, or start over) instead of the customer step.
+   */
+  linkage: ProjectPushLinkage;
   /** Summary counters for the modal header. */
   stats: {
     roomCount: number;
@@ -180,11 +192,12 @@ export async function preparePush(projectId: string): Promise<PreparedPush> {
 
   // 1. Build the tree, then 2. resolve every line in place. The catalog fetch
   // inside createCostCodeResolver() is the expensive part — done once.
-  const [tree, resolver, customers, catalog] = await Promise.all([
+  const [tree, resolver, customers, catalog, linkage] = await Promise.all([
     buildJobTreadBudgetTree(projectId),
     createCostCodeResolver(),
     listCustomers(),
     getCostCodeCatalog(),
+    getProjectPushLinkage(projectId),
   ]);
 
   let roomCount = 0;
@@ -224,6 +237,7 @@ export async function preparePush(projectId: string): Promise<PreparedPush> {
     costTypeOptions: catalog.costTypes,
     tree,
     customers,
+    linkage,
     stats: { roomCount, lineItemCount, flaggedCount },
   };
 }
@@ -295,6 +309,7 @@ export async function pushBudgetAction(
     locationId?: string | null;
     jobNumber?: string | null;
   },
+  opts?: { overwrite?: boolean },
 ): Promise<{ groupCount: number; itemCount: number }> {
   await requireAdmin();
 
@@ -308,6 +323,16 @@ export async function pushBudgetAction(
     }
   }
 
-  const result = await pushBudgetToJob(projectId, jobId, tree, linkage);
+  const result = await pushBudgetToJob(projectId, jobId, tree, linkage, opts);
   return { groupCount: result.groupCount, itemCount: result.itemCount };
+}
+
+/**
+ * Forget a stale push link WITHOUT touching JobTread — for "start over" when the
+ * JobTread job was deleted outside the app. Clears the project's linkage/lock and
+ * our JobTreadPushedItem records so the project can push fresh.
+ */
+export async function clearPushLinkageAction(projectId: string): Promise<void> {
+  await requireAdmin();
+  await clearProjectPushLinkage(projectId);
 }

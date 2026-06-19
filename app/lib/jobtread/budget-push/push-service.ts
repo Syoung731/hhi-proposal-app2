@@ -238,6 +238,100 @@ export async function listCustomerJobs(accountId: string): Promise<JTLocationLit
   return locs;
 }
 
+// ── Push linkage / re-push helpers ───────────────────────────────────────────
+
+export interface ProjectPushLinkage {
+  /** The JobTread job this project's budget was pushed to (null = never pushed). */
+  jobtreadJobId: string | null;
+  jobtreadJobNumber: string | null;
+  jobtreadAccountId: string | null;
+  jobtreadLocationId: string | null;
+  /** When the budget was last pushed/locked (ISO), or null. */
+  lockedAt: string | null;
+  /** How many cost groups / items WE created (tracked in JobTreadPushedItem). */
+  pushedGroupCount: number;
+  pushedItemCount: number;
+}
+
+/** Current JobTread push linkage + counts of what we created. Read-only. */
+export async function getProjectPushLinkage(
+  projectId: string,
+): Promise<ProjectPushLinkage> {
+  const [project, grouped] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        jobtreadJobId: true,
+        jobtreadJobNumber: true,
+        jobtreadAccountId: true,
+        jobtreadLocationId: true,
+        jobtreadBudgetLockedAt: true,
+      },
+    }),
+    prisma.jobTreadPushedItem.groupBy({
+      by: ["kind"],
+      where: { projectId },
+      _count: { _all: true },
+    }),
+  ]);
+  const countOf = (k: string) =>
+    grouped.find((g) => g.kind === k)?._count._all ?? 0;
+  return {
+    jobtreadJobId: project?.jobtreadJobId ?? null,
+    jobtreadJobNumber: project?.jobtreadJobNumber ?? null,
+    jobtreadAccountId: project?.jobtreadAccountId ?? null,
+    jobtreadLocationId: project?.jobtreadLocationId ?? null,
+    lockedAt: project?.jobtreadBudgetLockedAt
+      ? project.jobtreadBudgetLockedAt.toISOString()
+      : null,
+    pushedGroupCount: countOf("COST_GROUP"),
+    pushedItemCount: countOf("COST_ITEM"),
+  };
+}
+
+/**
+ * Delete every JobTread cost group we previously created for this project, then
+ * clear our local JobTreadPushedItem records. Deleting a parent (room) cost
+ * group cascades to its child trade groups + items (verified live), so deleting
+ * the tracked groups removes our whole budget; per-id errors are ignored (a
+ * child already removed by an ancestor's cascade returns a 404). Manual JobTread
+ * additions are left untouched. Used by the Overwrite re-push path.
+ */
+export async function deletePushedEntities(
+  projectId: string,
+): Promise<{ deletedGroups: number }> {
+  const groups = await prisma.jobTreadPushedItem.findMany({
+    where: { projectId, kind: "COST_GROUP" },
+    select: { jobtreadId: true },
+  });
+  for (const g of groups) {
+    await jtDeleteCostGroup(g.jobtreadId).catch(() => {}); // ignore cascade 404s
+  }
+  await prisma.jobTreadPushedItem.deleteMany({ where: { projectId } });
+  return { deletedGroups: groups.length };
+}
+
+/**
+ * Clear our local push linkage + records WITHOUT touching JobTread. For "start
+ * over" when the JobTread job was deleted outside the app — there's nothing left
+ * to delete there, we just forget the stale link so the project can push fresh.
+ */
+export async function clearProjectPushLinkage(projectId: string): Promise<void> {
+  await prisma.$transaction([
+    prisma.jobTreadPushedItem.deleteMany({ where: { projectId } }),
+    prisma.project.update({
+      where: { id: projectId },
+      data: {
+        jobtreadJobId: null,
+        jobtreadJobNumber: null,
+        jobtreadAccountId: null,
+        jobtreadLocationId: null,
+        jobtreadBudgetLockedAt: null,
+      },
+    }),
+  ]);
+}
+
 // ── Budget push (two-step: cost groups → cost items) ─────────────────────────
 
 export interface PushBudgetResult {
@@ -248,15 +342,28 @@ export interface PushBudgetResult {
 
 /**
  * Create the full Room > Trade > Item budget on an existing JobTread job, then
- * record what we created (for Phase-3 Overwrite) and set the project's push lock.
+ * record what we created (for re-push Overwrite) and set the project's push lock.
  * The tree's costCodeId/costTypeId must already be resolved by the caller.
+ *
+ * Re-push modes (`opts.overwrite`):
+ *   - false/undefined → first push OR Append (just creates + records; existing
+ *     JobTreadPushedItem rows from a prior push are kept so a later Overwrite
+ *     removes both).
+ *   - true → Overwrite: delete the groups/items WE previously created (cascade,
+ *     keeping manual JobTread edits) before re-creating from the current tree.
  */
 export async function pushBudgetToJob(
   projectId: string,
   jobId: string,
   tree: JobTreadBudgetTree,
   linkage: { accountId?: string | null; locationId?: string | null; jobNumber?: string | null },
+  opts?: { overwrite?: boolean },
 ): Promise<PushBudgetResult> {
+  // Overwrite: remove our prior cost groups/items (and their records) first.
+  if (opts?.overwrite) {
+    await deletePushedEntities(projectId);
+  }
+
   const createdGroupIds: string[] = [];
   const createdItemIds: string[] = [];
 
