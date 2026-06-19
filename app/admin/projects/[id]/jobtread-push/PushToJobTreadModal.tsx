@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   preparePush,
   listCustomerLocationsJobs,
@@ -1037,6 +1037,134 @@ function ExactLine({ item }: { item: JTCostItem }) {
   );
 }
 
+/**
+ * Searchable single-select combobox for long option lists (e.g. the 155-entry
+ * cost-code catalog). Type any substring(s) to filter — "trim" surfaces both
+ * "36S - Interior Trim" and "20M - Exterior Trim". Inline-expanding (renders the
+ * list in-flow, not as an absolute overlay) so it never gets clipped by the
+ * modal body's `overflow-y-auto`. Keyboard: ↑/↓ to move, Enter to pick, Esc to close.
+ */
+function SearchableSelect({
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  options: { id: string; name: string }[];
+  placeholder?: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const selected = options.find((o) => o.id === value) ?? null;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    const terms = q.split(/\s+/).filter(Boolean);
+    return options.filter((o) => {
+      const n = o.name.toLowerCase();
+      return terms.every((t) => n.includes(t));
+    });
+  }, [options, query]);
+
+  // Close on click outside.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  function choose(id: string) {
+    onChange(id);
+    setOpen(false);
+    setQuery("");
+  }
+
+  return (
+    <div ref={rootRef}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setQuery("");
+          setActiveIdx(0);
+        }}
+        className={`mt-0.5 flex w-full items-center justify-between gap-2 text-left ${input}`}
+      >
+        <span className={`truncate ${selected ? "" : "text-zinc-400"}`}>
+          {selected ? selected.name : placeholder ?? "— select —"}
+        </span>
+        <span className="shrink-0 text-zinc-400">▾</span>
+      </button>
+
+      {open && (
+        <div className="mt-1 rounded-md border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActiveIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveIdx((i) => Math.min(i + 1, filtered.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIdx((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                const o = filtered[activeIdx];
+                if (o) choose(o.id);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setOpen(false);
+                setQuery("");
+              }
+            }}
+            placeholder="Type to search…"
+            className="w-full border-b border-zinc-200 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-zinc-400 dark:border-zinc-700 dark:text-zinc-100"
+          />
+          <ul className="max-h-52 overflow-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-2 py-2 text-sm text-zinc-400">No matches</li>
+            ) : (
+              filtered.map((o, idx) => (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    onMouseEnter={() => setActiveIdx(idx)}
+                    onClick={() => choose(o.id)}
+                    className={`block w-full truncate px-2 py-1.5 text-left text-sm ${
+                      idx === activeIdx
+                        ? "bg-orange-50 text-orange-900 dark:bg-orange-900/20 dark:text-orange-200"
+                        : "text-zinc-700 dark:text-zinc-200"
+                    } ${o.id === value ? "font-semibold" : ""}`}
+                  >
+                    {o.name}
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One flagged line — requires a cost code + cost group choice.
 function FlaggedLine({
   item,
@@ -1090,23 +1218,17 @@ function FlaggedLine({
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <label className="block">
+        <div className="block">
           <span className="text-[10px] font-medium uppercase text-zinc-400">
             Cost code
           </span>
-          <select
-            className={`mt-0.5 w-full ${input}`}
+          <SearchableSelect
             value={item.costCodeId ?? ""}
-            onChange={(e) => onPickCostCode(ri, ti, ii, e.target.value)}
-          >
-            <option value="">— select cost code —</option>
-            {costCodeOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            options={costCodeOptions}
+            placeholder="— select cost code —"
+            onChange={(id) => onPickCostCode(ri, ti, ii, id)}
+          />
+        </div>
 
         <label className="block">
           <span className="text-[10px] font-medium uppercase text-zinc-400">
