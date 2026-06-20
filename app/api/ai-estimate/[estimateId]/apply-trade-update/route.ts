@@ -126,7 +126,9 @@ export async function POST(request: NextRequest, { params }: Params) {
         corrections.push({ field: "unitCost", original: existing.unitCost, corrected: op.unitCost });
       }
       if (op.unitPrice != null && op.unitPrice !== existing.unitPrice) {
-        corrections.push({ field: "unitPrice", original: existing.unitPrice, corrected: op.unitPrice });
+        // Record the value actually stored (post-margin-policy newUP), not the
+        // proposed op.unitPrice, so the audit trail matches the DB.
+        corrections.push({ field: "unitPrice", original: existing.unitPrice, corrected: newUP });
       }
       for (const c of corrections) {
         await prisma.priceCorrection.create({

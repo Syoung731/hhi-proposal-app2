@@ -49,10 +49,15 @@ export function classifyLine(
   if (ct.includes("labor")) return "Install";
   if (ct.includes("material")) return "Material";
 
-  // Looser "contains" fallback on the name.
-  if (lower.includes("material")) return "Material";
-  if (lower.includes("install") || lower.includes("labor")) return "Install";
-  if (lower.includes("sub")) return "Sub";
+  // Looser fallback on the name — WORD-BOUNDARY matched so unsuffixed lines like
+  // "Framing Labor" / "Tile Material" still classify, but compound words don't
+  // false-positive: "Reinstall", "Subfloor", "Substrate", "Subway", "immaterial"
+  // must NOT match (they'd mis-price + mis-flag allowances). Anything that
+  // reaches here without a real keyword stays null (ambiguous → keep AI price).
+  if (/\bmaterials?\b/.test(lower)) return "Material";
+  if (/\binstall(?:ation)?\b/.test(lower) || /\blabou?r\b/.test(lower))
+    return "Install";
+  if (/\bsub(?:contract(?:or)?)?\b/.test(lower)) return "Sub";
 
   return null;
 }

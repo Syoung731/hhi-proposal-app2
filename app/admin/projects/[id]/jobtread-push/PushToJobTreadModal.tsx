@@ -70,6 +70,21 @@ function isFlagged(item: JTCostItem): boolean {
   );
 }
 
+/**
+ * A material line the "Materials → allowances" master toggle + counter operate
+ * on: a real estimate/extra material line that's currently included. Excludes $0
+ * template-scaffold placeholders and excluded lines so the counter matches what
+ * the user actually sees and pushes (and the merge default, which only sets
+ * allowanceType on ESTIMATE/EXTRA lines).
+ */
+function isPushableMaterial(item: JTCostItem): boolean {
+  return (
+    item.included !== false &&
+    item.lineSource !== "TEMPLATE_SCAFFOLD" &&
+    isMaterialLine(item.name, item.costTypeName)
+  );
+}
+
 /** Stable key for a single line within the whole tree. */
 function lineKey(roomIdx: number, tradeIdx: number, itemIdx: number): string {
   return `${roomIdx}:${tradeIdx}:${itemIdx}`;
@@ -363,9 +378,9 @@ export function PushToJobTreadModal({
     );
   }
 
-  // Master: set/clear the allowance switch on every material line at once.
+  // Master: set/clear the allowance switch on every (pushable) material line.
   function setAllMaterialsAllowance(on: boolean) {
-    setItemsAllowance((it) => isMaterialLine(it.name, it.costTypeName), on);
+    setItemsAllowance((it) => isPushableMaterial(it), on);
   }
 
   // Set the cost code on a line from a CodeOption; derive cost type if a
@@ -1248,12 +1263,11 @@ function VerifyStep({
     return inc === 0 ? "none" : inc === items.length ? "all" : "some";
   };
 
-  // Material lines + how many are currently flagged as allowances — drives the
-  // "Materials → allowances" master toggle.
+  // Pushable material lines + how many are currently flagged as allowances —
+  // drives the "Materials → allowances" master toggle. Excludes $0 scaffold
+  // placeholders and excluded lines so the count matches what's on screen.
   const materialItems = tree.rooms.flatMap((r) =>
-    r.trades.flatMap((t) =>
-      t.items.filter((it) => isMaterialLine(it.name, it.costTypeName)),
-    ),
+    r.trades.flatMap((t) => t.items.filter(isPushableMaterial)),
   );
   const materialAllowanceOn = materialItems.filter(
     (it) => it.allowanceType != null,

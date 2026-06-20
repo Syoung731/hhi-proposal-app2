@@ -40,7 +40,6 @@ import { prisma } from "@/app/lib/prisma";
 
 import { defaultAllowanceType } from "./line-class";
 import type {
-  CostTypeHint,
   JobTreadBudgetTree,
   JTCostItem,
   JTLineSource,
@@ -575,26 +574,4 @@ function normalizeName(name: string): string {
 /** Normalize a trade-group name for grouping/lookup (case/space-insensitive). */
 function normalizeTradeName(trade: string): string {
   return trade.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-/**
- * Derive the Material / Install / Sub hint from a line. Not consumed inside
- * merge.ts (the resolver runs later in the payload step), but exported so the
- * payload builders can reuse the exact same rule against a merged line's name +
- * cost type without re-deriving it differently.
- */
-export function deriveCostTypeHint(
-  name: string,
-  costTypeName: string | null,
-): CostTypeHint {
-  const lowerName = name.toLowerCase();
-  if (/-\s*material\b/.test(lowerName)) return "Material";
-  if (/-\s*install\b/.test(lowerName)) return "Install";
-
-  const ct = (costTypeName ?? "").toLowerCase();
-  if (ct.includes("sub")) return "Sub";
-  if (ct.includes("labor")) return "Install";
-  if (ct.includes("material")) return "Material";
-
-  return null;
 }

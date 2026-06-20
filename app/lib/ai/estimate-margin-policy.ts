@@ -35,8 +35,12 @@ export const MATERIAL_MARGIN_PCT = 0;
 /** Labor / subcontract margin: 60% (== 150% markup == price = cost / 0.4). */
 export const LABOR_MARGIN_PCT = 60;
 
-/** Sources whose AI-derived price we re-derive. Catalog + manual are preserved. */
-const POLICY_SOURCES = new Set(["AI_PRICED", "ALLOWANCE", "CALC"]);
+/**
+ * Sources whose AI-derived price we re-derive. CATALOG (curated) and MANUAL
+ * (explicit overrides) are preserved — and so is CALC: those are pre-calculated
+ * exact values (e.g. permit fees) that must never be marked up.
+ */
+const POLICY_SOURCES = new Set(["AI_PRICED", "ALLOWANCE"]);
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
