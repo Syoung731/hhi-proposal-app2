@@ -193,6 +193,26 @@ model JobTreadPushJob {
 }
 
 /**
+ * Remembered cost-code / cost-type per line-item name, learned from prior pushes.
+ * `startPushJobAction` upserts the final code for every pushed line; `preparePush`
+ * pre-fills a non-template-exact line from this memory (matchKind "learned") so
+ * estimators don't re-pick the same codes every push. Org-wide (not per-project)
+ * — the same item name should map to the same code anywhere. Last-writer-wins.
+ */
+model JobTreadCostCodeMemory {
+  id           String   @id @default(cuid())
+  itemNameKey  String   @unique // normalized line-item name (lowercased, collapsed whitespace)
+  itemName     String // original name, for display/debug
+  costCodeId   String
+  costCodeName String
+  costTypeId   String?
+  costTypeName String?
+  timesSeen    Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/**
  * Project-level Project Overhead (COPE) generation state.
  * One COPE AIEstimate per project at a time; this enum tracks whether a
  * regeneration is in-flight, succeeded, or failed since the last reset.

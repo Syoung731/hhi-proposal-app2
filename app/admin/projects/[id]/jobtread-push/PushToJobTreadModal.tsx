@@ -54,9 +54,16 @@ function usd(n: number): string {
   });
 }
 
-/** A line is flagged when its cost code wasn't an exact template match. */
+/**
+ * A line is flagged (needs manual verify) when its cost code wasn't an exact
+ * template match AND wasn't pre-filled from learned memory. "learned" lines are
+ * pre-filled from a prior push, so they don't require resolution.
+ */
 function isFlagged(item: JTCostItem): boolean {
-  return item.costCodeMatchKind !== "template-exact";
+  return (
+    item.costCodeMatchKind !== "template-exact" &&
+    item.costCodeMatchKind !== "learned"
+  );
 }
 
 /** Stable key for a single line within the whole tree. */
@@ -1336,6 +1343,14 @@ function ExactLine({
       />
       <span className="flex-1 truncate text-zinc-700 dark:text-zinc-300">
         {item.name}
+        {item.costCodeMatchKind === "learned" && (
+          <span
+            title="Cost code pre-filled from a prior push"
+            className="ml-2 rounded bg-sky-100 px-1 py-0.5 text-[9px] font-medium uppercase text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+          >
+            learned
+          </span>
+        )}
       </span>
       <span className="w-20 text-right text-xs text-zinc-400">
         {item.quantity} {item.unit}

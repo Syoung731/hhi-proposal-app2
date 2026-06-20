@@ -28,6 +28,12 @@ import { requireAdmin } from "@/app/lib/auth";
 import { buildJobTreadBudgetTree } from "./merge";
 import { publishPushWorkerMessage, runPushJobInline } from "./push-job";
 import {
+  loadCostCodeMemory,
+  recordCostCodeMemory,
+  memoryKey,
+  type RecordableLine,
+} from "./push-memory";
+import {
   createCostCodeResolver,
   getCostCodeCatalog,
 } from "./cost-code-resolver";
@@ -193,12 +199,13 @@ export async function preparePush(projectId: string): Promise<PreparedPush> {
 
   // 1. Build the tree, then 2. resolve every line in place. The catalog fetch
   // inside createCostCodeResolver() is the expensive part — done once.
-  const [tree, resolver, customers, catalog, linkage] = await Promise.all([
+  const [tree, resolver, customers, catalog, linkage, memory] = await Promise.all([
     buildJobTreadBudgetTree(projectId),
     createCostCodeResolver(),
     listCustomers(),
     getCostCodeCatalog(),
     getProjectPushLinkage(projectId),
+    loadCostCodeMemory(),
   ]);
 
   let roomCount = 0;
@@ -219,10 +226,27 @@ export async function preparePush(projectId: string): Promise<PreparedPush> {
         item.costCodeName = resolution.costCodeName;
         item.costTypeId = resolution.costTypeId;
         item.costTypeName = resolution.costTypeName;
-        item.costCodeMatchKind = resolution.matchKind;
+        let matchKind = resolution.matchKind;
+
+        // Overlay learned memory onto any line the template didn't authoritatively
+        // code — pre-fills the estimator's prior choice for this item name.
+        if (matchKind !== "template-exact") {
+          const learned = memory.get(memoryKey(item.name));
+          if (learned) {
+            item.costCodeId = learned.costCodeId;
+            item.costCodeName = learned.costCodeName;
+            item.costTypeId = learned.costTypeId;
+            item.costTypeName = learned.costTypeName;
+            matchKind = "learned";
+          }
+        }
+        item.costCodeMatchKind = matchKind;
 
         lineItemCount += 1;
-        if (resolution.matchKind !== "template-exact") flaggedCount += 1;
+        // "learned" lines are pre-filled from a prior push → not flagged.
+        if (matchKind !== "template-exact" && matchKind !== "learned") {
+          flaggedCount += 1;
+        }
       }
     }
   }
@@ -338,9 +362,11 @@ export async function startPushJobAction(
 ): Promise<{ pushJobId: string }> {
   await requireAdmin();
 
-  // Validate + count up front (same cost-code guard as the synchronous path).
+  // Validate + count up front (same cost-code guard as the synchronous path),
+  // and collect the resolved codes to remember for next time.
   let totalGroups = 0;
   let totalItems = 0;
+  const recordable: RecordableLine[] = [];
   for (const room of tree.rooms) {
     totalGroups += 1; // room group
     for (const trade of room.trades) {
@@ -350,9 +376,20 @@ export async function startPushJobAction(
         if (item.costCodeId == null) {
           throw new Error("Every line must have a cost code before pushing.");
         }
+        recordable.push({
+          name: item.name,
+          costCodeId: item.costCodeId,
+          costCodeName: item.costCodeName,
+          costTypeId: item.costTypeId,
+          costTypeName: item.costTypeName,
+        });
       }
     }
   }
+
+  // Remember these codes so same-named lines pre-fill on future pushes
+  // (best-effort — never blocks the push).
+  await recordCostCodeMemory(recordable);
 
   const job = await prisma.jobTreadPushJob.create({
     data: {
