@@ -48,6 +48,12 @@ New jobs default to the **Design** stage and a name like *"123 Main St - Design"
 
 > **Tip:** JobTread caps job names at 30 characters — the field shows the limit.
 
+> **Heads-up:** When you create a **new job** for an existing customer who has
+> **more than one location**, the push attaches it to the customer's **first
+> location**. If that customer has multiple properties, create the job directly
+> in JobTread under the right location first, then come back and pick it as an
+> *existing* job here.
+
 ### Step 3 — Verify (the important one)
 
 This shows the whole budget as **Room → Trade → Line**. Two things to do here:
