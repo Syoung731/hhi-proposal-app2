@@ -24,6 +24,7 @@ Each module is self-contained; build the full training program by combining them
 | [Deck — Themes](./deck-themes.md) | The deck-wide visual skin: 5 themes (Blueprint, Editorial, Gallery, Coastal, Palmetto), what themes do/don't change, picking per client | ✅ Ready |
 | [Deck — Floor Plan Map Slide](./deck-floor-plan-slide.md) | The project footprint: client's real plan + zone pins + SF callouts pulled from room dimensions, 2 layouts (Callout Map, Side Ledger), AI Edit | ✅ Ready |
 | [Deck — Craftsmanship Slide](./deck-craftsmanship-slide.md) | Build-quality proof: 6 default HHI standards, 2 layouts (Standards Grid + macro collage, Annotated Photo + leader-line pins), AI Edit | ✅ Ready |
+| [Workflow — Push Budget to JobTread](./jobtread-budget-push.md) | Send an estimate into JobTread: customer/job lookup-or-create, 3-step Verify with searchable cost codes + include/exclude checkboxes, background push w/ progress, re-push (Overwrite/Append/Start over), learned cost codes, AI notes → Internal Notes | ✅ Ready |
 
 > The Website Discovery Questionnaire moved to its own standalone site
 > (Vercel project `hhi-discovery`); its team guide lives in that repo at
@@ -43,4 +44,4 @@ Each module is self-contained; build the full training program by combining them
 - **"Tip"** callouts are best-practice shortcuts.
 - **"Heads-up"** callouts are common mistakes to avoid.
 
-Last updated: 2026-06-12
+Last updated: 2026-06-20
