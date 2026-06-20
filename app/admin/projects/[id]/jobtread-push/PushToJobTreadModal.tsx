@@ -19,6 +19,10 @@ import type {
   JobTreadBudgetTree,
   JTCostItem,
 } from "@/app/lib/jobtread/budget-push/types";
+import {
+  JOBTREAD_ALLOWANCE_TYPE,
+  isMaterialLine,
+} from "@/app/lib/jobtread/budget-push/line-class";
 import type {
   JTCustomerLite,
   JTLocationLite,
@@ -324,6 +328,44 @@ export function PushToJobTreadModal({
     const items = tree?.rooms[ri]?.trades.flatMap((t) => t.items) ?? [];
     const anyIncluded = items.some((it) => it.included !== false);
     setItemsIncluded((r) => r === ri, !anyIncluded);
+  }
+
+  // ── Allowance toggles ──────────────────────────────────────────────────────
+  // Set `allowanceType` on every item matching `pred`. The value lives ON the
+  // item (like `included`), so it survives cost-code edits and re-homing.
+  function setItemsAllowance(
+    pred: (item: JTCostItem, ri: number, ti: number, ii: number) => boolean,
+    on: boolean,
+  ) {
+    setTree((prev) => {
+      if (!prev) return prev;
+      const rooms = prev.rooms.map((room, ri) => ({
+        ...room,
+        trades: room.trades.map((trade, ti) => ({
+          ...trade,
+          items: trade.items.map((item, ii) =>
+            pred(item, ri, ti, ii)
+              ? { ...item, allowanceType: on ? JOBTREAD_ALLOWANCE_TYPE : null }
+              : item,
+          ),
+        })),
+      }));
+      return { ...prev, rooms };
+    });
+  }
+
+  function toggleItemAllowance(ri: number, ti: number, ii: number) {
+    const cur = tree?.rooms[ri]?.trades[ti]?.items[ii];
+    if (!cur) return;
+    setItemsAllowance(
+      (_it, r, t, i) => r === ri && t === ti && i === ii,
+      cur.allowanceType == null,
+    );
+  }
+
+  // Master: set/clear the allowance switch on every material line at once.
+  function setAllMaterialsAllowance(on: boolean) {
+    setItemsAllowance((it) => isMaterialLine(it.name, it.costTypeName), on);
   }
 
   // Set the cost code on a line from a CodeOption; derive cost type if a
@@ -778,6 +820,8 @@ export function PushToJobTreadModal({
                   onToggleItem={toggleItemIncluded}
                   onToggleTrade={toggleTradeIncluded}
                   onToggleRoom={toggleRoomIncluded}
+                  onToggleItemAllowance={toggleItemAllowance}
+                  onSetAllMaterialsAllowance={setAllMaterialsAllowance}
                 />
               )}
             </>
@@ -1174,6 +1218,8 @@ function VerifyStep({
   onToggleItem,
   onToggleTrade,
   onToggleRoom,
+  onToggleItemAllowance,
+  onSetAllMaterialsAllowance,
 }: {
   prepared: PreparedPush;
   tree: JobTreadBudgetTree;
@@ -1189,6 +1235,8 @@ function VerifyStep({
   onToggleItem: (ri: number, ti: number, ii: number) => void;
   onToggleTrade: (ri: number, ti: number) => void;
   onToggleRoom: (ri: number) => void;
+  onToggleItemAllowance: (ri: number, ti: number, ii: number) => void;
+  onSetAllMaterialsAllowance: (on: boolean) => void;
 }) {
   const totalItems = tree.rooms.reduce(
     (s, r) => s + r.trades.reduce((t, tr) => t + tr.items.length, 0),
@@ -1199,6 +1247,23 @@ function VerifyStep({
     const inc = items.filter((it) => it.included !== false).length;
     return inc === 0 ? "none" : inc === items.length ? "all" : "some";
   };
+
+  // Material lines + how many are currently flagged as allowances — drives the
+  // "Materials → allowances" master toggle.
+  const materialItems = tree.rooms.flatMap((r) =>
+    r.trades.flatMap((t) =>
+      t.items.filter((it) => isMaterialLine(it.name, it.costTypeName)),
+    ),
+  );
+  const materialAllowanceOn = materialItems.filter(
+    (it) => it.allowanceType != null,
+  ).length;
+  const materialMasterState: "all" | "some" | "none" =
+    materialItems.length === 0 || materialAllowanceOn === 0
+      ? "none"
+      : materialAllowanceOn === materialItems.length
+        ? "all"
+        : "some";
   return (
     <div className="space-y-4">
       {/* Summary banner */}
@@ -1228,6 +1293,27 @@ function VerifyStep({
           ? " — unchecked lines are skipped."
           : ". Uncheck rooms, trades, or lines to push a subset."}
       </div>
+
+      {/* Allowance master toggle — flips the JobTread allowance switch on every
+          material line at once. Per-line switches below override it. */}
+      {materialItems.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800/40">
+          <TriCheckbox
+            state={materialMasterState}
+            onChange={() =>
+              onSetAllMaterialsAllowance(materialMasterState !== "all")
+            }
+            title="Mark all material lines as JobTread allowances"
+          />
+          <span className="font-medium text-zinc-600 dark:text-zinc-300">
+            Materials → allowances
+          </span>
+          <span className="text-xs text-zinc-400">
+            {materialAllowanceOn}/{materialItems.length} material line
+            {materialItems.length === 1 ? "" : "s"} set as allowance
+          </span>
+        </div>
+      )}
 
       {(tree.roomsWithoutTemplate.length > 0 ||
         tree.roomsWithoutEstimate.length > 0) && (
@@ -1316,6 +1402,8 @@ function VerifyStep({
                         ii={ii}
                         included={it.included !== false}
                         onToggle={() => onToggleItem(ri, ti, ii)}
+                        allowance={it.allowanceType != null}
+                        onToggleAllowance={() => onToggleItemAllowance(ri, ti, ii)}
                         resolved={!!resolved[lineKey(ri, ti, ii)]}
                         currentGroupKey={groupKey(ri, ti)}
                         groupOptions={groupOptions}
@@ -1334,6 +1422,8 @@ function VerifyStep({
                           item={it}
                           included={it.included !== false}
                           onToggle={() => onToggleItem(ri, ti, ii)}
+                          allowance={it.allowanceType != null}
+                          onToggleAllowance={() => onToggleItemAllowance(ri, ti, ii)}
                         />
                       ))}
 
@@ -1351,15 +1441,44 @@ function VerifyStep({
   );
 }
 
-// One read-only template-exact line (with include/exclude checkbox).
+/**
+ * Compact allowance switch shown on every line. ON = the line will be pushed as
+ * a JobTread allowance (`allowanceType` set). Materials default ON.
+ */
+function AllowanceChip({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={
+        on
+          ? "Allowance ON — this line pushes as a JobTread allowance. Click to make it a normal line."
+          : "Click to push this line as a JobTread allowance."
+      }
+      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors ${
+        on
+          ? "bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/40 dark:text-orange-300"
+          : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-500"
+      }`}
+    >
+      {on ? "● Allowance" : "○ Allowance"}
+    </button>
+  );
+}
+
+// One read-only template-exact line (with include/exclude + allowance toggle).
 function ExactLine({
   item,
   included,
   onToggle,
+  allowance,
+  onToggleAllowance,
 }: {
   item: JTCostItem;
   included: boolean;
   onToggle: () => void;
+  allowance: boolean;
+  onToggleAllowance: () => void;
 }) {
   return (
     <div
@@ -1383,6 +1502,7 @@ function ExactLine({
           </span>
         )}
       </span>
+      <AllowanceChip on={allowance} onToggle={onToggleAllowance} />
       <span className="w-20 text-right text-xs text-zinc-400">
         {item.quantity} {item.unit}
       </span>
@@ -1561,6 +1681,8 @@ function FlaggedLine({
   ii,
   included,
   onToggle,
+  allowance,
+  onToggleAllowance,
   resolved,
   currentGroupKey,
   groupOptions,
@@ -1575,6 +1697,8 @@ function FlaggedLine({
   ii: number;
   included: boolean;
   onToggle: () => void;
+  allowance: boolean;
+  onToggleAllowance: () => void;
   resolved: boolean;
   currentGroupKey: string;
   groupOptions: GroupOption[];
@@ -1604,6 +1728,7 @@ function FlaggedLine({
         <span className="flex-1 truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
           {item.name}
         </span>
+        <AllowanceChip on={allowance} onToggle={onToggleAllowance} />
         <span className="text-xs text-zinc-400">
           {item.quantity} {item.unit} · {usd(item.unitPrice)}
         </span>

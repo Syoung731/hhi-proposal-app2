@@ -38,7 +38,7 @@ import "server-only";
 
 import { prisma } from "@/app/lib/prisma";
 
-import { JOBTREAD_ALLOWANCE_TYPE } from "./types";
+import { defaultAllowanceType } from "./line-class";
 import type {
   CostTypeHint,
   JobTreadBudgetTree,
@@ -506,7 +506,13 @@ function applyEstimateToScaffold(
   scaffold.lineSource = "ESTIMATE";
   scaffold.estimateLineItemId = line.id;
   scaffold.notes = line.notes ?? null; // carry the estimate's AI notes
-  scaffold.allowanceType = line.source === "ALLOWANCE" ? JOBTREAD_ALLOWANCE_TYPE : null;
+  // Default the allowance switch ON for ALLOWANCE-bucket lines AND materials
+  // (client-selected finishes pushed at cost). The push modal can flip any line.
+  scaffold.allowanceType = defaultAllowanceType(
+    line.name,
+    scaffold.costTypeName,
+    line.source,
+  );
 }
 
 /**
@@ -531,7 +537,7 @@ function extraItemFromEstimate(
     costTypeName: null,
     costTypeId: null,
     notes: line.notes ?? null, // carry the estimate's AI notes
-    allowanceType: line.source === "ALLOWANCE" ? JOBTREAD_ALLOWANCE_TYPE : null,
+    allowanceType: defaultAllowanceType(line.name, null, line.source),
     lineSource: "EXTRA" satisfies JTLineSource,
     estimateLineItemId: line.id,
     jobtreadItemId: null,

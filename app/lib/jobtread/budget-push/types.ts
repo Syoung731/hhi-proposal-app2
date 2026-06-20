@@ -67,12 +67,11 @@ export type JTLineSource = "TEMPLATE_SCAFFOLD" | "ESTIMATE" | "EXTRA";
 export const JOBTREAD_INTERNAL_NOTES_FIELD_ID = "22P68yhCDCde";
 
 /**
- * JobTread cost-item `allowanceType` value used for estimate ALLOWANCE lines.
- * Confirmed live: the valid enum values are "costAndFee" and "price"; HHI's
- * existing items overwhelmingly use "costAndFee" (cost + fee), so that's our
- * default for pushed allowance lines.
+ * JobTread cost-item `allowanceType` value for allowance lines. Re-exported from
+ * the client-safe `./line-class` (single source of truth) so server modules can
+ * keep importing it from here while the push modal imports it directly.
  */
-export const JOBTREAD_ALLOWANCE_TYPE = "costAndFee";
+export { JOBTREAD_ALLOWANCE_TYPE } from "./line-class";
 
 // ---------------------------------------------------------------------------
 // Tree node types (the pure, in-memory merge result)
