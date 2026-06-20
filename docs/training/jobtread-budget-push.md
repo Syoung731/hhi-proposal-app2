@@ -79,6 +79,13 @@ checkbox. Uncheck anything you don't want to send — at the room level
 **"Pushing X of Y lines."** This is especially handy when you only want to add a
 few items (see Append below).
 
+**c) Allowance switches.** Each line has an **● Allowance** chip. **Material
+lines default to ON** — they'll be sent to JobTread as **allowances** (HHI tracks
+client-selected finishes as allowances). Click a chip to flip a single line, or
+use the **"Materials → allowances"** master toggle near the top to set or clear
+them all at once. Labor/subcontract lines default OFF. The counter shows how many
+of your priced material lines are currently set as allowances.
+
 ---
 
 ## 4. Pushing
@@ -113,6 +120,13 @@ of duplicating:
 - **Material vs labor.** Material lines map to the trade's *"- Material"* code;
   install/labor lines map to *"- Subcontract"* (HHI subs its trade labor).
   Demolition and Construction Clean default to Subcontract too.
-- **Allowances.** Estimate allowance lines are pushed as JobTread allowances.
+- **Pricing model.** Estimate pricing follows HHI's policy: **materials are
+  priced at cost** (no markup — they're client-selected allowances), and **HHI's
+  margin is on the labor** (install/subcontract is marked up to a 60% margin). So
+  a material line's client price equals its cost in JobTread — that's expected,
+  not a bug. Catalog-priced and manually-entered lines keep their own prices.
+- **Allowances.** **Material lines default to allowances** (flip per line or with
+  the master switch in Verify); estimate allowance-bucket lines push as
+  allowances too.
 - **One push at a time** per project, and the same push can't run twice — safe to
   click once and wait for the bar.
