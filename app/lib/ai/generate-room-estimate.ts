@@ -16,6 +16,7 @@ import { calcItemPriceRange } from "@/app/lib/price-range";
 import { getEffectiveRoomMetrics } from "@/app/lib/effective-room-sf";
 import { classifyRoomForDetail } from "@/app/lib/room-classification";
 import { upsertCatalogSuggestion } from "@/app/lib/ai/catalog-suggestion-upsert";
+import { applyMarginPolicy } from "@/app/lib/ai/estimate-margin-policy";
 
 /**
  * Single-room AI estimate generation — the core pipeline shared between
@@ -258,6 +259,11 @@ export async function generateRoomEstimate(
   }
 
   const parsedEstimate = parseEstimateResponse(rawText, catalogItems);
+
+  // Apply HHI's margin policy (materials at cost, labor at 60%) to AI-derived
+  // lines before persisting — the estimate is the source of truth the Investment
+  // tab, proposal, and JobTread push all read.
+  applyMarginPolicy(parsedEstimate);
 
   // ---------- Persist estimate + line items ----------
 

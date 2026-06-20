@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
 import { calcItemPriceRange } from "@/app/lib/price-range";
+import { resolvePolicyUnitPrice } from "@/app/lib/ai/estimate-margin-policy";
 import type { TradeUpdateProposal } from "@/app/lib/ai-trade-update-prompt";
 
 type Params = { params: Promise<{ estimateId: string }> };
@@ -88,9 +89,16 @@ export async function POST(request: NextRequest, { params }: Params) {
 
       const newQty = op.quantity ?? existing.quantity;
       const newUC = op.unitCost ?? existing.unitCost;
-      const newUP = op.unitPrice ?? existing.unitPrice;
       const newName = op.name ?? existing.name;
       const newUnit = op.unit ?? existing.unit;
+      // Apply HHI margin policy to AI-derived lines (materials at cost, labor 60%);
+      // catalog/manual sources + ambiguous lines keep the proposed price.
+      const newUP = resolvePolicyUnitPrice(
+        newName,
+        existing.source,
+        newUC,
+        op.unitPrice ?? existing.unitPrice,
+      );
       const newTotalPrice = newQty * newUP;
       const range = calcItemPriceRange(newTotalPrice, existing.source, lowPct, highPct);
 
@@ -148,8 +156,6 @@ export async function POST(request: NextRequest, { params }: Params) {
     for (const op of proposal.add ?? []) {
       const qty = op.quantity ?? 1;
       const uc = op.unitCost ?? 0;
-      const up = op.unitPrice ?? 0;
-      const tp = qty * up;
       // Honor AI's declared source; fall back based on catalog match.
       // If the AI overrode a $0 catalog item with real prices, treat as AI_PRICED, not CATALOG.
       let source: string;
@@ -160,6 +166,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       } else {
         source = "AI_PRICED";
       }
+      // Apply HHI margin policy to AI-derived lines; catalog/manual + ambiguous
+      // lines keep the proposed price.
+      const up = resolvePolicyUnitPrice(op.name, source, uc, op.unitPrice ?? 0);
+      const tp = qty * up;
       const range = calcItemPriceRange(tp, source, lowPct, highPct);
 
       const item = await prisma.estimateLineItem.create({

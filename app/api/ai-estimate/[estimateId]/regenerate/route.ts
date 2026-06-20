@@ -5,6 +5,7 @@ import { SYSTEM_PROMPT, buildUserPrompt, type ProjectContext, type RoomDimension
 import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
+import { applyMarginPolicy } from "@/app/lib/ai/estimate-margin-policy";
 
 // ---------- POST — Regenerate estimate (creates a new one) ----------
 
@@ -116,6 +117,11 @@ export async function POST(
     }
 
     const parsedEstimate = parseEstimateResponse(rawText, catalogItems);
+
+    // Apply HHI's margin policy (materials at cost, labor at 60%) to AI-derived
+    // lines before persisting — keeps regenerated estimates consistent with the
+    // initial-generation path.
+    applyMarginPolicy(parsedEstimate);
 
     // Calculate price ranges
     const lowPct = companyContext.priceRangeLowPct ?? -10;
