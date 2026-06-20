@@ -34,6 +34,16 @@ export const JOB_STAGE_OPTIONS = [
  */
 const ITEM_CONCURRENCY = 1;
 
+/**
+ * Time budget for a single push run. The QStash worker has maxDuration=300s; we
+ * stop creating well before that (255s) and throw, so the rollback path actually
+ * runs before the platform hard-kills the function (a hard-kill skips the
+ * try/catch and would orphan a partial budget + leave the job stuck RUNNING).
+ */
+const PUSH_TIME_BUDGET_MS = 255_000;
+const PUSH_TIMEOUT_MESSAGE =
+  "Push exceeded its time budget and was rolled back. Push fewer lines (use the checkboxes) or split it.";
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ── Response helpers ─────────────────────────────────────────────────────────
@@ -318,9 +328,12 @@ export async function deletePushedEntities(
  * Clear our local push linkage + records WITHOUT touching JobTread. For "start
  * over" when the JobTread job was deleted outside the app — there's nothing left
  * to delete there, we just forget the stale link so the project can push fresh.
+ * Also clears JobTreadPushJob rows so a job stuck in RUNNING (e.g. a worker that
+ * was hard-killed) can't block a fresh push via the in-flight guard.
  */
 export async function clearProjectPushLinkage(projectId: string): Promise<void> {
   await prisma.$transaction([
+    prisma.jobTreadPushJob.deleteMany({ where: { projectId } }),
     prisma.jobTreadPushedItem.deleteMany({ where: { projectId } }),
     prisma.project.update({
       where: { id: projectId },
@@ -356,8 +369,10 @@ export interface PushBudgetResult {
  *   - false/undefined → first push OR Append (just creates + records; existing
  *     JobTreadPushedItem rows from a prior push are kept so a later Overwrite
  *     removes both).
- *   - true → Overwrite: delete the groups/items WE previously created (cascade,
- *     keeping manual JobTread edits) before re-creating from the current tree.
+ *   - true → Overwrite: re-create from the current tree, THEN delete the groups/
+ *     items WE previously created (cascade, keeping manual JobTread edits). The
+ *     old budget is removed only after the new one is built, so a failed/timed-out
+ *     re-push never destroys the prior budget.
  */
 export async function pushBudgetToJob(
   projectId: string,
@@ -370,20 +385,18 @@ export async function pushBudgetToJob(
     onProgress?: (p: { groups: number; items: number }) => void | Promise<void>;
   },
 ): Promise<PushBudgetResult> {
-  // Overwrite: remove our prior cost groups/items (and their records) first.
-  if (opts?.overwrite) {
-    await deletePushedEntities(projectId);
-  }
-
+  const deadline = Date.now() + PUSH_TIME_BUDGET_MS;
   const createdGroupIds: string[] = [];
   const createdItemIds: string[] = [];
 
   try {
     for (const room of tree.rooms) {
+      if (Date.now() > deadline) throw new Error(PUSH_TIMEOUT_MESSAGE);
       const roomGroupId = await jtCreateCostGroup({ jobId, name: room.roomName });
       createdGroupIds.push(roomGroupId);
 
       for (const trade of room.trades) {
+        if (Date.now() > deadline) throw new Error(PUSH_TIMEOUT_MESSAGE);
         const tradeGroupId = await jtCreateCostGroup({ jobId, name: trade.tradeName, parentCostGroupId: roomGroupId });
         createdGroupIds.push(tradeGroupId);
 
@@ -410,6 +423,14 @@ export async function pushBudgetToJob(
           });
         }
       }
+    }
+
+    // Overwrite: the NEW budget is fully created — only NOW remove the OLD one
+    // (cascade, keeps manual JobTread edits). Doing this after success means a
+    // failed/timed-out create never destroys the prior budget; the catch rolls
+    // back only the new groups.
+    if (opts?.overwrite) {
+      await deletePushedEntities(projectId);
     }
 
     // Record created entities + set the linkage/lock atomically.

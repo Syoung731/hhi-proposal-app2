@@ -231,7 +231,7 @@ export async function preparePush(projectId: string): Promise<PreparedPush> {
         // Overlay learned memory onto any line the template didn't authoritatively
         // code — pre-fills the estimator's prior choice for this item name.
         if (matchKind !== "template-exact") {
-          const learned = memory.get(memoryKey(item.name));
+          const learned = memory.get(memoryKey(trade.tradeName, item.name));
           if (learned) {
             item.costCodeId = learned.costCodeId;
             item.costCodeName = learned.costCodeName;
@@ -340,6 +340,8 @@ export interface PushJobStatus {
   jobtreadJobId: string;
   jobtreadJobNumber: string | null;
   error: string | null;
+  /** True when RUNNING longer than the worker could possibly take (dead worker). */
+  stalled: boolean;
 }
 
 /**
@@ -373,10 +375,15 @@ export async function startPushJobAction(
       totalGroups += 1; // trade group
       for (const item of trade.items) {
         totalItems += 1;
-        if (item.costCodeId == null) {
-          throw new Error("Every line must have a cost code before pushing.");
+        // JobTread's createCostItem requires BOTH a cost code AND a cost type,
+        // so the gate must check both (a manual code pick can leave type null).
+        if (item.costCodeId == null || item.costTypeId == null) {
+          throw new Error(
+            `"${item.name}" needs both a cost code and a cost type before pushing.`,
+          );
         }
         recordable.push({
+          tradeName: trade.tradeName,
           name: item.name,
           costCodeId: item.costCodeId,
           costCodeName: item.costCodeName,
@@ -385,6 +392,18 @@ export async function startPushJobAction(
         });
       }
     }
+  }
+
+  // Guard against starting a second push while one is already in flight for this
+  // project (prevents duplicate budgets from a double-click / reopened modal).
+  const inflight = await prisma.jobTreadPushJob.findFirst({
+    where: { projectId, status: { in: ["QUEUED", "RUNNING"] } },
+    select: { id: true },
+  });
+  if (inflight) {
+    throw new Error(
+      "A push for this project is already in progress. Wait for it to finish.",
+    );
   }
 
   // Remember these codes so same-named lines pre-fill on future pushes
@@ -431,6 +450,14 @@ export async function getPushJobStatus(
   await requireAdmin();
   const job = await prisma.jobTreadPushJob.findUnique({ where: { id: pushJobId } });
   if (!job) return null;
+  // A RUNNING job whose start is older than the worker's hard ceiling (300s
+  // maxDuration + buffer) means the worker died mid-run — surface it as stalled
+  // so the modal stops polling forever and tells the user to recover.
+  const STALL_MS = 360_000;
+  const stalled =
+    job.status === "RUNNING" &&
+    job.startedAt != null &&
+    Date.now() - job.startedAt.getTime() > STALL_MS;
   return {
     status: job.status,
     mode: job.mode,
@@ -441,5 +468,6 @@ export async function getPushJobStatus(
     jobtreadJobId: job.jobtreadJobId,
     jobtreadJobNumber: job.jobtreadJobNumber,
     error: job.error,
+    stalled,
   };
 }

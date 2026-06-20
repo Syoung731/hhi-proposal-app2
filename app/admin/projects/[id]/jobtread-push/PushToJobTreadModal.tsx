@@ -141,6 +141,15 @@ export function PushToJobTreadModal({
   // Background push job (set once enqueued) + its latest polled progress.
   const [pushJobId, setPushJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState<PushJobStatus | null>(null);
+  // Entities created during a NEW push (customer/location/job). Cached so a retry
+  // after a failed push reuses them instead of re-creating duplicates. Reset when
+  // the customer/job selection changes (see effect below).
+  const createdTargetRef = useRef<{
+    accountId: string | null;
+    locationId: string | null;
+    jobId: string;
+    jobNumber: string | null;
+  } | null>(null);
   const [success, setSuccess] = useState<{
     jobId: string;
     jobNumber: string | null;
@@ -327,6 +336,8 @@ export function PushToJobTreadModal({
   ) {
     if (!prepared) return;
     const opt = prepared.costCodeOptions.find((o) => o.id === codeId);
+    const ct = opt ? deriveCostType(opt.name, prepared.costTypeOptions) : null;
+    const current = tree?.rooms[ri]?.trades[ti]?.items[ii];
     setTree((prev) => {
       if (!prev) return prev;
       const rooms = prev.rooms.map((r) => ({
@@ -340,18 +351,18 @@ export function PushToJobTreadModal({
         costCodeId: opt ? opt.id : null,
         costCodeName: opt ? opt.name : null,
       };
-      // Try to derive a cost type from a same-named cost-type option.
-      if (opt) {
-        const ct = deriveCostType(opt.name, prepared.costTypeOptions);
-        if (ct) {
-          next.costTypeId = ct.id;
-          next.costTypeName = ct.name;
-        }
+      if (ct) {
+        next.costTypeId = ct.id;
+        next.costTypeName = ct.name;
       }
       rooms[ri].trades[ti].items[ii] = next;
       return { ...prev, rooms };
     });
-    markResolved(ri, ti, ii);
+    // Only mark resolved when the line now has BOTH a cost code AND a cost type
+    // (JobTread requires both). If no type could be derived, leave it flagged so
+    // the push isn't blocked server-side with a confusing mid-push error.
+    const hasType = !!(ct?.id || current?.costTypeId);
+    if (opt?.id && hasType) markResolved(ri, ti, ii);
   }
 
   // Load a selected existing customer's locations + jobs for STEP 2.
@@ -471,6 +482,10 @@ export function PushToJobTreadModal({
         locationId = prepared.linkage.jobtreadLocationId;
         jobNumber = prepared.linkage.jobtreadJobNumber;
         mode = repushMode;
+      } else if (createdTargetRef.current) {
+        // Reuse entities created on a prior (failed) attempt this session — never
+        // re-create the customer/location/job on retry (avoids duplicates).
+        ({ accountId, locationId, jobId, jobNumber } = createdTargetRef.current);
       } else {
         // New push: resolve (or create) customer → location → job.
         if (custMode === "existing") {
@@ -518,6 +533,8 @@ export function PushToJobTreadModal({
           jobId = created.jobId;
           jobNumber = created.jobNumber;
         }
+        // Cache so a retry after a failed push reuses these, not re-creates them.
+        createdTargetRef.current = { accountId, locationId, jobId, jobNumber };
       }
 
       // Only push the SELECTED (checked) lines — prune excluded items and any
@@ -582,6 +599,14 @@ export function PushToJobTreadModal({
             setProgress(null);
             return;
           }
+          if (s.stalled) {
+            setPushError(
+              "This push stalled (the worker didn't finish). It may have left a partial budget — open the job in JobTread to check, then re-push with Overwrite to clean up, or use Start over.",
+            );
+            setPushJobId(null);
+            setProgress(null);
+            return;
+          }
         }
         timer = setTimeout(poll, 2000);
       } catch {
@@ -594,6 +619,12 @@ export function PushToJobTreadModal({
       if (timer) clearTimeout(timer);
     };
   }, [pushJobId, success]);
+
+  // If the customer/job target selection changes, drop any cached created-target
+  // so the next push creates against the new selection (not the stale one).
+  useEffect(() => {
+    createdTargetRef.current = null;
+  }, [custMode, selCustomer, jobMode, selJob, newCustName, newJobName, repushMode]);
 
   // Customer type-ahead filter.
   const filteredCustomers = useMemo(() => {
@@ -1626,7 +1657,13 @@ function FlaggedLine({
         <div className="mt-2 flex justify-end">
           <button
             onClick={() => onMarkResolved(ri, ti, ii)}
-            className="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+            disabled={item.costCodeId == null || item.costTypeId == null}
+            title={
+              item.costCodeId == null || item.costTypeId == null
+                ? "Pick a cost code first (it sets the cost type)."
+                : undefined
+            }
+            className="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 disabled:hover:bg-transparent dark:text-emerald-300 dark:hover:bg-emerald-900/20"
           >
             Confirm this line
           </button>

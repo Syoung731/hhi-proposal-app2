@@ -19,9 +19,15 @@ export interface LearnedCostCode {
   costTypeName: string | null;
 }
 
-/** Normalize a line-item name into the memory key (lowercased, collapsed ws). */
-export function memoryKey(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, " ").trim();
+const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Memory key, scoped to the TRADE + item name. Trade-scoping prevents a code
+ * learned for one trade (e.g. "Demo > Remove X") from silently pre-filling a
+ * same-named line in a different trade.
+ */
+export function memoryKey(tradeName: string, name: string): string {
+  return `${norm(tradeName)}::${norm(name)}`;
 }
 
 /** All remembered mappings as a `memoryKey(name)` → code map. */
@@ -49,6 +55,7 @@ export async function loadCostCodeMemory(): Promise<Map<string, LearnedCostCode>
 }
 
 export interface RecordableLine {
+  tradeName: string;
   name: string;
   costCodeId: string | null;
   costCodeName: string | null;
@@ -66,7 +73,7 @@ export async function recordCostCodeMemory(lines: RecordableLine[]): Promise<voi
   const byKey = new Map<string, RecordableLine>();
   for (const line of lines) {
     if (!line.costCodeId || !line.costCodeName) continue;
-    const key = memoryKey(line.name);
+    const key = memoryKey(line.tradeName, line.name);
     if (key) byKey.set(key, line);
   }
   const entries = [...byKey.entries()];
