@@ -65,7 +65,7 @@ RULES:
    - ALLOWANCE items (estimated from $0): 0.3-0.5
    - AI_PRICED items: 0.5-0.8 depending on how standard the item is
 
-10. For unit costs: catalog items have unitCost (our cost) and unitPrice (client price). The markup is already built into catalog prices — do NOT add additional markup. For AI_PRICED and ALLOWANCE items, estimate both unitCost and unitPrice with a similar markup ratio as catalog items in the same trade.
+10. For unit costs: catalog items have unitCost (our cost) and unitPrice (client price). The markup is already built into catalog prices — do NOT add additional markup. For AI_PRICED and ALLOWANCE items, focus on an ACCURATE unitCost — the system automatically sets the client unitPrice from cost using HHI's margin policy (MATERIALS are passed through at cost = 0 margin; INSTALLATION / labor / subcontract is marked up to a 60% margin). Still provide a unitPrice (use unitCost for material lines, unitCost / 0.4 for install/labor lines), but unitCost accuracy is what matters — the policy overrides the client price for these lines.
 
 JUSTIFICATION REQUIRED: For EVERY line item, the "notes" field must explain:
 - WHY this item is included (reference the specific scope text that requires it)
@@ -146,6 +146,8 @@ MATERIAL AND INSTALLATION PAIRING — MANDATORY:
   - Faucet material ↔ Faucet installation
 
   If you include a material item without an installation pair (or vice versa), the estimate is INCOMPLETE.
+
+  SEPARATE COSTS PER LINE — MANDATORY: Each line carries its OWN unitCost. The material line's unitCost is the MATERIAL cost only; the installation line's unitCost is the LABOR / subcontract cost only. NEVER lump material and labor into one line — they must always be two separate lines so HHI can apply material-vs-labor margins correctly. A material line with labor baked into its cost, or an install line with no matching material, is INCOMPLETE.
 
   OUTPUT ORDER: Within each trade group, output material items IMMEDIATELY followed by their installation pair:
     [TIL] Shower Wall Tile - Material

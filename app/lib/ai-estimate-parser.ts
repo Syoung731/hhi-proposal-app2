@@ -1,5 +1,6 @@
 import type { PricingCatalogItem } from "@/app/generated/prisma";
 import { fuzzyMatch } from "@/app/lib/fuzzy-catalog-match";
+import { classifyLine } from "@/app/lib/jobtread/budget-push/line-class";
 
 // ---------- Types ----------
 
@@ -363,6 +364,11 @@ export function parseEstimateResponse(
     }
   }
 
+  // Flag any material line that has no installation pair — every material
+  // should be paired with an install line (HHI prices material vs labor
+  // separately). Surfaced to the estimator in the UI as a warning.
+  checkMaterialInstallPairs(items, warnings);
+
   const totalCost = items.reduce((sum, i) => sum + i.totalCost, 0);
   const totalPrice = items.reduce((sum, i) => sum + i.totalPrice, 0);
 
@@ -373,4 +379,61 @@ export function parseEstimateResponse(
     items,
     warnings,
   };
+}
+
+/**
+ * Strip a line name down to its pairing key: drop a leading "[PREFIX]" tag and a
+ * trailing " - Material" / " - Install" / " - Labor" / " - Sub" type suffix, then
+ * normalize. "[TIL] Shower Floor Tile - Material" and "[TIL] Shower Floor Tile -
+ * Install" both reduce to "shower floor tile" so they pair up.
+ */
+function baseLineName(name: string): string {
+  return name
+    .replace(/^\s*\[[^\]]*\]\s*/, "")
+    .replace(/\s*-\s*(materials?|install|labor|sub(?:contract)?)\s*$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Push a warning when a material line has no install (or subcontract) pair in
+ * the same trade group. One-directional on purpose: HHI's rule is "every
+ * material needs an install", but labor-only lines (demo, cleaning) legitimately
+ * have no material, so we do NOT flag installs that lack a material.
+ */
+function checkMaterialInstallPairs(
+  items: ParsedLineItem[],
+  warnings: string[],
+): void {
+  // Classes present per "tradeGroup|baseName".
+  const present = new Map<string, Set<"Material" | "Install" | "Sub">>();
+  for (const it of items) {
+    const cls = classifyLine(it.name);
+    if (cls == null) continue;
+    const key = `${it.tradeGroup}|${baseLineName(it.name)}`;
+    const set = present.get(key) ?? new Set();
+    set.add(cls);
+    present.set(key, set);
+  }
+
+  const unpaired: string[] = [];
+  const seen = new Set<string>();
+  for (const it of items) {
+    if (classifyLine(it.name) !== "Material") continue;
+    const key = `${it.tradeGroup}|${baseLineName(it.name)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const set = present.get(key);
+    if (set && !set.has("Install") && !set.has("Sub")) unpaired.push(it.name);
+  }
+
+  if (unpaired.length > 0) {
+    const sample = unpaired.slice(0, 8).join("; ");
+    const more =
+      unpaired.length > 8 ? `, …(+${unpaired.length - 8} more)` : "";
+    warnings.push(
+      `${unpaired.length} material line(s) have no installation pair — every material should have a matching install line: ${sample}${more}`,
+    );
+  }
 }
