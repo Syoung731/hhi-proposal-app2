@@ -127,6 +127,8 @@ export async function jtCreateCostItem(opts: {
   description?: string | null;
   /** AI estimator notes → JobTread cost-item "Internal Notes" custom field. */
   notes?: string | null;
+  /** JobTread allowance type ("costAndFee"/"price") for ALLOWANCE lines; null = normal. */
+  allowanceType?: string | null;
 }): Promise<string> {
   const $: Record<string, unknown> = {
     costGroupId: opts.costGroupId,
@@ -137,6 +139,7 @@ export async function jtCreateCostItem(opts: {
   };
   if (opts.costCodeId) $.costCodeId = opts.costCodeId;
   if (opts.costTypeId) $.costTypeId = opts.costTypeId;
+  if (opts.allowanceType?.trim()) $.allowanceType = opts.allowanceType.trim();
   if (opts.description?.trim()) $.description = opts.description.trim();
   // Write the AI notes into the "Internal Notes" custom field (confirmed live:
   // createCostItem accepts customFieldValues keyed by field id).
@@ -395,6 +398,7 @@ export async function pushBudgetToJob(
             costTypeId: item.costTypeId,
             description: item.unit ? `Unit: ${item.unit}` : null,
             notes: item.notes,
+            allowanceType: item.allowanceType,
           }),
         );
         createdItemIds.push(...ids);

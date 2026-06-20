@@ -66,6 +66,14 @@ export type JTLineSource = "TEMPLATE_SCAFFOLD" | "ESTIMATE" | "EXTRA";
  */
 export const JOBTREAD_INTERNAL_NOTES_FIELD_ID = "22P68yhCDCde";
 
+/**
+ * JobTread cost-item `allowanceType` value used for estimate ALLOWANCE lines.
+ * Confirmed live: the valid enum values are "costAndFee" and "price"; HHI's
+ * existing items overwhelmingly use "costAndFee" (cost + fee), so that's our
+ * default for pushed allowance lines.
+ */
+export const JOBTREAD_ALLOWANCE_TYPE = "costAndFee";
+
 // ---------------------------------------------------------------------------
 // Tree node types (the pure, in-memory merge result)
 // ---------------------------------------------------------------------------
@@ -226,7 +234,12 @@ export interface JobTreadBudgetTree {
  * - `unmatched` — not even a Misc fallback was available; ids are null and the
  *   push UI must require a manual selection before sending.
  */
-export type CostCodeMatchKind = "template-exact" | "fuzzy" | "fallback" | "unmatched";
+export type CostCodeMatchKind =
+  | "template-exact"
+  | "learned" // a remembered cost code from a prior push of a same-named line
+  | "fuzzy"
+  | "fallback"
+  | "unmatched";
 
 /**
  * Resolved JobTread cost code + cost type for a single line.

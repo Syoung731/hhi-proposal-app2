@@ -38,6 +38,7 @@ import "server-only";
 
 import { prisma } from "@/app/lib/prisma";
 
+import { JOBTREAD_ALLOWANCE_TYPE } from "./types";
 import type {
   CostTypeHint,
   JobTreadBudgetTree,
@@ -505,7 +506,7 @@ function applyEstimateToScaffold(
   scaffold.lineSource = "ESTIMATE";
   scaffold.estimateLineItemId = line.id;
   scaffold.notes = line.notes ?? null; // carry the estimate's AI notes
-  scaffold.allowanceType = line.source === "ALLOWANCE" ? "1" : null;
+  scaffold.allowanceType = line.source === "ALLOWANCE" ? JOBTREAD_ALLOWANCE_TYPE : null;
 }
 
 /**
@@ -530,7 +531,7 @@ function extraItemFromEstimate(
     costTypeName: null,
     costTypeId: null,
     notes: line.notes ?? null, // carry the estimate's AI notes
-    allowanceType: line.source === "ALLOWANCE" ? "1" : null,
+    allowanceType: line.source === "ALLOWANCE" ? JOBTREAD_ALLOWANCE_TYPE : null,
     lineSource: "EXTRA" satisfies JTLineSource,
     estimateLineItemId: line.id,
     jobtreadItemId: null,

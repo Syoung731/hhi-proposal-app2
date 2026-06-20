@@ -52,6 +52,30 @@ export class JobTreadApiError extends Error {
 
 const MAX_RESPONSE_SNIPPET_LENGTH = 1000;
 
+/**
+ * Transient-failure retry policy. A large budget push fires hundreds of
+ * sequential Pave calls, so a single 429 (rate limit) or transient 5xx must not
+ * fail the whole push — we retry with exponential backoff, honoring Retry-After.
+ */
+const MAX_RETRIES = 4;
+const BASE_BACKOFF_MS = 500;
+const MAX_BACKOFF_MS = 30_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Backoff for retry `attempt` (0-based); honors a numeric Retry-After (seconds). */
+function retryDelayMs(attempt: number, retryAfterHeader: string | null): number {
+  if (retryAfterHeader) {
+    const secs = Number(retryAfterHeader);
+    if (Number.isFinite(secs) && secs >= 0) {
+      return Math.min(secs * 1000, MAX_BACKOFF_MS);
+    }
+  }
+  return Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
+}
+
 export type JobTreadRequestOptions = {
   /** Label for this request step (e.g. "jobMeta", "costGroupsPage") for error reporting. */
   step?: string;
@@ -91,18 +115,37 @@ export async function jobTreadRequest(
   };
 
   let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    throw new JobTreadApiError(`JobTread API request failed: ${message}`);
-  }
+  let rawText: string;
+  let attempt = 0;
+  // Retry loop for transient failures: network errors, 429 rate limits, and 5xx.
+  // Non-retryable responses (4xx other than 429) fall straight through to the
+  // normal error handling below.
+  for (;;) {
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      if (attempt < MAX_RETRIES) {
+        await sleep(retryDelayMs(attempt, null));
+        attempt += 1;
+        continue;
+      }
+      const message = e instanceof Error ? e.message : String(e);
+      throw new JobTreadApiError(`JobTread API request failed: ${message}`);
+    }
 
-  const rawText = await res.text();
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
+      await sleep(retryDelayMs(attempt, res.headers.get("retry-after")));
+      attempt += 1;
+      continue;
+    }
+
+    rawText = await res.text();
+    break;
+  }
   const contentType = res.headers.get("content-type") ?? undefined;
   const responseSnippet =
     rawText.length > 0
