@@ -25,6 +25,14 @@ function withExplicitSslMode(url: string | undefined): string | undefined {
 function createPrismaClient(): PrismaClient {
   const adapter = new PrismaPg({
     connectionString: withExplicitSslMode(process.env.DATABASE_URL),
+    // Serverless safety: each Vercel instance holds its own pg pool. With the
+    // default max (10), a deploy's instance churn exhausted Neon's connection
+    // cap and took prod down (2026-06-20). Keep the per-instance pool small and
+    // release idle connections quickly so many concurrent instances can't blow
+    // past max_connections. (Move DATABASE_URL to Neon's pooled "-pooler"
+    // endpoint for headroom beyond this.)
+    max: 3,
+    idleTimeoutMillis: 10_000,
   });
   return new PrismaClient({
     adapter,
