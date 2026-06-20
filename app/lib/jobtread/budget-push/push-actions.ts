@@ -394,10 +394,18 @@ export async function startPushJobAction(
     }
   }
 
-  // Guard against starting a second push while one is already in flight for this
-  // project (prevents duplicate budgets from a double-click / reopened modal).
+  // Guard against starting a second push while one is GENUINELY in flight for
+  // this project (prevents duplicate budgets from a double-click / reopened
+  // modal). Ignore stale jobs (>10 min old) so a job stuck QUEUED/RUNNING — e.g.
+  // a worker that never fired or was hard-killed — doesn't permanently block
+  // re-pushes.
+  const STALE_AFTER_MS = 10 * 60 * 1000;
   const inflight = await prisma.jobTreadPushJob.findFirst({
-    where: { projectId, status: { in: ["QUEUED", "RUNNING"] } },
+    where: {
+      projectId,
+      status: { in: ["QUEUED", "RUNNING"] },
+      createdAt: { gt: new Date(Date.now() - STALE_AFTER_MS) },
+    },
     select: { id: true },
   });
   if (inflight) {
@@ -450,14 +458,19 @@ export async function getPushJobStatus(
   await requireAdmin();
   const job = await prisma.jobTreadPushJob.findUnique({ where: { id: pushJobId } });
   if (!job) return null;
-  // A RUNNING job whose start is older than the worker's hard ceiling (300s
-  // maxDuration + buffer) means the worker died mid-run — surface it as stalled
-  // so the modal stops polling forever and tells the user to recover.
-  const STALL_MS = 360_000;
-  const stalled =
+  // Surface a stalled job so the modal stops polling forever:
+  //  - RUNNING longer than the worker's hard ceiling (300s + buffer) = worker died.
+  //  - QUEUED too long (worker never claimed it) = QStash never delivered / the
+  //    worker route is unreachable (404/403). 3 min is generous vs the seconds a
+  //    healthy claim takes.
+  const now = Date.now();
+  const runningStalled =
     job.status === "RUNNING" &&
     job.startedAt != null &&
-    Date.now() - job.startedAt.getTime() > STALL_MS;
+    now - job.startedAt.getTime() > 360_000;
+  const queuedStalled =
+    job.status === "QUEUED" && now - job.createdAt.getTime() > 180_000;
+  const stalled = runningStalled || queuedStalled;
   return {
     status: job.status,
     mode: job.mode,
