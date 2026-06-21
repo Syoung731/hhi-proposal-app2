@@ -437,3 +437,36 @@ function checkMaterialInstallPairs(
     );
   }
 }
+
+/**
+ * Remove project-overhead lines from a ROOM estimate. `[ADM]`-prefixed lines are
+ * HHI's marker for project-wide administrative overhead (permits, supervision,
+ * ARB/HOA review, waste, cleaning, content protection) — they belong in the
+ * project COPE, never in a room, but the AI occasionally emits one anyway (often
+ * scoped to the room, e.g. "[ADM] ARB Submission - Den"). Strips them, re-sums
+ * the estimate totals, and pushes a warning naming what was removed.
+ *
+ * MUST be called ONLY from the room-estimate paths — NOT on the COPE estimate
+ * itself, which legitimately uses `[ADM]` for its overhead lines. Returns the
+ * names removed.
+ */
+export function stripProjectOverheadFromRoom(estimate: ParsedEstimate): string[] {
+  const removed: string[] = [];
+  const kept = estimate.items.filter((it) => {
+    if (/^\s*\[adm\]/i.test(it.name)) {
+      removed.push(it.name);
+      return false;
+    }
+    return true;
+  });
+  if (removed.length > 0) {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    estimate.items = kept;
+    estimate.totalCost = r2(kept.reduce((s, i) => s + i.totalCost, 0));
+    estimate.totalPrice = r2(kept.reduce((s, i) => s + i.totalPrice, 0));
+    estimate.warnings.push(
+      `Removed ${removed.length} project-overhead line(s) from this room — these belong in the project COPE (Permits & Fees / overhead), not a room: ${removed.join("; ")}`,
+    );
+  }
+  return removed;
+}

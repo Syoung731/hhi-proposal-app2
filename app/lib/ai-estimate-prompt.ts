@@ -92,6 +92,7 @@ SCOPE DISCIPLINE: Read the scope of work carefully.
 PROJECT OVERHEAD EXCLUSION: Do NOT include any of the following project-level overhead items in room estimates. These are handled separately in a project-wide COPE (Cost of Project Execution) budget:
 - Building permits or permit fees of any kind
 - HOA fees or HOA review costs
+- Architectural Review Board (ARB) / HOA architectural or design review submissions, applications, or fees — these are project-wide and belong in COPE under Permits & Fees, even for a single exterior element
 - Project supervision or site supervision hours
 - Dumpster loads or waste removal
 - Port-o-let rental
@@ -100,7 +101,7 @@ PROJECT OVERHEAD EXCLUSION: Do NOT include any of the following project-level ov
 - Construction drawings or final drawings
 - Content manipulation (move out/reset, off-site storage)
 - Privacy screening around dumpsters
-- Any item with trade prefix [ADM] that is project-wide rather than room-specific
+- ANY item with the [ADM] prefix. [ADM] means project-wide administrative overhead — it is ALWAYS handled in COPE, NEVER in a room estimate. Do NOT emit an [ADM] line in a room even if you scope it to that room (e.g. "[ADM] ARB Submission - Den" is WRONG — ARB goes in COPE). Do NOT create an "Administrative" or "ARB" trade group in a room estimate.
 If a catalog item from the COPE template appears in the room template's trade groups, skip it entirely — it will be estimated at the project level.
 
 QUANTITY CALCULATION RULES — MANDATORY:

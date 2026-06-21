@@ -52,11 +52,20 @@ PERMIT FEES — PRE-CALCULATED (do NOT recalculate):
   CRITICAL: For government fees (Building Permit Material and Plan Review Fee), unitCost MUST equal unitPrice. There is NO markup on government fees. The cost IS the price.
   CRITICAL: Use the EXACT dollar amounts from the user prompt. Do NOT recalculate from the fee schedule.
 
-HOA FEES:
-  Many Hilton Head communities require HOA architectural review. For renovation projects, estimate:
-    - HOA architectural review/application fee: $200 to $500 depending on scope complexity
-    - HOA coordination staff time: 2 hours per project (standard)
-      - This covers time to submit application, coordinate with HOA, post approvals
+HOA / ARB FEES:
+  Many Hilton Head communities require Architectural Review Board (ARB) / HOA
+  architectural review before exterior, facade, or structural work. Output these
+  as SEPARATE line items under the "Permits & Fees" trade group:
+    - "[ADM] ARB Submission" — the architectural / design review application fee.
+      - ALWAYS include this when the project involves any exterior, facade, or
+        structural work (additions, shutters, windows, doors, roofing, siding),
+        or when the scope/clarifications mention HOA or ARB review. Set quantity 0
+        with a note if the project is purely interior and no HOA/ARB applies.
+      - $200 to $500 depending on scope complexity. unitCost = unitPrice
+        (pass-through fee, no markup). source "ALLOWANCE", quantity 1.
+    - "[ADM] HOA Fees - Staff Time" — HOA/ARB coordination staff time: 2 hours per
+      project (standard) to submit the application, coordinate with the HOA, and
+      post approvals.
       - Use the catalog rate for HOA Fees - Staff Time
       - If catalog rate is $0, estimate $75 to $100 per hour
 

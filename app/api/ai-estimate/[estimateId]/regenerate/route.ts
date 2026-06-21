@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/app/lib/prisma";
 import { SYSTEM_PROMPT, buildUserPrompt, type ProjectContext, type RoomDimensions } from "@/app/lib/ai-estimate-prompt";
-import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
+import { parseEstimateResponse, stripProjectOverheadFromRoom } from "@/app/lib/ai-estimate-parser";
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { applyMarginPolicy } from "@/app/lib/ai/estimate-margin-policy";
@@ -117,6 +117,10 @@ export async function POST(
     }
 
     const parsedEstimate = parseEstimateResponse(rawText, catalogItems);
+
+    // Strip any project-overhead ([ADM]) lines the AI mis-placed in this room —
+    // permits, ARB/HOA review, supervision, etc. belong in the project COPE.
+    stripProjectOverheadFromRoom(parsedEstimate);
 
     // Apply HHI's margin policy (materials at cost, labor at 60%) to AI-derived
     // lines before persisting — keeps regenerated estimates consistent with the

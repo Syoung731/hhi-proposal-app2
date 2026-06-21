@@ -9,7 +9,7 @@ import {
   type RoomDimensions,
   type ScopeQAData,
 } from "@/app/lib/ai-estimate-prompt";
-import { parseEstimateResponse } from "@/app/lib/ai-estimate-parser";
+import { parseEstimateResponse, stripProjectOverheadFromRoom } from "@/app/lib/ai-estimate-parser";
 import { getEngineeringAssemblies } from "@/app/lib/ai/engineering-assemblies";
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
@@ -259,6 +259,10 @@ export async function generateRoomEstimate(
   }
 
   const parsedEstimate = parseEstimateResponse(rawText, catalogItems);
+
+  // Strip any project-overhead ([ADM]) lines the AI mis-placed in this room —
+  // permits, ARB/HOA review, supervision, etc. belong in the project COPE.
+  stripProjectOverheadFromRoom(parsedEstimate);
 
   // Apply HHI's margin policy (materials at cost, labor at 60%) to AI-derived
   // lines before persisting — the estimate is the source of truth the Investment
