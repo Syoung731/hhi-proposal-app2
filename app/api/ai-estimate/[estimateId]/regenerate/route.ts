@@ -6,6 +6,10 @@ import { parseEstimateResponse, stripProjectOverheadFromRoom } from "@/app/lib/a
 import { streamClaude } from "@/app/lib/ai/model";
 import { calcItemPriceRange } from "@/app/lib/price-range";
 import { applyMarginPolicy } from "@/app/lib/ai/estimate-margin-policy";
+import {
+  generateProjectOverhead,
+  ProjectOverheadError,
+} from "@/app/lib/ai/generate-project-overhead";
 
 // ---------- POST — Regenerate estimate (creates a new one) ----------
 
@@ -22,6 +26,31 @@ export async function POST(
     });
     if (!original) {
       return NextResponse.json({ error: "Original estimate not found" }, { status: 404 });
+    }
+
+    // COPE estimates must regenerate through the project-overhead path (COPE
+    // prompt + aggregate data + copeStatus lock + rollups) — NOT the room
+    // estimator below, which uses the room prompt (it would exclude the [ADM]
+    // overhead lines COPE is made of) and apply room-only post-processing.
+    const sectionRoom = await prisma.room.findUnique({
+      where: { id: original.sectionId },
+      select: { isProjectOverhead: true },
+    });
+    if (sectionRoom?.isProjectOverhead) {
+      try {
+        const result = await generateProjectOverhead({ projectId: original.projectId });
+        return NextResponse.json({
+          estimate: result.estimate,
+          warnings: result.warnings,
+          usage: result.usage,
+        });
+      } catch (err) {
+        if (err instanceof ProjectOverheadError) {
+          const status = err.code === "BUSY" ? 409 : err.code === "NOT_FOUND" ? 404 : 500;
+          return NextResponse.json({ error: err.message }, { status });
+        }
+        throw err;
+      }
     }
 
     // Optional updated scope from request body
